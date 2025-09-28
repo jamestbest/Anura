@@ -1,0 +1,187 @@
+// pages
+//  2916- opcode map (1 byte)
+//  2910- opcode map key
+//  527 - SIB information
+//  2949- instr encoding
+//  1257- MOV encoding
+//  529 - REX prefix encoding
+//  87  - SIB information (limited)
+//  765 - CMOVcc encoding
+//  521 - Instruction encoding
+
+
+STRUCTURE
+lprefix* prefix? op 
+
+// assume we're in long mode
+//  so assume REX exists -- I don't want to do include protected mode
+//   with stuff like single byte inc, just keep to long mode
+//  SO is this --v needed?? -- I assume not
+FLAG mode= 64bit | 32bit | 16bit default 64bit
+FLAG opmode= 64bit | 32bit | 16bit | 8bit default 32bit
+FLAG ow
+
+// REX.W is for OPERAND size
+// REX.W = 64 Bit Operand Size
+// REX.R is for Rrrr
+// REX.R = Extension of the ModR/M reg field
+// REX.X is for X(SIB.xxx)
+// REX.X = Extension of the SIB index field
+// REX.B is for B(SIB.bbb)
+//       or for Brrr
+//       or for B(RM.bbb)
+// REX.B = Extension of the ModR/M r/m field, SIB base field, or Opcode reg field
+ALIAS prefix 1 byte= {
+  0b0100 rexw rexr rexx rexb
+}
+
+ALIAS lprefix= {
+  lp1
+  lp2
+  lp3
+  lp4
+}
+
+ALIAS lp1= {
+  LOCK= 0xF0
+  REPNE,REPNZ,BND= 0xF2  // BND has some restrictions to do with what the instr is
+  REP,REPE,REPZ= 0xF3
+}
+
+ALIAS lp2= {
+  CS,BNT= 0x2E
+  SS= 0x36
+  DS,BT = 0x3E
+  ES= 0x26
+  FS= 0x64
+  GS= 0x65
+}
+
+ALIAS lp3= {
+  OO= 0x66
+}
+
+ALIAS lp4= {
+  AO= 0x67
+}
+
+ALIAS reg 3 bits= {
+  AX, AL, AL, EAX, RAX= 000
+  CX, CL, AL, ECX, RCX= 001
+  
+  SP, AH, AL, ESP, RSP= 100
+}
+
+RULE ON reg {
+  CHOOSE 0 if opmode= 16bit
+  CHOOSE 1 if ow == 0 and rexw != 1
+  CHOOSE 2 if ow == 0
+  CHOOSE 3 if opmode= 32bit
+  CHOOSE 4 if opmode= 64bit
+}
+
+ALIAS cc 4 bits= {
+  O= 0b0000
+  NO= 0b0001
+  B,C,NAE= 0b0010
+  NB,NC,AE= 0b0011
+  E,Z= 0b0100
+  NE,NZ=0b0101
+  BE,NA=0b0110
+  NBE,A=0b0111
+  S=0b1000
+  NS=0b1001
+  P,PE=0b1010
+  NP,PO=0b1011
+  L,NGE=0b1100
+  NL,GE=0b1101
+  LE,NG=0b1110
+  NLE,G=0b1111
+}
+
+ALIAS Mod 2 bits= {}
+ALIAS RM 3 bits= {}
+ALIAS sibs 2 bits= {}
+ALIAS sibi 3 bits= reg
+ALIAS sibb 3 bits= reg
+ALIAS SIB 8 bits= {
+  sibs 100 sibb = 
+  sibs sibi 101 = {
+    if Mod == 0b00 then [sibi * (2 ^ sibs)] + disp32
+    if Mod == 0b01 then [sibi * (2 ^ sibs)] + disp8 + [EBP]
+    if Mod == 0b10 then [sibi * (2 ^ sibs)] + disp32 + [EBP]
+  }
+  sibs sibi sibb = [sibi * (2 ^ sibs)] + sibb
+}
+
+RULE ON SIB {
+  }
+
+ALIAS ModRM= {
+  Mod reg RM
+}
+
+RULE ON ModRM {
+  if opmode != 16bit && Mod != 0b11 && RM == 0b100 then EXPECT SIB
+}
+
+ALIAS op= {
+  MOV
+  CMOV
+  CVTDQ2PD
+}
+
+CALCULATE opmode= {
+  if mode == 32bit && lp3 then 16bit
+  if mode == 16bit && lp3 then 32bit
+  if mode == 32bit then 32bit
+  if mode == 16bit then 16bit
+
+  if rexw then 64bit
+  if lp3 then 16bit
+  if default then 32bit
+}
+
+ALIAS imm x bits= {
+  if opmode == 8bit then 8 bits
+  if opmode == 16bit then 16 bits
+  if opmode == 32bit then 32 bits
+  if opmode == 64bit then 64 bits
+}
+
+ALIAS RM 3 bits= {
+  if Mod == 00 then {
+     101= EXPECT disp32
+     default= EXPECT SIB
+  }
+  if Mod == 01 then EXPECT SIB
+  if Mod == 10 then EXPECT SIB
+  if Mod == 11 then reg
+}
+
+ALIAS MOV= {
+  TRANSLATE reg {
+    AH= SPL
+    BH= DIL
+    CH= BPL
+    DH= SIL
+  }
+
+  1000 100 ow ModRM= MOV RM, reg
+  1000 101 ow ModRM
+  1100 011 ow Mod 000 reg imm= MOV reg, imm
+ 
+  1011 ow reg imm= MOV reg, imm
+
+  8A ModRM= MOV r8, rm8
+  8B ModRM= MOV reg, RM
+}
+
+ALIAS CMOV= {
+  0F 0x40+cc ModRM= CMOV|cc reg, RM
+}
+
+CMOV= 0f cc+0x40 reg
+CVTDQ2PD= F3 0F E6 REQUIRE REP
+ENDBR64= 0F 1E FA REQUIRE REP
+ 
