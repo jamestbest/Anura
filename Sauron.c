@@ -2,13 +2,15 @@
 // Created by jamestbest on 9/27/25.
 //
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <string.h>
-#include <elf.h>
-
 #include "Sauron.h"
+
+#include "Saruman.h"
+
+#include <elf.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 bool verify_special(const uint8_t* start) {
     return memcmp(start, ELFMAG, SELFMAG) == 0;
@@ -201,7 +203,7 @@ const char* get_em_str(unsigned int id) {
         case EM_CLOUDSHIELD: return "CloudShield";
         case EM_COREA_1ST: return "KIPO-KAIST Core-A 1st gen.";
         case EM_COREA_2ND: return "KIPO-KAIST Core-A 2nd gen.";
-        case EM_ARC_COMPACT2: return "Synopsys ARCompact V2";
+        // case EM_ARC_COMPACT2: return "Synopsys ARCompact V2";
         case EM_OPEN8: return "Open8 RISC";
         case EM_RL78: return "Renesas RL78";
         case EM_VIDEOCORE5: return "Broadcom VideoCore V";
@@ -303,6 +305,9 @@ int decode(FILE* elf) {
     fseek(elf, (long)h_strs.sh_offset, SEEK_SET);
     fread(sstring_table, sizeof (uint8_t), h_strs.sh_size, elf);
 
+    void* dl_data= NULL;
+    void* str_data= NULL;
+
     for (int i = 0; i < header.e_shnum; ++i) {
         Elf64_Shdr section= sections[i];
 
@@ -323,11 +328,71 @@ int decode(FILE* elf) {
                 if (j % 16 == 15) putchar('\n');
             }
             putchar('\n');
+
+            if (strcmp(&sstring_table[section.sh_name], ".debug_line") == 0) {
+                dl_data= data;
+                continue;
+            }
+
+            if (strcmp(&sstring_table[section.sh_name], ".debug_line_str") == 0) {
+                str_data= data;
+                continue;
+            }
+
             free(data);
         }
     }
+
+    decode_lines(dl_data, str_data);
 
     free(sections);
 
     return 0;
 }
+
+const char* DW_FORM_STRS[]= {
+    [DW_FORM_addr]="addr",
+    [DW_FORM_reserved0]="reserved0",
+    [DW_FORM_block2]="block2",
+    [DW_FORM_block4]="block4",
+    [DW_FORM_data2]="data2",
+    [DW_FORM_data4]="data4",
+    [DW_FORM_data8]="data8",
+    [DW_FORM_string]="string",
+    [DW_FORM_block]="block",
+    [DW_FORM_block1]="block1",
+    [DW_FORM_data1]="data1",
+    [DW_FORM_flag]="flag",
+    [DW_FORM_sdata]="sdata",
+    [DW_FORM_strp]="strp",
+    [DW_FORM_udata]="udata",
+    [DW_FORM_ref_addr]="ref_addr",
+    [DW_FORM_ref1]="ref1",
+    [DW_FORM_ref2]="ref2",
+    [DW_FORM_ref4]="ref4",
+    [DW_FORM_ref8]="ref8",
+    [DW_FORM_ref_udata]="ref_udata",
+    [DW_FORM_indirect]="indirect",
+    [DW_FORM_sec_offset]="sec_offset",
+    [DW_FORM_exprloc]="exprloc",
+    [DW_FORM_flag_present]="flag_present",
+    [DW_FORM_strx]="strx",
+    [DW_FORM_addrx]="addrx",
+    [DW_FORM_ref_sup4]="ref_sup4",
+    [DW_FORM_strp_sup]="strp_sup",
+    [DW_FORM_data16]="data16",
+    [DW_FORM_line_strp]="line_strp",
+    [DW_FORM_ref_sig8]="ref_sig8",
+    [DW_FORM_implicit_const]="implicit_const",
+    [DW_FORM_loclistx]="loclistx",
+    [DW_FORM_rnglistx]="rnglistx",
+    [DW_FORM_ref_sup8]="ref_sup8",
+    [DW_FORM_strx1]="strx1",
+    [DW_FORM_strx2]= "strx2",
+    [DW_FORM_strx3]= "strx3",
+    [DW_FORM_strx4]= "strx4",
+    [DW_FORM_addrx1]= "addrx1",
+    [DW_FORM_addrx2]= "addrx2",
+    [DW_FORM_addrx3]= "addrx3",
+    [DW_FORM_addrx4]= "addrx4"
+};
