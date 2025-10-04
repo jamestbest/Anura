@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD 99)
 
 add_executable(Anura main.c Array.c
         Sauron.c
-        Sauron.h)
+        Sauron.h
+        Saruman.c
+        Saruman.h)
 target_compile_options(Anura PUBLIC -g)
-
-add_executable(target target.c target.h)

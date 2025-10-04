@@ -1,0 +1,50 @@
+#BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+
+Language: Cpp
+PointerAlignment: Left
+IndentCaseLabels: True
+
+ColumnLimit: 0 # 80 chars is for chumps
+
+AlignConsecutiveBitFields: Consecutive
+AlignConsecutiveMacros: Consecutive
+AlignEscapedNewlines: Right
+AlwaysBreakBeforeMultilineStrings: true
+
+AllowShortFunctionsOnASingleLine: None
+
+BraceWrapping:
+  AfterEnum: false
+  AfterControlStatement: Never
+  AfterFunction: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeElse: false
+  BeforeWhile: false
+
+BreakBeforeInlineASMColon: Always
+BreakBeforeTernaryOperators: false
+
+BreakStringLiterals: true
+
+IncludeBlocks: Regroup
+SortIncludes: CaseInsensitive
+InsertNewlineAtEOF: true
+
+MaxEmptyLinesToKeep: 2
+
+SeparateDefinitionBlocks: Always
+
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+
+SpaceBeforeAssignmentOperators: false
+SpaceBeforeCaseColon: false
+
+SpaceBeforeParens: ControlStatements
+
+SpaceBeforeSquareBrackets: false
+SpaceInEmptyBlock: false
