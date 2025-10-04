@@ -8,7 +8,21 @@
 //  87  - SIB information (limited)
 //  765 - CMOVcc encoding
 //  521 - Instruction encoding
+//  535 - VEX prefix encoding
+//  558 - EVEX prefix encoding
 
+// RULE ON NUMBERS
+//  some places expect base 10, i.e. anywhere that isn't inside {} e.g. 4 bits
+//  most places expect base 2 written as 0011 1011
+//  numbers are written from high bit - low bit and will go until 8 bits are found
+//  e.g. 1010 101 ow -- this is one byte as any non-alias identifier is 1 bit in size
+//  e.g. 10 reg 001  -- this is one byte (assuming reg is a 3 bit ALIAS)
+
+ALIAS prefix= {
+    REX
+    VEX
+    EVEX
+}
 
 STRUCTURE
 lprefix* prefix? op 
@@ -31,8 +45,16 @@ FLAG ow
 //       or for Brrr
 //       or for B(RM.bbb)
 // REX.B = Extension of the ModR/M r/m field, SIB base field, or Opcode reg field
-ALIAS prefix 1 byte= {
-  0b0100 rexw rexr rexx rexb
+ALIAS REX 1 byte= {
+  0100 rexw rexr rexx rexb
+}
+
+// these bits have been writted in the high-low level, is this ok to assume?
+//  when reading new bytes we just read high bit as we get the whole byte at once
+// dot prefix? for accessing values within? or the alias listing?
+ALIAS VEX 1 byte= {
+  1100 0100 .R .X .B .m(5) .W .v(4) .L .pp(2)
+  1100 0101 .R .v(4) .L .pp(2)
 }
 
 ALIAS lprefix= {
@@ -81,22 +103,22 @@ RULE ON reg {
 }
 
 ALIAS cc 4 bits= {
-  O= 0b0000
-  NO= 0b0001
-  B,C,NAE= 0b0010
-  NB,NC,AE= 0b0011
-  E,Z= 0b0100
-  NE,NZ=0b0101
-  BE,NA=0b0110
-  NBE,A=0b0111
-  S=0b1000
-  NS=0b1001
-  P,PE=0b1010
-  NP,PO=0b1011
-  L,NGE=0b1100
-  NL,GE=0b1101
-  LE,NG=0b1110
-  NLE,G=0b1111
+  O= 0000
+  NO= 0001
+  B,C,NAE= 0010
+  NB,NC,AE= 0011
+  E,Z= 0100
+  NE,NZ=0101
+  BE,NA=0110
+  NBE,A=0111
+  S=1000
+  NS=1001
+  P,PE=1010
+  NP,PO=1011
+  L,NGE=1100
+  NL,GE=1101
+  LE,NG=1110
+  NLE,G=1111
 }
 
 ALIAS Mod 2 bits= {}
@@ -107,15 +129,12 @@ ALIAS sibb 3 bits= reg
 ALIAS SIB 8 bits= {
   sibs 100 sibb = 
   sibs sibi 101 = {
-    if Mod == 0b00 then [sibi * (2 ^ sibs)] + disp32
-    if Mod == 0b01 then [sibi * (2 ^ sibs)] + disp8 + [EBP]
-    if Mod == 0b10 then [sibi * (2 ^ sibs)] + disp32 + [EBP]
+    if Mod == 00 then [sibi * (2 ^ sibs)] + disp32
+    if Mod == 01 then [sibi * (2 ^ sibs)] + disp8 + [EBP]
+    if Mod == 10 then [sibi * (2 ^ sibs)] + disp32 + [EBP]
   }
   sibs sibi sibb = [sibi * (2 ^ sibs)] + sibb
 }
-
-RULE ON SIB {
-  }
 
 ALIAS ModRM= {
   Mod reg RM
@@ -126,9 +145,14 @@ RULE ON ModRM {
 }
 
 ALIAS op= {
+  0x0f op2
   MOV
   CMOV
-  CVTDQ2PD
+}
+
+ALIAS op2= {
+  CVTDQ2PD xyzreg, xyzrm= E6 ModRM REQUIRE REP // change on E/VEX
+  ENDBR64= 1E FA REQUIRE REP
 }
 
 CALCULATE opmode= {
@@ -159,6 +183,10 @@ ALIAS RM 3 bits= {
   if Mod == 11 then reg
 }
 
+// opcodes are matched up to the next non-0|1
+//  i.e. each level is expanded to it's level of 1|0s
+//  and each is an opcode
+
 ALIAS MOV= {
   TRANSLATE reg {
     AH= SPL
@@ -168,20 +196,18 @@ ALIAS MOV= {
   }
 
   1000 100 ow ModRM= MOV RM, reg
-  1000 101 ow ModRM
-  1100 011 ow Mod 000 reg imm= MOV reg, imm
+  1000 101 ow ModRM= MOV reg, RM
+  1100 011 ow Mod 000 RM imm = MOV RM, imm
  
   1011 ow reg imm= MOV reg, imm
-
-  8A ModRM= MOV r8, rm8
-  8B ModRM= MOV reg, RM
 }
 
-ALIAS CMOV= {
-  0F 0x40+cc ModRM= CMOV|cc reg, RM
-}
 
-CMOV= 0f cc+0x40 reg
-CVTDQ2PD= F3 0F E6 REQUIRE REP
-ENDBR64= 0F 1E FA REQUIRE REP
- 
+CMOV|cc reg, RM = 0F 0x40+cc ModRM
+
+ALIAS ADC= {
+  0b0000111 ow imm[8,16,32]= ADC reg, imm[8,16,32]
+  0b1000000 ow
+  ADC AL, imm8= 0x14 imm8
+
+}
