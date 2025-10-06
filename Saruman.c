@@ -29,9 +29,10 @@ uint32_t discrim;
 
 // EXTENDED OPCODES
 typedef enum DW_LNE {
-    DW_LNE_end_sequence= 1,
+    DW_LNE_end_sequence= 0x1,
     DW_LNE_set_address,
-    DW_LNE_set_discriminator,
+    DW_LNE_reserved= 0x3,
+    DW_LNE_set_discriminator= 0x4,
     DW_LNE_COUNT= DW_LNE_set_discriminator,
 
     DW_LNE_lo_user= 0x80,
@@ -202,8 +203,8 @@ void new_row() {
     // 3. Append a row to the matrix using the current values of the state machine
     //   registers.
     // [[TODO]]
-    printf("MATRIX ROW line: %u  Col: %u  PC: %llu\n",
-        line, col, pc);
+    printf("MATRIX ROW line: %u  Col: %u  PC: %p  Discrim: %u\n",
+        line, col, (void*)pc, discrim);
 
     // 4. Set the basic_block register to “false.”
     // 5. Set the prologue_end register to “false.”
@@ -211,6 +212,30 @@ void new_row() {
     // 7. Set the discriminator register to 0.
     basic_block= prologue_end= epilogue_begin= false;
     discrim= 0;
+}
+
+int special_op(uint8_t op) {
+    // this is a special opcode
+    uint8_t aoc= op - info.op_base;
+    uint8_t op_adv= aoc / info.line_range;
+
+    uint64_t npc= pc + (info.min_instr_length * ((op_idx + op_adv) / info.max_op_per_inst));
+    uint64_t n_op_idx= (op_idx + op_adv) % info.max_op_per_inst;
+    uint32_t line_inc= info.line_base + (aoc % info.line_range);
+
+    // FROM https://dwarfstd.org/doc/DWARF5.pdf#page=178
+    // 1. Add a signed integer to the line register
+    line += line_inc;
+    // 2. Modify the operation pointer by incrementing the address and op_index
+    //  registers as described below.
+    op_idx= n_op_idx;
+    pc= npc;
+
+    // 3-7
+    new_row();
+
+    // all special opcodes are 1 byte
+    return 1;
 }
 
 // returns bytes read
@@ -222,11 +247,12 @@ size_t decode_op(uint8_t* base) {
         ULEB128 bytes= read_uleb128(base);
         base += bytes.size;
         uint8_t op_code= *base;
+        base++;
         switch (op_code) {
             case DW_LNE_end_sequence:
                 end_seq= true;
                 new_row();
-                return bytes.v;
+                break;
             case DW_LNE_set_address:
                 switch (info.a_size) {
                     case 4:
@@ -238,14 +264,15 @@ size_t decode_op(uint8_t* base) {
                     default:
                         assert(false);
                 }
-                return bytes.v;
+                break;
             case DW_LNE_set_discriminator:
                 ULEB128 operand= read_uleb128(base);
                 discrim= operand.v;
-                return bytes.v;
+                break;
             default:
                 assert(false);
         }
+        return bytes.v + bytes.size + 1;
     }
     if (c < info.op_base) {
         // this is a standard opcode
@@ -253,19 +280,15 @@ size_t decode_op(uint8_t* base) {
             case DW_LNS_copy:
                 new_row();
                 return 1;
+            case DW_LNS_const_add_pc:
+                return special_op(255);
             case DW_LNS_advance_pc:
-            case DW_LNS_const_add_pc: {
-                uint64_t op_adv;
-                uint8_t op_size;
-                if (c == DW_LNS_const_add_pc) {
-                    op_adv= 255;
-                    op_size= 1;
-                } else {
-                    ULEB128 operand= read_uleb128(base);
-                    op_adv= operand.v;
-                    op_size= operand.size + 1;
-                }
-                pc= pc + (info.min_instr_length * ((op_idx + op_adv) / info.max_op_per_inst));
+             {
+                ULEB128 operand= read_uleb128(base);
+                uint64_t op_adv= operand.v;
+                uint8_t op_size= operand.size + 1;
+
+                pc += (info.min_instr_length * ((op_idx + op_adv) / info.max_op_per_inst));
                 op_idx= (op_idx + op_adv) % info.max_op_per_inst;
                 return op_size; // the operand size + the opcode
             }
@@ -308,27 +331,7 @@ size_t decode_op(uint8_t* base) {
                 return operand.size + 1;
         }
     } else {
-        // this is a special opcode
-        uint8_t aoc= c - info.op_base;
-        uint8_t op_adv= aoc / info.line_range;
-
-        uint64_t npc= pc + (info.min_instr_length * ((op_idx + op_adv) / info.max_op_per_inst));
-        uint64_t n_op_idx= (op_idx + op_adv) % info.max_op_per_inst;
-        uint64_t line_inc= info.line_base + (aoc % info.line_range);
-
-        // FROM https://dwarfstd.org/doc/DWARF5.pdf#page=178
-        // 1. Add a signed integer to the line register
-        line += line_inc;
-        // 2. Modify the operation pointer by incrementing the address and op_index
-        //  registers as described below.
-        op_idx= n_op_idx;
-        pc= npc;
-
-        // 3-7
-        new_row();
-
-        // all special opcodes are 1 byte
-        return 1;
+        return special_op(c);
     }
 }
 
