@@ -24,8 +24,7 @@ ALIAS prefix= {
     EVEX
 }
 
-STRUCTURE
-lprefix* prefix? op 
+STRUCTURE lprefix* prefix? op
 
 // assume we're in long mode
 //  so assume REX exists -- I don't want to do include protected mode
@@ -46,7 +45,7 @@ FLAG ow
 //       or for B(RM.bbb)
 // REX.B = Extension of the ModR/M r/m field, SIB base field, or Opcode reg field
 ALIAS REX 1 byte= {
-  0100 rexw rexr rexx rexb
+  0100 .w .r .x .b
 }
 
 // these bits have been writted in the high-low level, is this ok to assume?
@@ -57,44 +56,44 @@ ALIAS VEX 1 byte= {
   1100 0101 .R .v(4) .L .pp(2)
 }
 
-ALIAS lprefix= {
+ALIAS lprefix 1 byte= {
   lp1
   lp2
   lp3
   lp4
 }
 
-ALIAS lp1= {
-  LOCK= 0xF0
-  REPNE,REPNZ,BND= 0xF2  // BND has some restrictions to do with what the instr is
-  REP,REPE,REPZ= 0xF3
+ALIAS lp1 1 byte= {
+  0xF0= LOCK
+  0xF2= REPNE,REPNZ,BND  // BND has some restrictions to do with what the instr is
+  0xF3= REP,REPE,REPZ
 }
 
-ALIAS lp2= {
-  CS,BNT= 0x2E
-  SS= 0x36
-  DS,BT = 0x3E
-  ES= 0x26
-  FS= 0x64
-  GS= 0x65
+ALIAS lp2 1 byte= {
+  0x2E= CS,BNT
+  0x36= SS
+  0x3E= DS,BT
+  0x26= ES
+  0x64= FS
+  0x65= GS
 }
 
-ALIAS lp3= {
-  OO= 0x66
+ALIAS lp3 1 byte= {
+  0x66= OO
 }
 
-ALIAS lp4= {
-  AO= 0x67
+ALIAS lp4 1 byte= {
+  0x67= AO
 }
 
 ALIAS reg 3 bits= {
-  AX, AL, AL, EAX, RAX= 000
-  CX, CL, AL, ECX, RCX= 001
+  000= AX, AL, AL, EAX, RAX
+  001= CX, CL, AL, ECX, RCX
   
-  SP, AH, AL, ESP, RSP= 100
+  100= SP, AH, AL, ESP, RSP
 }
 
-RULE ON reg {
+RULE RIGHT ON reg {
   CHOOSE 0 if opmode= 16bit
   CHOOSE 1 if ow == 0 and rexw != 1
   CHOOSE 2 if ow == 0
@@ -103,37 +102,44 @@ RULE ON reg {
 }
 
 ALIAS cc 4 bits= {
-  O= 0000
-  NO= 0001
-  B,C,NAE= 0010
-  NB,NC,AE= 0011
-  E,Z= 0100
-  NE,NZ=0101
-  BE,NA=0110
-  NBE,A=0111
-  S=1000
-  NS=1001
-  P,PE=1010
-  NP,PO=1011
-  L,NGE=1100
-  NL,GE=1101
-  LE,NG=1110
-  NLE,G=1111
+  0000= O
+  0001= NO
+  0010= B,C,NAE
+  0011= NB,NC,AE
+  0100= E,Z
+  0101= NE,NZ
+  0110= BE,NA
+  0111= NBE,A
+  1000= S
+  1001= NS
+  1010= P,PE
+  1011= NP,PO
+  1100= L,NGE
+  1101= NL,GE
+  1110= LE,NG
+  1111= NLE,G
 }
 
 ALIAS Mod 2 bits= {}
 ALIAS RM 3 bits= {}
-ALIAS sibs 2 bits= {}
-ALIAS sibi 3 bits= reg
-ALIAS sibb 3 bits= reg
-ALIAS SIB 8 bits= {
-  sibs 100 sibb = 
-  sibs sibi 101 = {
-    if Mod == 00 then [sibi * (2 ^ sibs)] + disp32
-    if Mod == 01 then [sibi * (2 ^ sibs)] + disp8 + [EBP]
-    if Mod == 10 then [sibi * (2 ^ sibs)] + disp32 + [EBP]
+
+ALIAS sibs 2 bits
+ALIAS sibi= reg
+ALIAS sibb= reg
+
+ALIAS sibsi 5 bits= {
+   sibs 100 =
+   sibs sibi= [sibi * (2 ^ sibs)]
+}
+
+ALIAS SIB 1 byte= {
+  sibsi 101 = {
+    if Mod == 00 && mode==64bit then sibsi + rip + disp32
+    if Mod == 00 then sibsi + disp32
+    if Mod == 01 then sibsi + disp8 + [EBP]
+    if Mod == 10 then sibsi + disp32 + [EBP]
   }
-  sibs sibi sibb = [sibi * (2 ^ sibs)] + sibb
+  sibsi sibb = sibsi + sibb
 }
 
 ALIAS ModRM= {
@@ -147,12 +153,13 @@ RULE ON ModRM {
 ALIAS op= {
   0x0f op2
   MOV
-  CMOV
+  ADC
 }
 
 ALIAS op2= {
-  CVTDQ2PD xyzreg, xyzrm= E6 ModRM REQUIRE REP // change on E/VEX
-  ENDBR64= 1E FA REQUIRE REP
+  E6 ModRM REQUIRE REP= CVTDQ2PD xyzreg, xyzrm=  // change on E/VEX
+  1E FA REQUIRE REP= ENDBR64
+  CMOV
 }
 
 CALCULATE opmode= {
@@ -166,20 +173,36 @@ CALCULATE opmode= {
   if default then 32bit
 }
 
-ALIAS imm x bits= {
-  if opmode == 8bit then 8 bits
-  if opmode == 16bit then 16 bits
-  if opmode == 32bit then 32 bits
-  if opmode == 64bit then 64 bits
+DATA imm x bits= {
+  if opmode == 8bit then 1 byte
+  if opmode == 16bit then 2 bytes
+  if opmode == 32bit then 4 bytes
+  if opmode == 64bit then 8 bytes
+}
+
+DATA immM32 x bits= {
+  if opmode == 8bit then 1 byte
+  if opmode == 16bit then 2 bytes
+  if opmode == 32bit then 4 bytes
+  if opmode == 64bit then 4 bytes
 }
 
 ALIAS RM 3 bits= {
+  100= EXPECT SIB
+
   if Mod == 00 then {
      101= EXPECT disp32
-     default= EXPECT SIB
+     reg= [reg]
   }
-  if Mod == 01 then EXPECT SIB
-  if Mod == 10 then EXPECT SIB
+
+  if Mod == 01 then {
+     reg= [reg] + EXPECT disp8
+  }
+
+  if Mod == 10 then {
+     reg= [reg] + EXPECT disp32
+  }
+
   if Mod == 11 then reg
 }
 
@@ -202,12 +225,20 @@ ALIAS MOV= {
   1011 ow reg imm= MOV reg, imm
 }
 
-
-CMOV|cc reg, RM = 0F 0x40+cc ModRM
-
 ALIAS ADC= {
-  0b0000111 ow imm[8,16,32]= ADC reg, imm[8,16,32]
-  0b1000000 ow
-  ADC AL, imm8= 0x14 imm8
-
+  0000 111 ow immM32= ADC reg, immM32 WITH reg=000
+  1000 000 ow immM32= ADC reg, immM32
+  1000 0011 mod 010 reg imm8= ADC reg, imm8
+  0001 000 ow ModRM = ADC rm, reg
+  0001 001 ow ModRM = ADC reg, rm
 }
+
+ALIAS CMOV= {
+  0100 cc ModRM = CMOV|cc reg, rm
+}
+
+
+INPUT
+ 0000 111 1 0xf0
+ ^
+ ptr
