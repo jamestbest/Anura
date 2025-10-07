@@ -307,6 +307,8 @@ int decode(FILE* elf) {
 
     void* dl_data= NULL;
     void* str_data= NULL;
+    void* text_data= NULL;
+    uint64_t text_off= 0;
 
     for (int i = 0; i < header.e_shnum; ++i) {
         Elf64_Shdr section= sections[i];
@@ -319,33 +321,43 @@ int decode(FILE* elf) {
         );
 
         if (section.sh_type == SHT_PROGBITS) {
-            char* data= malloc(section.sh_size);
+            char* prog_data= malloc(section.sh_size);
             fseek(elf, section.sh_offset, SEEK_SET);
-            fread(data, sizeof (uint8_t), section.sh_size, elf);
+            fread(prog_data, sizeof (uint8_t), section.sh_size, elf);
 
             for (int j = 0; j < section.sh_size; ++j) {
-                printf("%02X ", (uint8_t)data[j]);
+                printf("%02X ", (uint8_t)prog_data[j]);
                 if (j % 16 == 15) putchar('\n');
             }
             putchar('\n');
 
             if (strcmp(&sstring_table[section.sh_name], ".debug_line") == 0) {
-                dl_data= data;
+                dl_data= prog_data;
+                continue;
+            }
+
+            if (strcmp(&sstring_table[section.sh_name], ".text") == 0) {
+                text_data= prog_data;
+                text_off= section.sh_offset;
                 continue;
             }
 
             if (strcmp(&sstring_table[section.sh_name], ".debug_line_str") == 0) {
-                str_data= data;
+                str_data= prog_data;
                 continue;
             }
 
-            free(data);
+            free(prog_data);
         }
     }
 
-    decode_lines(dl_data, str_data);
+    decode_lines(dl_data, str_data, text_data, text_off);
 
     free(sections);
+    free(dl_data);
+    free(str_data);
+    free(text_data);
+    free(sstring_table);
 
     return 0;
 }
