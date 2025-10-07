@@ -37,7 +37,7 @@ typedef enum DW_LNE {
 
     DW_LNE_lo_user= 0x80,
     DW_LNE_hi_user= 0xFF
-};
+} DW_LNE;
 
 typedef enum DW_LNCT {
     DW_LNCT_path= 1,
@@ -49,7 +49,7 @@ typedef enum DW_LNCT {
 
     DW_LNCT_lo_user= 0x2000,
     DW_LNCT_hi_user= 0x3fff
-};
+} DW_LNCT;
 
 const char* DW_LNCT_STRS[]= {
     [DW_LNCT_path]= "path",
@@ -148,7 +148,7 @@ uint64_t decode_uleb128(uint8_t* start) {
     *(type*)s; s+= sizeof (type);
 
 #define RAA(elem) \
-    {typeof(&elem)_____temp=base; elem=*base; base+= sizeof (elem);}
+    {typeof(&elem)temp=(void*)base; elem=*temp; base+= sizeof (elem);}
 
 typedef struct ULEB128 {
     uint64_t v;
@@ -198,6 +198,8 @@ LEB128 read_leb128(uint8_t* start) {
 }
 
 DW_LInfo64 info;
+uint8_t* text_data= NULL;
+uint64_t text_off= 0;
 
 void new_row() {
     // 3. Append a row to the matrix using the current values of the state machine
@@ -205,6 +207,13 @@ void new_row() {
     // [[TODO]]
     printf("MATRIX ROW line: %u  Col: %u  PC: %p  Discrim: %u\n",
         line, col, (void*)pc, discrim);
+
+    printf("Peek at PC: \n");
+    for (int j = 0; j < 128; ++j) {
+        printf("%02X ", (uint8_t)text_data[j + pc - text_off]);
+        if (j % 16 == 15) putchar('\n');
+    }
+    putchar('\n');
 
     // 4. Set the basic_block register to “false.”
     // 5. Set the prologue_end register to “false.”
@@ -214,22 +223,28 @@ void new_row() {
     discrim= 0;
 }
 
-int special_op(uint8_t op) {
-    // this is a special opcode
-    uint8_t aoc= op - info.op_base;
+void addr_op_inc(uint8_t aoc) {
     uint8_t op_adv= aoc / info.line_range;
 
     uint64_t npc= pc + (info.min_instr_length * ((op_idx + op_adv) / info.max_op_per_inst));
     uint64_t n_op_idx= (op_idx + op_adv) % info.max_op_per_inst;
+
+    // 2. Modify the operation pointer by incrementing the address and op_index
+    //  registers as described below.
+    op_idx= n_op_idx;
+    pc= npc;
+}
+
+int special_op(uint8_t op) {
+    // this is a special opcode
+    uint8_t aoc= op - info.op_base;
+    addr_op_inc(aoc);
+
     uint32_t line_inc= info.line_base + (aoc % info.line_range);
 
     // FROM https://dwarfstd.org/doc/DWARF5.pdf#page=178
     // 1. Add a signed integer to the line register
     line += line_inc;
-    // 2. Modify the operation pointer by incrementing the address and op_index
-    //  registers as described below.
-    op_idx= n_op_idx;
-    pc= npc;
 
     // 3-7
     new_row();
@@ -265,10 +280,11 @@ size_t decode_op(uint8_t* base) {
                         assert(false);
                 }
                 break;
-            case DW_LNE_set_discriminator:
-                ULEB128 operand= read_uleb128(base);
-                discrim= operand.v;
+            case DW_LNE_set_discriminator: {
+                ULEB128 operand = read_uleb128(base);
+                discrim = operand.v;
                 break;
+            }
             default:
                 assert(false);
         }
@@ -281,7 +297,8 @@ size_t decode_op(uint8_t* base) {
                 new_row();
                 return 1;
             case DW_LNS_const_add_pc:
-                return special_op(255);
+                addr_op_inc(255 - info.op_base);
+                return 1;
             case DW_LNS_advance_pc:
              {
                 ULEB128 operand= read_uleb128(base);
@@ -325,10 +342,13 @@ size_t decode_op(uint8_t* base) {
             case DW_LNS_set_epilogue_begin:
                 epilogue_begin= true;
                 return 1;
-            case DW_LNS_set_isa:
+            case DW_LNS_set_isa: {
                 ULEB128 operand= read_uleb128(base);
                 isa= operand.v;
                 return operand.size + 1;
+            }
+            default:
+                assert(false);
         }
     } else {
         return special_op(c);
@@ -350,11 +370,17 @@ int read_header(uint8_t* start, char* string_data) {
     }
     bc_end= (void*)(base + (uint64_t)(bit64 ? info.ul_64 : info.ul_32));
 
-    printf("ByteCode starts at addr %p from base of %p\n", bc_start, start);
-
+    // THE HEADER INFORMATION IS DIFFERENT BETWEEN VERSIONS
     RAA(info.version);
-    RAA(info.a_size);
-    RAA(info.seg_sel_size);
+
+    if (info.version >= 5) {
+        RAA(info.a_size);
+        RAA(info.seg_sel_size);
+    } else {
+        // we have to fetch the CU's address size from the .debug_info section
+        info.a_size= 8;
+        info.seg_sel_size= 0; // we assume no segment selector for now, although a dwarf version this old may be a 16-bit platform
+    }
 
     RAA(info.hl_32)
     if (info.hl_32 == 0xFFFFFFFF) {
@@ -362,9 +388,15 @@ int read_header(uint8_t* start, char* string_data) {
     }
 
     bc_start= (void*)(base + (uint64_t)(bit64 ? info.hl_64 : info.hl_32));
+    printf("ByteCode starts at addr %p from base of %p\n", bc_start, start);
 
     RAA(info.min_instr_length);
-    RAA(info.max_op_per_inst);
+    if (info.version >= 4) {
+        RAA(info.max_op_per_inst);
+    } else {
+        info.max_op_per_inst= 1;
+    }
+
     RAA(info.default_is_stmt);
     RAA(info.line_base);
     RAA(info.line_range);
@@ -394,8 +426,12 @@ int read_header(uint8_t* start, char* string_data) {
         uint8_t bytes_read= decode_op(bc_start);
         bc_start+= bytes_read;
     }
-    // for now ignore this part of DWARF v5
 
+    if (info.version < 5) {
+        return 0;
+    }
+
+    // for now ignore this part of DWARF v5
     RAA(info.directory_entry_format_count)
     for (int i= 0; i < info.directory_entry_format_count; ++i) {
         ULEB128 l= read_uleb128(base);
@@ -410,7 +446,7 @@ int read_header(uint8_t* start, char* string_data) {
     ULEB128 dfc= read_uleb128(base);
     base += dfc.size;
 
-    printf("There are %lld directories.\n", dfc.v);
+    printf("There are %lu directories.\n", dfc.v);
     for (size_t i= 0; i < dfc.v; ++i) {
         uint32_t off; // todo this offset can be uint64_t (bit64 mode)
         RAA(off);
@@ -433,7 +469,7 @@ int read_header(uint8_t* start, char* string_data) {
     info.file_names_count= fnc.v;
 }
 
-int init() {
+void init() {
     pc= op_idx= 0;
     file= line= 1;
     col= 0;
@@ -450,8 +486,13 @@ int init() {
 //     DW_LNS_advance_pc
 // }
 
-int decode_lines(uint8_t* start, void* string_data) {
+int decode_lines(uint8_t* start, void* string_data, void* t_data, uint64_t t_off) {
     init();
 
+    text_data= t_data;
+    text_off= t_off;
+
     read_header(start, string_data);
+
+    return 0;
 }
