@@ -1,0 +1,48 @@
+ALIAS prefix = {REX \n VEX \n EVEX}
+mean that when you see prefix try all of these rules
+There is no output on either side, as it would be which ever rule matches
+
+STRUCTURE is the base entry point and gives the format for a new instr.
+
+FLAGs are enums or booleans
+
+// are comments
+
+.x(y) is a format for defining fields that just store bits
+ to access use e.g. REX.x if ALIAS REX= {0100 .w ...}
+
+in rules numbers are firstly base 2, use 0x to be base 16 in which they
+are assumed to be 1 byte in size
+
+= within rules means left side is assembled, right side is disassembled
+   if the super alias is used on left or right the value from this is used
+
+RULE <LEFT | RIGHT> ON <ALIAS>
+ triggers once an alias has been consumed
+ e.g. ALIAS reg 3 bits= {
+  	000= AX, AL, AL, EAX, RAX
+	001= CX, CL, AL, ECX, RCX
+  
+  	100= SP, AH, AL, ESP, RSP
+      }
+      RULE RIGHT ON reg {
+  	CHOOSE 0 if opmode= 16bit
+  	CHOOSE 1 if ow == 0 and rexw != 1
+  	CHOOSE 2 if ow == 0
+  	CHOOSE 3 if opmode= 32bit
+  	CHOOSE 4 if opmode= 64bit
+      }
+  this means that once consumed e.g. 001, we choose from the right
+   based on the rules
+
+  if there are no rules on an alias with lots of options then the first
+  is picked
+
+ALIASes can just be wrappers around another to give a name
+ e.g. ALIAS sibi= reg
+ this will use reg's left and right rules when sibi is used
+
+MOD reg RM
+01  111 101
+SS IDX BASE
+10 101 000
