@@ -19,19 +19,20 @@ are assumed to be 1 byte in size
 
 RULE <LEFT | RIGHT> ON <ALIAS>
  triggers once an alias has been consumed
- e.g. ALIAS reg 3 bits= {
-  	000= AX, AL, AL, EAX, RAX
-	001= CX, CL, AL, ECX, RCX
+ e.g.
+    ALIAS reg 3 bits= {
+  	    000= AX, AL, AL, EAX, RAX
+	    001= CX, CL, AL, ECX, RCX
   
-  	100= SP, AH, AL, ESP, RSP
-      }
-      RULE RIGHT ON reg {
-  	CHOOSE 0 if opmode= 16bit
-  	CHOOSE 1 if ow == 0 and rexw != 1
-  	CHOOSE 2 if ow == 0
-  	CHOOSE 3 if opmode= 32bit
-  	CHOOSE 4 if opmode= 64bit
-      }
+  	    100= SP, AH, AL, ESP, RSP
+    }
+    RULE RIGHT ON reg {
+  	    CHOOSE 0 if opmode= 16bit
+  	    CHOOSE 1 if ow == 0 and REX.w != 1
+  	    CHOOSE 2 if ow == 0
+  	    CHOOSE 3 if opmode= 32bit
+  	    CHOOSE 4 if opmode= 64bit
+    }
   this means that once consumed e.g. 001, we choose from the right
    based on the rules
 
@@ -42,7 +43,3 @@ ALIASes can just be wrappers around another to give a name
  e.g. ALIAS sibi= reg
  this will use reg's left and right rules when sibi is used
 
-MOD reg RM
-01  111 101
-SS IDX BASE
-10 101 000

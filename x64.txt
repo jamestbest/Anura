@@ -93,9 +93,17 @@ ALIAS reg 3 bits= {
   100= SP, AH, AL, ESP, RSP
 }
 
-RULE RIGHT ON reg {
+// some instructions access SPL etc. instead of AH etc.
+ALIAS regT 3 bits= {
+  000= AX, AL, AL, EAX, RAX
+  001= CX, CL, AL, ECX, RCX
+
+  100= SP, SPL, AL, ESP, RSP
+}
+
+RULE RIGHT ON reg, regT {
   CHOOSE 0 if opmode= 16bit
-  CHOOSE 1 if ow == 0 and rexw != 1
+  CHOOSE 1 if ow == 0 and REX.w != 1
   CHOOSE 2 if ow == 0
   CHOOSE 3 if opmode= 32bit
   CHOOSE 4 if opmode= 64bit
@@ -120,9 +128,6 @@ ALIAS cc 4 bits= {
   1111= NLE,G
 }
 
-ALIAS Mod 2 bits= {}
-ALIAS RM 3 bits= {}
-
 ALIAS sibs 2 bits
 ALIAS sibi= reg
 ALIAS sibb= reg
@@ -134,7 +139,6 @@ ALIAS sibsi 5 bits= {
 
 ALIAS SIB 1 byte= {
   sibsi 101 = {
-    if Mod == 00 && mode==64bit then sibsi + rip + disp32
     if Mod == 00 then sibsi + disp32
     if Mod == 01 then sibsi + disp8 + [EBP]
     if Mod == 10 then sibsi + disp32 + [EBP]
@@ -142,12 +146,29 @@ ALIAS SIB 1 byte= {
   sibsi sibb = sibsi + sibb
 }
 
+ALIAS Mod 2 bits= {}
 ALIAS ModRM= {
   Mod reg RM
 }
 
-RULE ON ModRM {
-  if opmode != 16bit && Mod != 0b11 && RM == 0b100 then EXPECT SIB
+ALIAS RM 3 bits= {
+  if opmode != 16bit && Mod != 0b11 then 100= EXPECT SIB
+
+  if Mod == 00 then {
+     if mode == 64bit then 101= "rip" + EXPECT disp32
+     if mode != 64bit then 101= EXPECT disp32
+     reg= [reg]
+  }
+
+  if Mod == 01 then {
+     reg= [reg] + EXPECT disp8
+  }
+
+  if Mod == 10 then {
+     reg= [reg] + EXPECT disp32
+  }
+
+  if Mod == 11 then reg=reg
 }
 
 ALIAS op= {
@@ -168,7 +189,7 @@ CALCULATE opmode= {
   if mode == 32bit then 32bit
   if mode == 16bit then 16bit
 
-  if rexw then 64bit
+  if REX.w then 64bit
   if lp3 then 16bit
   if default then 32bit
 }
@@ -187,46 +208,26 @@ DATA immM32 x bits= {
   if opmode == 64bit then 4 bytes
 }
 
-ALIAS RM 3 bits= {
-  100= EXPECT SIB
-
-  if Mod == 00 then {
-     101= EXPECT disp32
-     reg= [reg]
-  }
-
-  if Mod == 01 then {
-     reg= [reg] + EXPECT disp8
-  }
-
-  if Mod == 10 then {
-     reg= [reg] + EXPECT disp32
-  }
-
-  if Mod == 11 then reg
-}
+DATA disp8 1 byte
+DATA disp16 2 bytes
+DATA disp32 4 bytes
 
 // opcodes are matched up to the next non-0|1
 //  i.e. each level is expanded to it's level of 1|0s
 //  and each is an opcode
 
 ALIAS MOV= {
-  TRANSLATE reg {
-    AH= SPL
-    BH= DIL
-    CH= BPL
-    DH= SIL
-  }
-
-  1000 100 ow ModRM= MOV RM, reg
-  1000 101 ow ModRM= MOV reg, RM
+  1000 100 ow ModRM= MOV RM, regT
+  1000 101 ow ModRM= MOV regT, RM
   1100 011 ow Mod 000 RM imm = MOV RM, imm
  
-  1011 ow reg imm= MOV reg, imm
+  1011 ow reg imm= MOV regT, imm
 }
 
+ALIAS regA= reg AS 000
+
 ALIAS ADC= {
-  0000 111 ow immM32= ADC reg, immM32 WITH reg=000
+  0000 111 ow immM32= ADC regA, immM32
   1000 000 ow immM32= ADC reg, immM32
   1000 0011 mod 010 reg imm8= ADC reg, imm8
   0001 000 ow ModRM = ADC rm, reg
@@ -236,9 +237,3 @@ ALIAS ADC= {
 ALIAS CMOV= {
   0100 cc ModRM = CMOV|cc reg, rm
 }
-
-
-INPUT
- 0000 111 1 0xf0
- ^
- ptr
