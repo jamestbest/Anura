@@ -403,6 +403,7 @@ int main(void) {
     decode(elf);
 
     return 0;
+
     hlog("Hello, World!\n");
 
     bps= BPInfo_arr_construct(5);
