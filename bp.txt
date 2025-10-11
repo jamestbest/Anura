@@ -1,0 +1,18 @@
+break point on a source line
+ - use Saruman to read in the Number Line program and find the mapping in the matrix
+ - This is the start of the instruction
+
+break point on an address (verified)
+ - Need to find the start of the instruction, cannot add a bp to
+    the middle of an instruction, as it may just change data or the instr meaning
+ - This can be done by mapping addr -> line, line -> addr to find the start of the
+    line's instruction and then walking through and disassembling the instructions
+    until you find the address, is within the instruction
+ - Then take the start of the instruction as the address to add the breakpoint to
+ - The size of the instruction should be checked against the size of the breakpoint
+    e.g. 0xCC, or ARM 4 byte (intrinsic), to check that the saved amount is the same,
+    or greater
+
+break point on an address (unverified)
+ I cannot imagine much use for this version as this could just be data
+ in which case we wouldn't break
