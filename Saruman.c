@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
+const LC LC_ERR= {-1, -1};
+const ARange ARange_ERR= {-1, -1};
+
 uint64_t pc;
 uint64_t op_idx;
 
@@ -201,6 +204,26 @@ DW_LInfo64 info;
 uint8_t* text_data= NULL;
 uint64_t text_off= 0;
 
+typedef struct MRow {
+    uint32_t line;
+    uint32_t col;
+
+    uint64_t pc;
+} MRow;
+
+ARRAY_PROTO(MRow, MRow)
+ARRAY_ADD(MRow, MRow)
+
+MRowArray matrix;
+
+void peek_text_at_addr(uintptr_t addr, uint16_t amount) {
+    for (int j = 0; j < amount; ++j) {
+        printf("%02X ", text_data[j + addr - text_off]);
+        if (j % 16 == 15) putchar('\n');
+    }
+    putchar('\n');
+}
+
 void new_row() {
     // 3. Append a row to the matrix using the current values of the state machine
     //   registers.
@@ -208,12 +231,14 @@ void new_row() {
     printf("MATRIX ROW line: %u  Col: %u  PC: %p  Discrim: %u\n",
         line, col, (void*)pc, discrim);
 
-    printf("Peek at PC: \n");
-    for (int j = 0; j < 128; ++j) {
-        printf("%02X ", (uint8_t)text_data[j + pc - text_off]);
-        if (j % 16 == 15) putchar('\n');
-    }
-    putchar('\n');
+    MRow_arr_add(&matrix, (MRow){
+        .line= line,
+        .col= col,
+        .pc= pc
+    });
+
+    // printf("Peek at PC: \n");
+    // peek_text_at_addr(pc, 128);
 
     // 4. Set the basic_block register to “false.”
     // 5. Set the prologue_end register to “false.”
@@ -254,7 +279,7 @@ int special_op(uint8_t op) {
 }
 
 // returns bytes read
-size_t decode_op(uint8_t* base) {
+size_t _decode_op(uint8_t* base) {
     uint8_t c= *base;
     base++;
     if (c == 0) {
@@ -350,9 +375,16 @@ size_t decode_op(uint8_t* base) {
             default:
                 assert(false);
         }
-    } else {
-        return special_op(c);
     }
+
+    return special_op(c);
+}
+
+DecodeRet decode_op(uint8_t* base) {
+    return (DecodeRet) {
+        .bytes_read= _decode_op(base),
+        .end_of_code= end_seq
+    };
 }
 
 int read_header(uint8_t* start, char* string_data) {
@@ -421,10 +453,18 @@ int read_header(uint8_t* start, char* string_data) {
             DW_LNS_STRS[i + 1], i + 1, size);
     }
 
+    matrix= MRow_arr_create();
+    while (true) {
+        DecodeRet res= decode_op(bc_start);
+        bc_start+= res.bytes_read;
 
-    for (int i= 0; i < 100; ++i) {
-        uint8_t bytes_read= decode_op(bc_start);
-        bc_start+= bytes_read;
+        if (res.end_of_code) break;
+    }
+
+    for (int i= 26; i < 50; ++i) {
+        ARange addr_r= line2addr(i);
+        printf("line[%d] is addr: %p-%p %s\n", i, (void*)addr_r.s, (void*)addr_r.e, addr_r.s == -1 ? "(NO LINE)" : "\nWith peek: ");
+        if (addr_r.s != -1) peek_text_at_addr(addr_r.s, addr_r.e - addr_r.s);
     }
 
     if (info.version < 5) {
@@ -495,4 +535,61 @@ int decode_lines(uint8_t* start, void* string_data, void* t_data, uint64_t t_off
     read_header(start, string_data);
 
     return 0;
+}
+
+ARange line2addr(uint32_t line) {
+    for (int i= 0; i < matrix.pos; ++i) {
+        MRow* row= MRow_arr_ptr(&matrix, i);
+        if (i == matrix.pos - 1) {
+            if (line == row->line) return (ARange){
+                .s= row->pc,
+                .e= row->pc
+            };
+            return ARange_ERR;
+        }
+
+
+        if (row->line == line) {
+            int j= i;
+            MRow* next;
+            MRow* end;
+
+            while (next= MRow_arr_ptr(&matrix, ++j),
+                next->line == line || next->discrim >= discrim) {}
+            end=next;
+
+            return (ARange){
+                .s= row->pc,
+                .e= end->pc
+            };
+        }
+    }
+
+    return ARange_ERR;
+}
+
+// addresses and op indexes only increase
+//  so finding the value of an address needs only
+//  to find the first value greater than and then step back
+//  once. If this is the start then there is no
+LC addr2line(uintptr_t addr) {
+    for (int i= 0; i < matrix.pos; ++i) {
+        MRow* row= MRow_arr_ptr(&matrix, i);
+
+        if (addr == row->pc) return (LC) {
+            .line= row->line,
+            .col= row->col
+        };
+
+        if (addr < row->pc) {
+            if (i == 0) return LC_ERR;
+            MRow* prev= MRow_arr_ptr(&matrix, i - 1);
+            return (LC) {
+                .line= prev->line,
+                .col= prev->col
+            };
+        }
+    }
+
+    return LC_ERR;
 }
