@@ -147,28 +147,17 @@ ALIAS SIB 1 byte= {
 }
 
 ALIAS Mod 2 bits= {}
+ALIAS RM 3 bits
 ALIAS ModRM= {
-  Mod reg RM
-}
-
-ALIAS RM 3 bits= {
-  if opmode != 16bit && Mod != 0b11 then 100= EXPECT SIB
-
-  if Mod == 00 then {
-     if mode == 64bit then 101= "rip" + EXPECT disp32
-     if mode != 64bit then 101= EXPECT disp32
-     reg= [reg]
+  11 reg 100 SIB= SIB
+  00 reg 101 disp32= {
+    when mode == 64bit then "rip" + disp32
+    when mode != 64bit then disp32
   }
-
-  if Mod == 01 then {
-     reg= [reg] + EXPECT disp8
-  }
-
-  if Mod == 10 then {
-     reg= [reg] + EXPECT disp32
-  }
-
-  if Mod == 11 then reg=reg
+  00 reg RM= [reg]
+  01 reg RM disp8 = [reg] + disp8
+  10 reg RM disp32= [reg] + disp32
+  11 reg RM= reg
 }
 
 ALIAS op= {
@@ -178,16 +167,20 @@ ALIAS op= {
 }
 
 ALIAS op2= {
-  E6 ModRM REQUIRE REP= CVTDQ2PD xyzreg, xyzrm=  // change on E/VEX
-  1E FA REQUIRE REP= ENDBR64
+  0xE6 ModRM REQUIRE REP= CVTDQ2PD xyzreg, xyzrm=  // change on E/VEX
+  0x1E 0xFA  REQUIRE REP= ENDBR64
   CMOV
 }
 
 CALCULATE opmode= {
-  if mode == 32bit && lp3 then 16bit
-  if mode == 16bit && lp3 then 32bit
-  if mode == 32bit then 32bit
-  if mode == 16bit then 16bit
+  when mode == 32bit then {
+    if lp3 then 16bit
+    if default then 32bit
+  }
+  when mode == 16bit then {
+    if lp3 then 32bit
+    if default then 16bit
+  }
 
   if REX.w then 64bit
   if lp3 then 16bit
@@ -237,3 +230,6 @@ ALIAS ADC= {
 ALIAS CMOV= {
   0100 cc ModRM = CMOV|cc reg, rm
 }
+
+if vs when semantic for something that can back when assemble
+vs something that is based on a mode set at the start
