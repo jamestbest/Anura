@@ -21,9 +21,10 @@ typedef struct LC {
     uint32_t col;
 } LC;
 
+// Address range; mainly used for source line -> address which through the byte code is INCLUSIVE, EXCLUSIVE
 typedef struct ARange {
-    uintptr_t s;
-    uintptr_t e;
+    uintptr_t s; // INCLUSIVE
+    uintptr_t e; // EXCLUSIVE
 } ARange;
 
 extern const LC LC_ERR;

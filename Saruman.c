@@ -14,21 +14,21 @@
 const LC LC_ERR= {-1, -1};
 const ARange ARange_ERR= {-1, -1};
 
-uint64_t pc;
-uint64_t op_idx;
+static uint64_t pc;
+static uint64_t op_idx;
 
-uint32_t file;
-uint32_t line;
-uint32_t col;
+static uint32_t file;
+static uint32_t line;
+static uint32_t col;
 
-bool is_stmt;
-bool basic_block;
-bool end_seq;
-bool prologue_end;
-bool epilogue_begin;
+static bool is_stmt;
+static bool basic_block;
+static bool end_seq;
+static bool prologue_end;
+static bool epilogue_begin;
 
-uint32_t isa;
-uint32_t discrim;
+static uint32_t isa;
+static uint32_t discrim;
 
 // EXTENDED OPCODES
 typedef enum DW_LNE {
@@ -554,8 +554,10 @@ ARange line2addr(uint32_t line) {
             MRow* next;
             MRow* end;
 
-            while (next= MRow_arr_ptr(&matrix, ++j),
-                next->line == line || next->discrim >= discrim) {}
+            // todo this misses dis-joint lines
+            //  to link them though would be n^2
+            //  so more likely is a linear bucket putter-er
+            while (next= MRow_arr_ptr(&matrix, ++j), next->line == line) {}
             end=next;
 
             return (ARange){
