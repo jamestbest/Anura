@@ -246,38 +246,52 @@ const char* get_et_str(unsigned int id) {
     };
 }
 
-int decode(FILE* elf) {
-    uint8_t buff[1000];
-    size_t read= fread(buff, sizeof (u_int8_t), sizeof (buff) - 1, elf);
-    buff[read]= '\0';
+typedef struct ELF64 {
+    Elf64_Ehdr header;
+    Elf64_Shdr* sections;
 
-    if (!verify_special(buff)) {
+    struct {
+        void* text;
+        void* debug_line;
+        void* debug_line_str;
+        void* str;
+    } data;
+} ELF64;
+
+static ELF64 ELF;
+
+int decode(FILE* elf) {
+    size_t read= fread(&ELF.header, sizeof (uint8_t), sizeof(ELF.header), elf);
+
+    if (!verify_special(ELF.header.e_ident)) {
         perror("Unable to verify ELF special sequence at start of file");
         return -1;
     }
 
+    uint8_t* ident= ELF.header.e_ident;
+
     puts("Special sequence verified");
 
-    uint8_t class_id= buff[EI_CLASS];
+    uint8_t class_id= ident[EI_CLASS];
     const char* class= EI_CLASS_STR[class_id % ELFCLASSNUM];
 
     printf("ELF is of class %s\n", class);
 
-    uint8_t data_id= buff[EI_DATA];
+    uint8_t data_id= ident[EI_DATA];
     const char* data= EI_DATA_STR[data_id % ELFDATANUM];
 
     printf("ELF is of data encoding %s\n", data);
 
-    uint8_t version= buff[EI_VERSION];
+    uint8_t version= ident[EI_VERSION];
     printf("ELF is of version %u\n", version);
 
-    uint8_t os_abi_id= buff[EI_OSABI];
+    uint8_t os_abi_id= ident[EI_OSABI];
     const char* os_abi= get_osabi_str(os_abi_id);
-    uint8_t os_abi_version= buff[EI_ABIVERSION];
+    uint8_t os_abi_version= ident[EI_ABIVERSION];
 
     printf("ELF is of OS ABI type %s version %u\n", os_abi, os_abi_version);
 
-    Elf64_Ehdr header= *(Elf64_Ehdr*)buff;
+    Elf64_Ehdr header= ELF.header;
     printf(
         "ELF header information:\n"
         "  e_type: %s\n"
