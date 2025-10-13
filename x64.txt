@@ -243,6 +243,7 @@ vs something that is based on a mode set at the start
 
 
 // example of ARM64 adc
+FLAG sf
 ALIAS S 1 bit= {
   0=""
   1="S"
@@ -257,6 +258,8 @@ RULE RIGHT ON regA {
   CHOOSE 1 if sf == 1
 }
 ALIAS rd= regA
+ALIAS rm= regA
+ALIAS rn= regA
 ALIAS AADC= {
   sf S 01 1010 000 rm 0000 00 rn rd= ADC|S rd, rn, rm
 }
