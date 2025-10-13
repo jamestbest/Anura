@@ -152,7 +152,7 @@ ALIAS ModRM= {
   11 reg 100 SIB= SIB
   00 reg 101 disp32= {
     when mode == 64bit then "rip" + disp32
-    when mode != 64bit then disp32
+    when default then disp32
   }
   00 reg RM= [reg]
   01 reg RM disp8 = [reg] + disp8
@@ -233,3 +233,30 @@ ALIAS CMOV= {
 
 if vs when semantic for something that can back when assemble
 vs something that is based on a mode set at the start
+
+
+
+
+
+
+
+
+
+// example of ARM64 adc
+ALIAS S 1 bit= {
+  0=""
+  1="S"
+}
+ALIAS regA 5 bits= {
+  00000= W0, X0
+  00001= W1, X1
+  11110= W30, X30
+}
+RULE RIGHT ON regA {
+  CHOOSE 0 if sf == 0
+  CHOOSE 1 if sf == 1
+}
+ALIAS rd= regA
+ALIAS AADC= {
+  sf S 01 1010 000 rm 0000 00 rn rd= ADC|S rd, rn, rm
+}
