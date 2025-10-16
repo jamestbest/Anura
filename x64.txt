@@ -155,8 +155,8 @@ ALIAS ModRM= {
     when default then disp32
   }
   00 reg RM= [reg]
-  01 reg RM disp8 = [reg] + disp8
-  10 reg RM disp32= [reg] + disp32
+  01 reg RM disp8 = [reg + disp8]
+  10 reg RM disp32= [reg + disp32]
   11 reg RM= reg
 }
 
@@ -173,6 +173,11 @@ ALIAS op2= {
 }
 
 CALCULATE opmode= {
+  when mode == 64bit then {
+    if REX.w then 64bit
+    if lp3 then 16bit
+    if default then 32bit
+  }
   when mode == 32bit then {
     if lp3 then 16bit
     if default then 32bit
@@ -181,10 +186,6 @@ CALCULATE opmode= {
     if lp3 then 32bit
     if default then 16bit
   }
-
-  if REX.w then 64bit
-  if lp3 then 16bit
-  if default then 32bit
 }
 
 DATA imm x bits= {
@@ -263,3 +264,9 @@ ALIAS rn= regA
 ALIAS AADC= {
   sf S 01 1010 000 rm 0000 00 rn rd= ADC|S rd, rn, rm
 }
+
+ALIAS op= {
+    AADC
+}
+
+STRUCTURE op
