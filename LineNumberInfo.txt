@@ -1,0 +1,30 @@
+storing: 
+ cc
+ for cc
+   start, size
+   
+could use ULEB for the size
+and then verify that the start can be sentinal + offset
+Then store a header that keeps track of the line -> location in the table
+
+sentinals stored at
+
+if the line is greater than we can store then overwrite the other lines,
+rewrite their values & update the header index for those lines
+
+| line7 | line8 | line9     -> | line7 line7 | line9 | line8
+e.g. if line7 has a new child, then overwrite line8, rewrite it to the end & update
+the header. This still works for n % x sentinals
+
+The sentinals should be stored in the header?
+
+what if one of the offsets is greater than the assumed size, this could be ok with ULEB128,
+and just store if we need to parse them completely. This does slightly reduce the max
+Actually unlikely to work as the max size would be < uint8_t
+So would most likely just parse a ULEB, OR would it be better to be strictly uint16_t or uint32_t?
+what about a 16 or 32 bit ULEB?
+
+assume most lines require only one child,
+those that don't may amortise with the lines that don't have anything linked
+So the header is the size of the lines * the offset into the table (this could be changed?)
+
