@@ -17,8 +17,6 @@
 int i=0;
 
 #define PCOND_X(cond) (cond ? 'X' : ' ')
-#define PRW_VAL(l, r) ((!l && !r) ? "BRK INST" : ((!l && r) ? "BRK WRITES" : ((l && !r) ? "BRK IO" : "BRK RW NO INST FETCH")))
-#define PLEN_VAL(l, r) ((!l && !r) ? 1 : ((!l && r) ? 2 : ((l && !r) ? 8 : 4)))
 
 void hlog(const char* message, ...);
 
@@ -71,85 +69,6 @@ void print_dr_status(long long r7) {
 
 void print_dr7(long long reg) {
     print_dr_status(reg);
-    return;
-    hlog(
-        "DR7 (Control Register) (%llu)\n"
-        "  - Local break points\n"
-        "    - B0: %c\n"
-        "    - B1: %c\n"
-        "    - B2: %c\n"
-        "    - B3: %c\n"
-        "  - Global break points\n"
-        "    - B0: %c\n"
-        "    - B1: %c\n"
-        "    - B2: %c\n"
-        "    - B3: %c\n"
-        "  - Exact bps\n"
-        "    - Local: %c\n"
-        "    - Global: %c\n"
-        "  - Flags\n"
-        "    - RTM (restricted transactional memory): %c\n"
-        "    - GD (debug register protection): %c\n"
-        "  - RW modes (DE: %s)\n"
-        "    - B0(%d%d): %s\n"
-        "    - B1(%d%d): %s\n"
-        "    - B2(%d%d): %s\n"
-        "    - B3(%d%d): %s\n"
-        "  - LEN modes\n"
-        "    - B0(%d%d): %d byte(s)\n"
-        "    - B1(%d%d): %d byte(s)\n"
-        "    - B2(%d%d): %d byte(s)\n"
-        "    - B3(%d%d): %d byte(s)\n\n",
-        reg,
-        PCOND_X((reg >> 0) & 1),
-        PCOND_X((reg >> 2) & 1),
-        PCOND_X((reg >> 4) & 1),
-        PCOND_X((reg >> 6) & 1),
-
-        PCOND_X((reg >> 1) & 1),
-        PCOND_X((reg >> 3) & 1),
-        PCOND_X((reg >> 5) & 1),
-        PCOND_X((reg >> 7) & 1),
-
-        PCOND_X((reg >> 8) & 1),
-        PCOND_X((reg >> 9) & 1),
-
-        PCOND_X((reg >> 11) & 1),
-        PCOND_X((reg >> 13) & 1),
-
-        "UNKNOWN",
-        (int)((reg >> 16) & 1),
-        (int)((reg >> 17) & 1),
-        PRW_VAL(((reg >> 16) & 1), ((reg >> 17) & 1)),
-
-        (int)((reg >> 20) & 1),
-        (int)((reg >> 21) & 1),
-        PRW_VAL(((reg >> 20) & 1), ((reg >> 21) & 1)),
-
-        (int)((reg >> 24) & 1),
-        (int)((reg >> 25) & 1),
-        PRW_VAL(((reg >> 24) & 1), ((reg >> 25) & 1)),
-
-        (int)((reg >> 28) & 1),
-        (int)((reg >> 29) & 1),
-        PRW_VAL(((reg >> 28) & 1), ((reg >> 29) & 1)),
-
-        (int)((reg >> 18) & 1),
-        (int)((reg >> 19) & 1),
-        PLEN_VAL(((reg >> 18) & 1), ((reg >> 19) & 1)),
-
-        (int)((reg >> 22) & 1),
-        (int)((reg >> 23) & 1),
-        PLEN_VAL(((reg >> 22) & 1), ((reg >> 23) & 1)),
-
-        (int)((reg >> 26) & 1),
-        (int)((reg >> 27) & 1),
-        PLEN_VAL(((reg >> 26) & 1), ((reg >> 27) & 1)),
-
-        (int)((reg >> 30) & 1),
-        (int)((reg >> 31) & 1),
-        PLEN_VAL(((reg >> 30) & 1), ((reg >> 31) & 1))
-    );
 }
 
 void print_dr6(long long reg) {
@@ -222,8 +141,6 @@ long long place_bp(void* address) {
     }
     // if there is a local or global breakpoint enabled for all bps then we cannot create a hardware breakpoint
     if (free_bp == -1) {
-        // for now we error, but later this can be a software breakpoint with int3
-
         // we want to read just 1 byte of data for the shadow, but this might not be an aligned read
         // so we'll find the nearest 8 aligned boundry which includes the address and then shift out the rest
         //  save this alignment offset for later writing the shadow back
@@ -282,7 +199,7 @@ long long place_bp(void* address) {
         return 0;
     }
 
-    r7 |= 1 << (free_bp << 1); // enable LOCAL BREAKPOINT 0
+    r7 |= 1 << (free_bp << 1); // enable LOCAL BREAKPOINT free_bp
     r7 &= (~(0b11 << (16 + (free_bp << 2)))); // set R/Wx to 00 I.e. BRK INST
     r7 &= (~(0b11 << (18 + (free_bp << 2)))); // set LENx to 00 FOLLOWING R/W0 being 00 (Vol. 3B 19-5)
 
@@ -398,12 +315,7 @@ ssize_t process_vm_writev(pid_t pid,
                           unsigned long riovcnt,
                           unsigned long flags);
 
-int main(void) {
-    FILE* elf= fopen("Anura", "r");
-    decode(elf);
-
-    return 0;
-
+int breakpoint_program() {
     hlog("Hello, World!\n");
 
     bps= BPInfo_arr_construct(5);
@@ -474,15 +386,8 @@ int main(void) {
 
     hlog("i is : %d\n", value);
 
-//    res = INT3 | (res & 0xFFFFFFFFFFFFFF00);
-//    long long ress= res;
-//    res= ptrace(PTRACE_POKETEXT, pid, target, res);
-//    hlog("The result OF POKING (%#X) is %ld errno is %d with error %s\n", ress, res, errno, strerror(errno));
-
     res= ptrace(PTRACE_CONT, pid, NULL, 0);
     hlog("The result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
-
-//    asm ("mov 12, rax");
 
     while (true) {
         ret = waitpid(pid, &status, 0);
@@ -549,6 +454,17 @@ int main(void) {
             break;
         }
     }
+
+    return 0;
+}
+
+int main(void) {
+    FILE* elf= fopen("Anura", "r");
+    decode(elf);
+
+    return 0;
+
+    breakpoint_program();
 
     return 0;
 }
