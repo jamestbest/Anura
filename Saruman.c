@@ -473,6 +473,7 @@ int read_header(uint8_t* start, char* string_data) {
 
         if (res.end_of_code) break;
     }
+    print_header();
 
     for (int i= 26; i < 50; ++i) {
         ARange addr_r= line2addr(i);
@@ -612,24 +613,59 @@ LC addr2line(uintptr_t addr) {
 void on_new_row_header();
 LNInfo LN_info;
 #define ASSUMED_LINE_COUNT 500
-LNHeader create_header() {
+void create_header() {
     // we assume a lower bound of 500 lines to start (at worst we waste 1/2kb)
     void* data= calloc(ASSUMED_LINE_COUNT, sizeof (uint32_t));
+    memset(data, 0xFF, ASSUMED_LINE_COUNT * sizeof (uint32_t));
     LN_info.header= (LNHeader) {
         .data= data,
         .lines= (uint32_t*)data + 1,
         .max_line= ASSUMED_LINE_COUNT
     };
+    ((uint32_t*)LN_info.header.data)[0]= LN_info.header.max_line;
 
     // this is the next free slot in the data entries
     //  the structure is 3 uint16_t's [[todo]] this could be ULEB but adding gets complicated
     //  being the count, the start, and the size
-    LN_info.next_free= malloc(sizeof (uint16_t) * 3 * ASSUMED_LINE_COUNT);
+    LN_info.entries= malloc(sizeof (uint16_t) * 3 * ASSUMED_LINE_COUNT);
+    LN_info.next_free= (uint8_t *)LN_info.entries;
+    LN_info.last_entry= 0;
 
     // [[todo]] could store the free parts of what is essentially a heap
     //  and fill them first. It is unlikely that there will be lots of gaps I'd wager
 
     on_new_row= on_new_row_header;
+}
+
+void print_header() {
+    printf("---HEADER INFO---\n");
+    printf("The header contains %u lines\n", LN_info.header.max_line);
+    uint64_t zc= 0;
+    uint64_t zs= 0;
+    for (int i = 0; i < LN_info.header.max_line; ++i) {
+        uint32_t offset= LN_info.header.lines[i];
+
+        if (offset != -1) {
+            if (zc != 0) {
+                printf("Lines [%lu-%lu] contain no code\n", zs, zs + zc - 1);
+                zc= 0;
+            }
+            LNEntry* entry= (LNEntry*)&LN_info.entries[offset];
+            printf("Line %u contains %u ranges\n", i, entry->cc);
+            for (int j = 0; j < entry->cc; ++j) {
+                LNData* child= ((LNData*)(entry + 1)) + j;
+                printf("  - %x:%x\n", child->start_offset, child->start_offset + child->size);
+            }
+
+        } else {
+            if (zc == 0) {
+                zs= i;
+                zc= 1;
+            } else {
+                zc++;
+            }
+        }
+    }
 }
 
 void on_new_row_header() {
@@ -643,10 +679,13 @@ void on_new_row_header() {
         if (last_row.line == row.line) {
             // we are contiguous
             uint32_t entry_off= LN_info.header.lines[row.line];
+            LN_info.last_entry= entry_off;
 
             // if we're the same as the previous line then it should
             //  already have an allocation area!
-            if (entry_off == 0) assert(false);
+            if (entry_off == -1) {
+                assert(false);
+            }
 
             LNEntry* entry= &LN_info.entries[entry_off];
             if (entry->cc == 0) assert(false);
@@ -660,26 +699,41 @@ void on_new_row_header() {
             //  and so we either add a new entry
             uint32_t entry_off= LN_info.header.lines[row.line];
 
-            if (entry_off == 0) {
+            // we need to set the last entry's size to include up to us
+            LNEntry* last_entry= (LNEntry*)&LN_info.entries[LN_info.last_entry];
+            LNData* last_data= (LNData*)(last_entry + 1) + (last_entry->cc - 1);
+            last_data->size= row.pc - last_data->start_offset;
+
+            if (entry_off == -1) {
                 // add a new entry
-                LNEntry* entry= LN_info.next_free++;
+                LNEntry* entry= LN_info.next_free;
                 entry->cc= 1;
+                entry->max_size= 1;
+
                 *(LNData*)(entry + 1)= (LNData) {
                     .start_offset= row.pc,
                     .size= 1 // [[todo]] should this be the min instr size?
                 };
+
+                uint32_t entry_off= (uint8_t*)entry - LN_info.entries;
+                LN_info.header.lines[row.line]= entry_off;
+                LN_info.last_entry= entry_off;
+
+                LN_info.next_free+= sizeof(LNEntry) + sizeof(LNData) * 1;
             } else {
                 // add another entry (>1) so we might have to move others
                 // around
                 LNEntry* entry= &LN_info.entries[entry_off];
-                uint32_t neighbour_size= 0;
+                LN_info.last_entry= entry_off;
+                uint32_t extra_size= 0;
                 if (entry->max_size < entry->cc + 1) {
                     // we have to take over the next line
-                    LNEntry* neighbour_entry= entry + 1;
+                    LNEntry* neighbour_entry= (LNEntry*)(((uint8_t*)(entry + 1)) + entry->max_size * 4);
+                    extra_size= neighbour_entry->max_size + 1;
                     uint32_t neighbour_line= -1;
 
                     for (size_t i= row.line; i <= LN_info.header.max_line; ++i) {
-                        if (LN_info.header.lines[i] == (uint64_t)neighbour_entry) {
+                        if (LN_info.header.lines[i] == (uint64_t)((uint8_t*)neighbour_entry - LN_info.entries)) {
                             neighbour_line= i;
                             break;
                         }
@@ -687,17 +741,18 @@ void on_new_row_header() {
 
                     if (neighbour_line == -1) assert(false);
 
-                    neighbour_size= 2 + 2 + 4 * neighbour_entry->cc;
+                    uint32_t neighbour_size= 2 + 2 + 4 * neighbour_entry->cc;
                     memcpy(LN_info.next_free, neighbour_entry, neighbour_size);
+                    LN_info.header.lines[neighbour_line]= LN_info.next_free - LN_info.entries;
                     LN_info.next_free+= neighbour_size;
                 }
 
+                entry->cc++;
                 ((LNData*)(entry + 1))[entry->cc - 1]= (LNData) {
                     .start_offset=row.pc,
                     .size= 1
                 };
-                entry->cc++;
-                entry->max_size+= neighbour_size;
+                entry->max_size+= extra_size;
             }
         }
     } else {
@@ -714,7 +769,9 @@ void on_new_row_header() {
             .size= 1
         };
 
-        LN_info.header.lines[row.line]= entry - LN_info.entries;
+        uint32_t entry_off= (uint8_t*)entry - LN_info.entries;
+        LN_info.header.lines[row.line]= entry_off;
+        LN_info.last_entry= entry_off;
 
         LN_info.next_free+= sizeof(LNEntry) + sizeof(LNData) * 1;
     }

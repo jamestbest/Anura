@@ -67,11 +67,13 @@ typedef struct LNHeader {
 typedef struct LNInfo {
     LNHeader header;
 
-    LNEntry* entries;
+    uint8_t* entries;
     uint8_t* next_free;
+    uint32_t last_entry;
     uint64_t max_size;
 } LNInfo;
 
-LNHeader create_header();
+void create_header();
+void print_header();
 
 #endif //SARUMAN_H
