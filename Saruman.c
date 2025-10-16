@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 const LC LC_ERR= {-1, -1};
 const ARange ARange_ERR= {-1, -1};
@@ -224,6 +225,15 @@ void peek_text_at_addr(uintptr_t addr, uint16_t amount) {
     putchar('\n');
 }
 
+MRow last_row= {0};
+MRow row= {0};
+
+void add_new_row_to_matrix() {
+    MRow_arr_add(&matrix, row);
+}
+
+// this is the default, overwritten if we are are using the header version
+void (*on_new_row)()= add_new_row_to_matrix;
 void new_row() {
     // 3. Append a row to the matrix using the current values of the state machine
     //   registers.
@@ -231,11 +241,13 @@ void new_row() {
     printf("MATRIX ROW line: %u  Col: %u  PC: %p  Discrim: %u\n",
         line, col, (void*)pc, discrim);
 
-    MRow_arr_add(&matrix, (MRow){
+    last_row= row;
+    row= (MRow){
         .line= line,
         .col= col,
         .pc= pc
-    });
+    };
+    if (on_new_row) on_new_row();
 
     // printf("Peek at PC: \n");
     // peek_text_at_addr(pc, 128);
@@ -454,6 +466,7 @@ int read_header(uint8_t* start, char* string_data) {
     }
 
     matrix= MRow_arr_create();
+    create_header();
     while (true) {
         DecodeRet res= decode_op(bc_start);
         bc_start+= res.bytes_read;
@@ -594,4 +607,115 @@ LC addr2line(uintptr_t addr) {
     }
 
     return LC_ERR;
+}
+
+void on_new_row_header();
+LNInfo LN_info;
+#define ASSUMED_LINE_COUNT 500
+LNHeader create_header() {
+    // we assume a lower bound of 500 lines to start (at worst we waste 1/2kb)
+    void* data= calloc(ASSUMED_LINE_COUNT, sizeof (uint32_t));
+    LN_info.header= (LNHeader) {
+        .data= data,
+        .lines= (uint32_t*)data + 1,
+        .max_line= ASSUMED_LINE_COUNT
+    };
+
+    // this is the next free slot in the data entries
+    //  the structure is 3 uint16_t's [[todo]] this could be ULEB but adding gets complicated
+    //  being the count, the start, and the size
+    LN_info.next_free= malloc(sizeof (uint16_t) * 3 * ASSUMED_LINE_COUNT);
+
+    // [[todo]] could store the free parts of what is essentially a heap
+    //  and fill them first. It is unlikely that there will be lots of gaps I'd wager
+
+    on_new_row= on_new_row_header;
+}
+
+void on_new_row_header() {
+    // we go through the line number program
+    // as we get new rows we check if they are contiguous (same line as last)
+    //  if they are we can just update the last data in the entry
+    //  if they are not then we either add a new entry, or a new data entry
+    if (row.line > LN_info.header.max_line) assert(false);
+
+    if (last_row.line != 0) {
+        if (last_row.line == row.line) {
+            // we are contiguous
+            uint32_t entry_off= LN_info.header.lines[row.line];
+
+            // if we're the same as the previous line then it should
+            //  already have an allocation area!
+            if (entry_off == 0) assert(false);
+
+            LNEntry* entry= &LN_info.entries[entry_off];
+            if (entry->cc == 0) assert(false);
+
+            LNData* child= &((LNData*)(entry + 1))[entry->cc - 1];
+            child->size= row.pc - child->start_offset;
+
+            printf("Consecutive row %u found and updated with new size\n", row.line);
+        } else {
+            // here we are not contigous
+            //  and so we either add a new entry
+            uint32_t entry_off= LN_info.header.lines[row.line];
+
+            if (entry_off == 0) {
+                // add a new entry
+                LNEntry* entry= LN_info.next_free++;
+                entry->cc= 1;
+                *(LNData*)(entry + 1)= (LNData) {
+                    .start_offset= row.pc,
+                    .size= 1 // [[todo]] should this be the min instr size?
+                };
+            } else {
+                // add another entry (>1) so we might have to move others
+                // around
+                LNEntry* entry= &LN_info.entries[entry_off];
+                uint32_t neighbour_size= 0;
+                if (entry->max_size < entry->cc + 1) {
+                    // we have to take over the next line
+                    LNEntry* neighbour_entry= entry + 1;
+                    uint32_t neighbour_line= -1;
+
+                    for (size_t i= row.line; i <= LN_info.header.max_line; ++i) {
+                        if (LN_info.header.lines[i] == (uint64_t)neighbour_entry) {
+                            neighbour_line= i;
+                            break;
+                        }
+                    }
+
+                    if (neighbour_line == -1) assert(false);
+
+                    neighbour_size= 2 + 2 + 4 * neighbour_entry->cc;
+                    memcpy(LN_info.next_free, neighbour_entry, neighbour_size);
+                    LN_info.next_free+= neighbour_size;
+                }
+
+                ((LNData*)(entry + 1))[entry->cc - 1]= (LNData) {
+                    .start_offset=row.pc,
+                    .size= 1
+                };
+                entry->cc++;
+                entry->max_size+= neighbour_size;
+            }
+        }
+    } else {
+        // this is a special case for the first row being added
+        //  we just find the line entry and add the default data
+        LNEntry* entry= LN_info.next_free;
+        *entry= (LNEntry) {
+            .cc= 1,
+            .max_size= 1
+        };
+
+        *(LNData*)(entry + 1)= (LNData) {
+            .start_offset= row.pc,
+            .size= 1
+        };
+
+        LN_info.header.lines[row.line]= entry - LN_info.entries;
+
+        LN_info.next_free+= sizeof(LNEntry) + sizeof(LNData) * 1;
+    }
 }

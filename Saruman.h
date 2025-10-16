@@ -33,4 +33,45 @@ extern const ARange ARange_ERR;
 LC addr2line(uintptr_t addr);
 ARange line2addr(uint32_t line);
 
+
+typedef struct LNData {
+    uint16_t start_offset;
+    uint16_t size;
+} LNData;
+
+typedef struct LNEntry {
+    uint16_t max_size;
+    uint16_t cc;
+} LNEntry;
+
+// LNEntry (2 + 2 + 4 * cc bytes)
+//  cc (2 bytes)
+//  max_size (2 bytes)
+//  LIST OF LNData
+//   (start (2 bytes), size (2 bytes)) (4 bytes)
+
+// The structure of the header is:
+//  - Max lines
+//  - Line information, which is at lines, and can be indexed by the line
+//    - a value of -1 means that there is no addresses for that line
+//    - a value means index of data i.e. start of header
+//  - Each valid line entry contains a LNEntry
+//    - most of the data within is stored as a ULEB128 that must be parsed
+typedef struct LNHeader {
+    uint8_t* data;
+
+    uint32_t max_line;
+    uint32_t* lines;
+} LNHeader;
+
+typedef struct LNInfo {
+    LNHeader header;
+
+    LNEntry* entries;
+    uint8_t* next_free;
+    uint64_t max_size;
+} LNInfo;
+
+LNHeader create_header();
+
 #endif //SARUMAN_H
