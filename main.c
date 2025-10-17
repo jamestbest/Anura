@@ -13,8 +13,10 @@
 #include <assert.h>
 #include "Array.h"
 #include "Sauron.h"
+#include "Saruman.h"
 
 int i=0;
+uintptr_t base;
 
 #define PCOND_X(cond) (cond ? 'X' : ' ')
 
@@ -350,11 +352,11 @@ int breakpoint_program() {
     res= ptrace(PTRACE_GETREGS, pid, &regs, &regs);
     hlog("Result of getting registers is %d\n", res);
 
-    place_bp(t5);
-    place_bp(t4);
-    place_bp(t3);
-    place_bp(t2);
-    place_bp(target);
+//    place_bp(t5);
+//    place_bp(t4);
+//    place_bp(t3);
+//    place_bp(t2);
+//    place_bp(target);
 
     char buff[40];
     struct iovec l;
@@ -386,11 +388,66 @@ int breakpoint_program() {
 
     hlog("i is : %d\n", value);
 
-    res= ptrace(PTRACE_CONT, pid, NULL, 0);
-    hlog("The result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
+//    res= ptrace(PTRACE_CONT, pid, NULL, 0);
+//    hlog("The result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
+
+    return 0;
+}
+
+int main(void) {
+    breakpoint_program();
+
+    FILE* elf= fopen("Anura", "r");
+    decode(elf);
+
+    // have to find the runtime address; for now just a quick fetch from the /proc/<pid>/maps file
+    char buff[100];
+    sprintf(buff, "/proc/%d/maps", t_pid);
+    FILE* f= fopen(buff, "r");
+
+    if (!f) perror("Unable to open /proc/<pid>/maps");
+
+    char fbuff[500];
+    fread(fbuff, sizeof(char), sizeof(fbuff), f);
+    sscanf(fbuff, "%lx", &base);
+
+    printf("The base is %lx\n", base);
+
+//    ptrace(PTRACE_CONT, t_pid, NULL, 0);
 
     while (true) {
-        ret = waitpid(pid, &status, 0);
+        printf("cmd: ");
+        char buff[100];
+        int line= -1;
+
+        if (!fgets(buff, sizeof(buff), stdin)) break;
+
+        sscanf(buff, "set %d", &line);
+        if (line == -1) {
+            printf("Ending loop\n");
+            break;
+        }
+        uint64_t addr= line2startaddr(line);
+        if (addr == -1) {
+            printf("There is no code on line %d\n", line);
+            continue;
+        }
+        long long res= place_bp((void*)addr + base);
+
+        if (res) printf("Failed to place bp at %d\n", line);
+        else printf("Placed bp at line %d on addr 0x%p\n", line, (void*)addr);
+    }
+
+
+
+    long res;
+    int ret;
+    int status;
+
+    ptrace(PTRACE_CONT, t_pid, NULL, 0);
+
+    while (true) {
+        ret = waitpid(t_pid, &status, 0);
         if (ret == -1) {
             perror("waitpid");
             break;
@@ -398,18 +455,18 @@ int breakpoint_program() {
         if (WIFSTOPPED(status)) {
             hlog("Target stopped by signal %d\n", WSTOPSIG(status));
 
-            res= ptrace(PTRACE_PEEKDATA, pid, &i, 0);
-            value = (int)(res & 0xffffffffUL);
+            res= ptrace(PTRACE_PEEKDATA, t_pid, &i, 0);
+            long value = (int)(res & 0xffffffffUL);
             hlog("i is : %d\n", value);
 
-            long long r6= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[6]));
+            long long r6= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[6]));
 
-            long long rip= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, regs.rip));
+            long long rip= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, regs.rip));
             if (!(r6 & 0b1111)) {
                 // if we're not hardware i.e. software then we are one ahead
                 rip--;
             }
-            hlog("The tracee stopped via breakpoint at %lld\n", rip);
+            hlog("The tracee stopped via breakpoint at %p which is in line %u\n", rip, addr2line(rip - base).line);
 
             char buff[40];
             struct iovec l;
@@ -428,43 +485,36 @@ int breakpoint_program() {
             }
             putchar('\n');
 
-            res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[7]));
+            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[7]));
             print_dr7(res);
-            res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[6]));
+            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[6]));
             print_dr6(res);
-            res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[0]));
-            hlog("DR0 is : %lld\n", res);
-            res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[1]));
-            hlog("DR1 is : %lld\n", res);
-            res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[2]));
-            hlog("DR2 is : %lld\n", res);
-            res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[3]));
-            hlog("DR3 is : %lld\n", res);
+//            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[0]));
+//            hlog("DR0 is : %lld\n", res);
+//            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[1]));
+//            hlog("DR1 is : %lld\n", res);
+//            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[2]));
+//            hlog("DR2 is : %lld\n", res);
+//            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[3]));
+//            hlog("DR3 is : %lld\n", res);
 
             BPInfo* bp= BPInfo_arr_search_ie(&bps, (void*)rip);
-            hlog("Bp triggered is a %s breakpoint at address %llx\n", bp->type == BP_SOFTWARE ? "SOFTWARE" : "HARDWARE");
+            hlog("Bp triggered is a %s breakpoint at address %p (%u)\n", bp->type == BP_SOFTWARE ? "SOFTWARE" : "HARDWARE", (void*)rip, addr2line(rip - base).line);
 
             // clear R6 for the next
             r6= 1 << 16 | 1 << 11; // Enable RTM & BLD (19-4 Vol. 3B)
             ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[6]), r6);
 
-            ptrace(PTRACE_CONT, pid, NULL, 0);
+            ptrace(PTRACE_CONT, t_pid, NULL, 0);
         } else if (WIFEXITED(status)) {
             hlog("Target exited with %d\n", WEXITSTATUS(status));
             break;
         }
     }
 
-    return 0;
-}
 
-int main(void) {
-    FILE* elf= fopen("Anura", "r");
-    decode(elf);
+//    return 0;
 
-    return 0;
-
-    breakpoint_program();
 
     return 0;
 }

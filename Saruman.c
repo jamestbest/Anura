@@ -612,7 +612,7 @@ LC addr2line(uintptr_t addr) {
 
 void on_new_row_header();
 LNInfo LN_info;
-#define ASSUMED_LINE_COUNT 500
+#define ASSUMED_LINE_COUNT 600 // [[todo]] THIS DOES NOT GROW!!!
 void create_header() {
     // we assume a lower bound of 500 lines to start (at worst we waste 1/2kb)
     void* data= calloc(ASSUMED_LINE_COUNT, sizeof (uint32_t));
@@ -668,7 +668,21 @@ void print_header() {
     }
 }
 
+uint64_t line2startaddr(uint32_t l) {
+    if (l > LN_info.header.max_line) return -1;
+
+    uint32_t off= LN_info.header.lines[l];
+    if (off == -1) return -1;
+
+    LNEntry* entry= (LNEntry*)&LN_info.entries[off];
+    LNData* data= (LNData*)entry + 1; // we only need the first instance as address is increasing from the LN program
+
+    return data->start_offset;
+}
+
 void on_new_row_header() {
+    add_new_row_to_matrix(); // [[todo]] TEMP!
+
     // we go through the line number program
     // as we get new rows we check if they are contiguous (same line as last)
     //  if they are we can just update the last data in the entry
