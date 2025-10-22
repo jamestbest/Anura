@@ -612,7 +612,7 @@ LC addr2line(uintptr_t addr) {
 
 void on_new_row_header();
 LNInfo LN_info;
-#define ASSUMED_LINE_COUNT 600 // [[todo]] THIS DOES NOT GROW!!!
+#define ASSUMED_LINE_COUNT 1000 // [[todo]] THIS DOES NOT GROW!!!
 void create_header() {
     // we assume a lower bound of 500 lines to start (at worst we waste 1/2kb)
     void* data= calloc(ASSUMED_LINE_COUNT, sizeof (uint32_t));
@@ -746,7 +746,7 @@ void on_new_row_header() {
                     extra_size= neighbour_entry->max_size + 1;
                     uint32_t neighbour_line= -1;
 
-                    for (size_t i= row.line; i <= LN_info.header.max_line; ++i) {
+                    for (size_t i= 0; i <= LN_info.header.max_line; ++i) {
                         if (LN_info.header.lines[i] == (uint64_t)((uint8_t*)neighbour_entry - LN_info.entries)) {
                             neighbour_line= i;
                             break;
