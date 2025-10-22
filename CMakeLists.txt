@@ -8,5 +8,18 @@ add_executable(Anura main.c Array.c
         Sauron.c
         Sauron.h
         Saruman.c
-        Saruman.h)
+        Saruman.h
+        Palantir.c
+        Palantir.h
+        QueueB.c
+        QueueB.h
+        TargetOS/Linux.c
+        TargetOS/Linux.h
+        TargetArch/x64.c
+        TargetArch/x64.h)
+
+add_compile_options(-pthread)
+find_package(Threads REQUIRED)
+target_link_libraries(Anura PRIVATE Threads::Threads)
+
 target_compile_options(Anura PUBLIC -g)
