@@ -20,6 +20,20 @@ uintptr_t base;
 
 #define PCOND_X(cond) (cond ? 'X' : ' ')
 
+const char* const RW_MAP[4]= {
+    [0b00]= "BRK INST",
+    [0b01]= "BRK WRITES",
+    [0b10]= "BRK IO",
+    [0b11]= "BRK RW NO INST FETCH"
+};
+
+const unsigned int LEN_MAP[4]= {
+    [0b00]= 1,
+    [0b01]= 2,
+    [0b10]= 8,
+    [0b11]= 4
+};
+
 void hlog(const char* message, ...);
 
 void print_bp_status(long long r7, unsigned int reg, const char* prefix) {
@@ -31,27 +45,14 @@ void print_bp_status(long long r7, unsigned int reg, const char* prefix) {
     unsigned int rw = ((r7 >> 16) >> offset) & 0b11;
     unsigned int len= ((r7 >> 18) >> offset) & 0b11;
 
-    const char* rw_map[4]= {
-            [0b00]= "BRK INST",
-            [0b01]= "BRK WRITES",
-            [0b10]= "BRK IO",
-            [0b11]= "BRK RW NO INST FETCH"
-    };
-    const unsigned int len_map[4]= {
-            [0b00]= 1,
-            [0b01]= 2,
-            [0b10]= 8,
-            [0b11]= 4
-    };
-
     printf(
         "%sDR%u: Local --%c-- Global --%c-- %s %u byte(s)\n",
         prefix,
         reg,
         l_active ? 'X' : ' ',
         g_active ? 'X' : ' ',
-        rw_map[rw],
-        len_map[len]
+        RW_MAP[rw],
+        LEN_MAP[len]
     );
 }
 
@@ -100,8 +101,22 @@ void print_dr6(long long reg) {
 
 typedef enum BP_TYPE {
     BP_HARDWARE,
-    BP_SOFTWARE
+    BP_SOFTWARE,
+
+    BP_SOURCE_SINGLE_STEP_TRAP,
+
+    BP_TYPE_COUNT
 } BP_TYPE;
+
+const char* const BP_TYPE_STRS[BP_TYPE_COUNT]= {
+    [BP_HARDWARE]= "HARDWARE",
+    [BP_SOFTWARE]= "SOFTWARE",
+    [BP_SOURCE_SINGLE_STEP_TRAP]= "SINGLE STEP TRAP"
+};
+
+int BP_type_is_user(BP_TYPE type) {
+    return type == BP_HARDWARE || type == BP_SOFTWARE;
+}
 
 #define SW_INT_TYPE (unsigned char)
 #define SW_INT_CODE 0xCC
@@ -109,7 +124,6 @@ _Static_assert(SW_INT_TYPE SW_INT_CODE == SW_INT_CODE);
 
 typedef struct BPInfo {
     BP_TYPE type;
-    void* address;
 
     union {
         // we could just save the contents of the word, but there may be another bp or code having been changed in between,
@@ -126,14 +140,36 @@ int cmp_addr(void* bpa, void* bpb) {
 }
 
 ARRAY_PROTO(BPInfo, BPInfo)
-ARRAY_ADD_CMP(BPInfo, BPInfo, cmp_addr, address)
+ARRAY_ADD(BPInfo, BPInfo)
 
-BPInfoArray bps;
+//BPInfoArray bps;
+
+typedef struct BPAddressInfo {
+    void* address;
+
+    BPInfoArray bps;
+} BPAddressInfo;
+
+ARRAY_PROTO(BPAddressInfo, BPAddressInfo)
+ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, cmp_addr, address)
+
+BPAddressInfoArray bp_info;
+
+BPAddressInfo* get_or_add_bp_address_info(void* address) {
+    BPAddressInfo* info= BPAddressInfo_arr_search_ie(&bp_info, address);
+    if (info) return info;
+
+    BPAddressInfo* addr_info= BPAddressInfo_arr_add_i(&bp_info);
+    addr_info->address= address;
+    addr_info->bps= BPInfo_arr_construct(1);
+
+    return addr_info;
+}
 
 pid_t t_pid;
 long long place_bp(void* address) {
     long long r7= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[7]));
-
+    
     bool bp_used[4]= {0};
     unsigned int free_bp= -1;
     for (int j = 0; j < 4; ++j) {
@@ -189,14 +225,11 @@ long long place_bp(void* address) {
             (int)shadow
         );
 
-        BPInfo_arr_add(
-            &bps,
-            (BPInfo){
-                .type= BP_SOFTWARE,
-                .address= address,
-                .data.shadow= shadow
-            }
-        );
+        BPAddressInfo* addr_info= get_or_add_bp_address_info(address);
+        BPInfo_arr_add(&addr_info->bps, (BPInfo){
+            .type= BP_SOFTWARE,
+            .data.shadow= shadow
+        });
 
         return 0;
     }
@@ -211,14 +244,11 @@ long long place_bp(void* address) {
 
     res= ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[free_bp]), (long long)address);
 
-    BPInfo_arr_add(
-        &bps,
-        (BPInfo) {
-            .type= BP_HARDWARE,
-            .address= address,
-            .data.bp= free_bp
-        }
-    );
+    BPAddressInfo* addr_info= get_or_add_bp_address_info(address);
+    BPInfo_arr_add(&addr_info->bps, (BPInfo) {
+        .type= BP_HARDWARE,
+        .data.bp= free_bp
+    });
 
     hlog("Created HARDWARE bp %d at address %p\n", free_bp, address);
 
@@ -303,6 +333,7 @@ int target(bool second) {
 
 #define INT3 (0xCC)
 #include <sys/uio.h>
+#include <pthread.h>
 
 ssize_t process_vm_readv(pid_t pid,
                          const struct iovec *local_iov,
@@ -320,50 +351,62 @@ ssize_t process_vm_writev(pid_t pid,
 int breakpoint_program() {
     hlog("Hello, World!\n");
 
-    bps= BPInfo_arr_construct(5);
+    bp_info= BPAddressInfo_arr_construct(4);
 
     pid_t pid= fork();
+//    execv()
 
     if (pid == 0) {
+        raise(SIGSTOP);
         target(false);
         return 0;
     }
 
     t_pid= pid;
 
-    long res= ptrace(PTRACE_ATTACH, pid, 0, 0);
-    hlog("The result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
+    printf("Set the t_pid to %d\n", pid);
 
-    int status;
-    int ret = waitpid(pid, &status, 0);
-    hlog("waitpid returned %d, status: 0x%x\n", ret, status);
+    return 0;
+}
 
-    if (!WIFSTOPPED(status)) {
-        perror("target did not stop as expected\n");
+void print_breakpoints() {
+    printf("-----BREAKPOINTS-----\n");
+    printf("There are %zu locations with breakpoints\n", bp_info.pos);
+
+    for (int j = 0; j < bp_info.pos; ++j) {
+        BPAddressInfo* addr_info= BPAddressInfo_arr_ptr(&bp_info, j);
+
+        printf("  - Addr: %p contains %zu breakpoint(s): \n", addr_info->address, addr_info->bps.pos);
+
+        for (int k = 0; k < addr_info->bps.pos; ++k) {
+            BPInfo* bp= BPInfo_arr_ptr(&addr_info->bps, k);
+
+            printf("    + BP of Type %s with data ", BP_TYPE_STRS[bp->type]);
+
+            switch (bp->type) {
+                case BP_HARDWARE:
+                    printf("BP No. %u", bp->data.bp);
+                    break;
+                case BP_SOFTWARE:
+                    printf("SHADOW 0x%x", bp->data.shadow);
+                    break;
+                case BP_SOURCE_SINGLE_STEP_TRAP:
+                    printf("No data");
+                    break;
+            }
+
+            printf("\n");
+        }
     }
+}
 
-    res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[7]));
-    print_dr7(res);
-    print_dr_status(res);
-    res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[6]));
-    print_dr6(res);
-
-    struct user regs;
-    res= ptrace(PTRACE_GETREGS, pid, &regs, &regs);
-    hlog("Result of getting registers is %d\n", res);
-
-//    place_bp(t5);
-//    place_bp(t4);
-//    place_bp(t3);
-//    place_bp(t2);
-//    place_bp(target);
-
+int read_test(void* loc) {
     char buff[40];
     struct iovec l;
     l.iov_base= buff;
     l.iov_len= sizeof (buff);
     struct iovec r;
-    r.iov_base= (void*)t2;
+    r.iov_base= (void*)loc;
     r.iov_len= sizeof (buff);
     ssize_t read= process_vm_readv(t_pid, &l, 1, &r, 1, 0);
     if (read != sizeof (buff)) {
@@ -375,30 +418,19 @@ int breakpoint_program() {
     }
     putchar('\n');
 
-
-    res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[7]));
-    print_dr7(res);
-    res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[6]));
-    print_dr6(res);
-    res= ptrace(PTRACE_PEEKUSER, pid, offsetof(struct user, u_debugreg[0]));
-    hlog("DR0 is : %lld\n", res);
-
-    res= ptrace(PTRACE_PEEKDATA, pid, &i, 0);
-    int value = (int)(res & 0xffffffffUL);
-
-    hlog("i is : %d\n", value);
-
-//    res= ptrace(PTRACE_CONT, pid, NULL, 0);
-//    hlog("The result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
-
     return 0;
 }
 
-int main(void) {
-    breakpoint_program();
+#define ACTION_CONTINUE 1
+#define ACTION_BREAKPOINT_SET 2
+int action= 0;
+void* bp_pos= 0;
+int bp_line= 0;
 
-    FILE* elf= fopen("Anura", "r");
-    decode(elf);
+void* control_target(void* a) {
+    long res;
+    int ret;
+    int status;
 
     // have to find the runtime address; for now just a quick fetch from the /proc/<pid>/maps file
     char buff[100];
@@ -413,7 +445,126 @@ int main(void) {
 
     printf("The base is %lx\n", base);
 
-//    ptrace(PTRACE_CONT, t_pid, NULL, 0);
+    res= ptrace(PTRACE_ATTACH, t_pid, 0, 0);
+    hlog("The result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
+
+    ret = waitpid(t_pid, &status, 0);
+    if (!WIFSTOPPED(status)) {
+        fprintf(stderr, "Tracee did not stop\n");
+    }
+
+    ptrace(PTRACE_CONT, t_pid, NULL, 0);
+
+    while (true) {
+        ret = waitpid(t_pid, &status, __WALL);
+        if (ret == -1) {
+            perror("waitpid");
+            break;
+        }
+
+        res= ptrace(PTRACE_PEEKDATA, t_pid, &i, 0);
+        long value = (int)(res & 0xffffffffUL);
+        hlog("i is : %d\n", value);
+        printf("err: %ld as %s with t_pid %d\n", res, strerror(errno), t_pid);
+
+        long long r6= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[6]));
+
+        long long rip= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, regs.rip));
+        if (!(r6 & 0b1111)) {
+            // if we're not hardware i.e. software then we are one ahead
+            rip--;
+        }
+        hlog("The tracee stopped via breakpoint at %p which is in line %u\n", rip, addr2line(rip - base).line);
+
+        res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[7]));
+        print_dr7(res);
+        res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[6]));
+        print_dr6(res);
+
+        BPAddressInfo* addr_info= BPAddressInfo_arr_search_ie(&bp_info, (void*)rip);
+        if (!addr_info) {
+            printf("The target was stopped at a non-breakpoint location %p\n", (void*)rip);
+        } else {
+            BPInfo* bp= BPInfo_arr_ptr(&addr_info->bps, 0);
+            hlog("Bp triggered is a %s breakpoint at address %p (%u)\n", bp->type == BP_SOFTWARE ? "SOFTWARE" : "HARDWARE", (void*)rip, addr2line(rip - base).line);
+        }
+
+        // clear R6 for the next
+        r6= 1 << 16 | 1 << 11; // Enable RTM & BLD (19-4 Vol. 3B)
+        ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[6]), r6);
+
+
+        if (WIFSTOPPED(status)) {
+            hlog("Target stopped by signal %d\n", WSTOPSIG(status));
+
+            int c=0;
+            while (true) {
+                if (c++ == 0) {
+                    printf("Still waiting\n");
+                }
+                if (action == ACTION_CONTINUE) {
+                    ptrace(PTRACE_CONT, t_pid, NULL, 0);
+                    action= 0;
+                    break;
+                }
+                if (action == ACTION_BREAKPOINT_SET) {
+                    long long res= place_bp((void*)bp_pos + base);
+                    if (res) printf("Failed to place bp at %d with errno %lld of %s\n", bp_line, res, strerror(res));
+                    else printf("Placed bp at line %d on addr 0x%p\n", bp_line, (void*)bp_pos);
+                    action= 0;
+                    continue;
+                }
+            }
+
+
+//            if (WSTOPSIG(status) == SIGSTOP) {
+//                ptrace(PTRACE_CONT, t_pid, NULL, 0);
+//                continue;
+//            }
+
+        } else if (WIFEXITED(status)) {
+            hlog("Target exited with %d\n", WEXITSTATUS(status));
+            break;
+        }
+    }
+
+    return 0;
+}
+
+/*                 UI HANDLING
+ * There are ui actions that we want to allow
+ *    E.g. set breakpoint, read value, show stack trace etc.
+ * These require in linux the process being in a PTRACE_stopped mode
+ *
+ * So
+ *  UI trigger_bp_set -> trigger_stop -> CTRL CATCH SIGSTOP -> CTRL bp_set -> CTRL RESUME
+ * The UI thread may need to trigger some kind of stop for the OS target,
+ *  and so there is a trigger_bp_set which does this
+ *  it also queues an action of bp_set
+ * The CTRL thread catches this SIGSTOP, it will check that it was internal (storing generative SIGSTOPs)
+ * The CTRL thread can then do any/all the actions in the queue that are available, one will be the bp_set
+ * The CTRL thread can then CONT the execution
+ *
+ * The action queue should be multithreaded safe
+ * Same for the SIGSTOP generative queue
+ * Just pop the top SIGSTOP generator off when verifying, we can't know which of the signals is external, just that
+ *  ones at the end are extra
+ * INTERNAL_SIGSTOP -> INTERNAL_SIGSTOP -> EXTERNAL_SIGSTOP -> INTERNAL_SIGSTOP
+ *  queue: SIGSTOP, SIGSTOP, SIGSTOP
+ * handling:
+ *  receive stop, pop queue -> receive stop, pop queue -> receive stop, pop queue -> receive stop, NOTHING TO POP
+ * any actions are all delt with at each SIGSTOP, even if bp_add, bp_add placed two SIGSTOPs it shouldn't matter
+ * as they'll both be in the generator list.
+ */
+
+int main(void) {
+    FILE* elf= fopen("Anura", "r");
+    decode(elf);
+
+    breakpoint_program();
+
+    pthread_t tui_thread;
+    pthread_create(&tui_thread, NULL, control_target, NULL);
 
     while (true) {
         printf("cmd: ");
@@ -422,99 +573,26 @@ int main(void) {
 
         if (!fgets(buff, sizeof(buff), stdin)) break;
 
-        sscanf(buff, "set %d", &line);
-        if (line == -1) {
-            printf("Ending loop\n");
-            break;
-        }
-        uint64_t addr= line2startaddr(line);
-        if (addr == -1) {
-            printf("There is no code on line %d\n", line);
-            continue;
-        }
-        long long res= place_bp((void*)addr + base);
-
-        if (res) printf("Failed to place bp at %d\n", line);
-        else printf("Placed bp at line %d on addr 0x%p\n", line, (void*)addr);
-    }
-
-
-
-    long res;
-    int ret;
-    int status;
-
-    ptrace(PTRACE_CONT, t_pid, NULL, 0);
-
-    while (true) {
-        ret = waitpid(t_pid, &status, 0);
-        if (ret == -1) {
-            perror("waitpid");
-            break;
-        }
-        if (WIFSTOPPED(status)) {
-            hlog("Target stopped by signal %d\n", WSTOPSIG(status));
-
-            res= ptrace(PTRACE_PEEKDATA, t_pid, &i, 0);
-            long value = (int)(res & 0xffffffffUL);
-            hlog("i is : %d\n", value);
-
-            long long r6= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[6]));
-
-            long long rip= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, regs.rip));
-            if (!(r6 & 0b1111)) {
-                // if we're not hardware i.e. software then we are one ahead
-                rip--;
+        if (strncmp(buff, "set", sizeof("set") - 1) == 0) {
+            sscanf(buff, "set %d", &line);
+            uint64_t addr= line2startaddr(line);
+            if (addr == -1) {
+                printf("There is no code on line %d\n", line);
+                continue;
             }
-            hlog("The tracee stopped via breakpoint at %p which is in line %u\n", rip, addr2line(rip - base).line);
-
-            char buff[40];
-            struct iovec l;
-            l.iov_base= buff;
-            l.iov_len= sizeof (buff);
-            struct iovec r;
-            r.iov_base= (void*)rip;
-            r.iov_len= sizeof (buff);
-            ssize_t read= process_vm_readv(t_pid, &l, 1, &r, 1, 0);
-            if (read != sizeof (buff)) {
-                perror("Cannot read vm readv\n");
-            }
-            hlog("Read %zu byte from target\n", read);
-            for (int j = 0; j < sizeof (buff); ++j) {
-                printf("%02hhX ", buff[j]);
-            }
-            putchar('\n');
-
-            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[7]));
-            print_dr7(res);
-            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[6]));
-            print_dr6(res);
-//            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[0]));
-//            hlog("DR0 is : %lld\n", res);
-//            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[1]));
-//            hlog("DR1 is : %lld\n", res);
-//            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[2]));
-//            hlog("DR2 is : %lld\n", res);
-//            res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[3]));
-//            hlog("DR3 is : %lld\n", res);
-
-            BPInfo* bp= BPInfo_arr_search_ie(&bps, (void*)rip);
-            hlog("Bp triggered is a %s breakpoint at address %p (%u)\n", bp->type == BP_SOFTWARE ? "SOFTWARE" : "HARDWARE", (void*)rip, addr2line(rip - base).line);
-
-            // clear R6 for the next
-            r6= 1 << 16 | 1 << 11; // Enable RTM & BLD (19-4 Vol. 3B)
-            ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[6]), r6);
-
-            ptrace(PTRACE_CONT, t_pid, NULL, 0);
-        } else if (WIFEXITED(status)) {
-            hlog("Target exited with %d\n", WEXITSTATUS(status));
-            break;
+            action= ACTION_BREAKPOINT_SET;
+            bp_line= line;
+            bp_pos= (void*)addr;
+        } else if (strncmp(buff, "cont", sizeof("cont") - 1) == 0) {
+            printf("Continuing process\n");
+            errno=0;
+            action= ACTION_CONTINUE;
+        } else {
+            printf("Unable to match command `%s`\n", buff);
         }
     }
 
-
-//    return 0;
-
+    print_breakpoints();
 
     return 0;
 }
