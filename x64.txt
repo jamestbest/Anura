@@ -48,7 +48,7 @@ ALIAS REX 1 byte= {
   0100 .w .r .x .b
 }
 
-// these bits have been writted in the high-low level, is this ok to assume?
+// these bits have been written in the high-low level, is this ok to assume?
 //  when reading new bytes we just read high bit as we get the whole byte at once
 // dot prefix? for accessing values within? or the alias listing?
 ALIAS VEX 1 byte= {
@@ -221,7 +221,7 @@ ALIAS MOV= {
 ALIAS regA= reg AS 000
 
 ALIAS ADC= {
-  0000 111 ow immM32= ADC regA, immM32
+  0000 111 ow immM32= ADC regA, immM32 # Add with carry to regA immM32 ## regA= regA + immM32 + carrybit
   1000 000 ow immM32= ADC reg, immM32
   1000 0011 mod 010 reg imm8= ADC reg, imm8
   0001 000 ow ModRM = ADC rm, reg
