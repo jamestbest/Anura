@@ -16,10 +16,18 @@ add_executable(Anura main.c Array.c
         TargetOS/Linux.c
         TargetOS/Linux.h
         TargetArch/x64.c
-        TargetArch/x64.h)
+        TargetArch/x64.h
+        main.h
+        IsildursBane.c
+        IsildursBane.h
+        Target/Linux-x64.c
+        Target/Linux-x64.h
+        Target.c
+        Target.h)
 
 add_compile_options(-pthread)
 find_package(Threads REQUIRED)
 target_link_libraries(Anura PRIVATE Threads::Threads)
 
 target_compile_options(Anura PUBLIC -g)
+add_executable(test Test.c)

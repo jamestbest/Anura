@@ -75,8 +75,19 @@ QueueBAll queueb_pop_all(QueueB* queue) {
     return res;
 }
 
+bool queueb_resize(QueueB* queue, size_t new_size) {
+    void* new_data= realloc(queue->data_arr, new_size);
+
+    if (!new_data) return false;
+
+    queue->data_arr= new_data;
+    queue->max_size= new_size;
+
+    return true;
+}
+
 QueueBRes queueb_pop(QueueB* queue) {
-    pthread_mutex_unlock(&queue->lock);
+    pthread_mutex_lock(&queue->lock);
 
     if (queue->pos == 0) {
         pthread_mutex_unlock(&queue->lock);

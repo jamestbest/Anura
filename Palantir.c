@@ -8,41 +8,90 @@
 
 #include "Palantir.h"
 
-typedef enum ACTION_GTYPE {
-    ACTION_GTYPE_BREAK_POINT,
-    ACTION_GTYPE_CONTROL_FLOW,
-} ACTION_GTYPE;
+#include "QueueB.h"
+#include "Saruman.h"
 
-typedef enum ACTION_TYPE {
-    ACTION_BP_ADD,
-    ACTION_BP_REMOVE,
-    ACTION_BP_LIST,
-
-    ACTION_CF_SINGLE_STEP,
-    ACTION_CF_STEP_OVER,
-    ACTION_CF_STEP_INFO,
-    ACTION_CF_CONTINUE
-} ACTION_TYPE;
-
-typedef union ACTION_DATA {
-    struct {
-        void* addr;
-    } BP_ADD;
-
-    struct {
-        void* addr;
-    } BP_REMOVE;
-
-    struct {
-
-    } BP_LIST;
-} ACTION_DATA;
-
-typedef struct Action {
-    ACTION_TYPE type;
-    ACTION_DATA data;
-} Action;
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include "main.h"
 
 int setup() {
 
+}
+
+/*                 UI HANDLING
+ * There are ui actions that we want to allow
+ *    E.g. set breakpoint, read value, show stack trace etc.
+ * These require in linux the process being in a PTRACE_stopped mode
+ *
+ * So
+ *  UI trigger_bp_set -> trigger_stop -> CTRL CATCH SIGSTOP -> CTRL bp_set -> CTRL RESUME
+ * The UI thread may need to trigger some kind of stop for the OS target,
+ *  and so there is a trigger_bp_set which does this
+ *  it also queues an action of bp_set
+ * The CTRL thread catches this SIGSTOP, it will check that it was internal (storing generative SIGSTOPs)
+ * The CTRL thread can then do any/all the actions in the queue that are available, one will be the bp_set
+ * The CTRL thread can then CONT the execution
+ *
+ * The action queue should be multithreaded safe
+ * Same for the SIGSTOP generative queue -- just a mutex protected count
+ * Just pop the top SIGSTOP generator off when verifying, we can't know which of the signals is external, just that
+ *  ones at the end are extra
+ * INTERNAL_SIGSTOP -> INTERNAL_SIGSTOP -> EXTERNAL_SIGSTOP -> INTERNAL_SIGSTOP
+ *  queue: SIGSTOP, SIGSTOP, SIGSTOP
+ * handling:
+ *  receive stop, pop queue -> receive stop, pop queue -> receive stop, pop queue -> receive stop, NOTHING TO POP
+ * any actions are all delt with at each SIGSTOP, even if bp_add, bp_add placed two SIGSTOPs it shouldn't matter
+ * as they'll both be in the generator list.
+ */
+
+int tui() {
+    while (true) {
+        printf("cmd: ");
+        char buff[100];
+        int line= -1;
+
+        if (!fgets(buff, sizeof(buff), stdin))
+            break;
+
+        if (strncmp(buff, "set", sizeof("set") - 1) == 0) {
+            sscanf(buff, "set %d", &line);
+            uint64_t addr= line2startaddr(line);
+            if (addr == -1) {
+                printf("There is no code on line %d\n", line);
+                continue;
+            }
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_BP_ADD,
+                    (ACTION_DATA){
+                        .BP_ADD= {
+                            .line= line,
+                            .addr= (void*)addr}}));
+        } else if (strncmp(buff, "cont", sizeof("cont") - 1) == 0) {
+            printf("Continuing process\n");
+            errno= 0;
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_CF_CONTINUE,
+                    (ACTION_DATA){.NO_DATA= 0}));
+        } else if (strncmp(buff, "exit", sizeof("exit") - 1) == 0) {
+            printf("Exiting process\n");
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_CF_EXIT,
+                    (ACTION_DATA){.NO_DATA= 0}));
+            break;
+        } else {
+            printf("Unable to match command `%s`\n", buff);
+        }
+    }
+
+    return 0;
 }
