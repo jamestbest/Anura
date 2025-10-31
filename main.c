@@ -138,13 +138,15 @@ pid_t launch_process(const char* path, const char* argv[]) {
     pid_t pid= fork();
 
     if (pid == 0) {
+        ptrace(PTRACE_TRACEME, getpid(), NULL, 0);
+
         // we're the sub proc
         int ret= execvp(path, argv);
         if (ret == -1) {
             printf("There was an error (%d: %s) writing over fork to create target program. Consider attaching.\n", errno, strerror(errno));
             return -1;
         }
-        printf("We are created;\n");
+        exit(0);
     }
     return pid;
 }
@@ -179,54 +181,6 @@ void hlog(const char* message, ...) {
     va_end(args);
 }
 
-void t2() {
-    tlog("I am in T2\n");
-}
-
-void t3() {
-    tlog("I am in T3\n");
-    t2();
-}
-
-void t4() {
-    tlog("I am in T4\n");
-    t3();
-    t2();
-}
-
-void t5() {
-    tlog("I am in T5\n");
-    t4();
-    t3();
-    t2();
-}
-
-int target_func(bool second) {
-    tlog("PID: %d\n", getpid());
-    tlog("I is at %p\n", &i);
-
-    i=0;
-
-    while (i < 3) {
-        i++;
-        tlog("I is: %d\n", i);
-        sleep(1);
-    }
-
-//    asm (
-//            "int3"
-//    );
-
-//    tlog("Target starting again after int3\n");
-
-    t5();
-
-    if (second) exit(0);
-    target_func(true);
-
-    return 0;
-}
-
 #define INT3 (0xCC)
 #include <sys/uio.h>
 #include <pthread.h>
@@ -258,13 +212,12 @@ int breakpoint_program(const char* program) {
     // pid_t pid= fork();
 //    execv()
 
-    if (pid == 0) {
-        ptrace(PTRACE_TRACEME, getpid(), NULL, 0);
-
-        // raise(SIGSTOP);
-        // target_func(false);
-        return 0;
-    }
+    // if (pid == 0) {
+    //
+    //     // raise(SIGSTOP);
+    //     // target_func(false);
+    //     return 0;
+    // }
 
     t_pid= pid;
     long long res= ptrace(PTRACE_ATTACH, t_pid, 0, 0);

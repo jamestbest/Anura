@@ -71,15 +71,21 @@ int tui() {
                     (ACTION_DATA){
                         .BP_ADD= {
                             .line= line,
-                            .addr= (void*)addr}}));
+                            .addr= (void*)addr
+                        }
+                    }
+                )
+            );
         } else if (strncmp(buff, "cont", sizeof("cont") - 1) == 0) {
-            printf("Continuing process\n");
+            printf("tui Continuing process\n");
             errno= 0;
             queueb_push_blocking(
                 &action_q,
                 create_action(
                     ACTION_CF_CONTINUE,
-                    (ACTION_DATA){.NO_DATA= 0}));
+                    (ACTION_DATA){.NO_DATA= 0}
+                )
+            );
         } else if (strncmp(buff, "exit", sizeof("exit") - 1) == 0) {
             printf("Exiting process\n");
             queueb_push_blocking(

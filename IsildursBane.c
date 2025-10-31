@@ -20,10 +20,14 @@ uintptr_t base;
 
 bool handle_action(Action* action) {
     switch (action->type) {
-        case ACTION_CF_CONTINUE:
+        case ACTION_CF_CONTINUE: {
             printf("Continuing process\n");
-            ptrace(PTRACE_CONT, t_pid, NULL, 0);
+            long long res= ptrace(PTRACE_CONT, t_pid, NULL, 0);
+            if (res) printf("Failed to continue process errno %lld of %s\n", res, strerror(res));
+            else printf("Continued process\n");
+
             break;
+        }
 
         case ACTION_BP_ADD: {
             printf("GETTING DAA IN BP ADD\n");
@@ -67,9 +71,12 @@ void* control_target(void* a) {
         fprintf(stderr, "Tracee did not stop\n");
     }
 
-    ptrace(PTRACE_CONT, t_pid, NULL, 0);
+    // ptrace(PTRACE_CONT, t_pid, NULL, 0);
+
+    printf("Sent first cont\n");
 
     while (true) {
+        printf("Starting to wait\n");
         ret = waitpid(t_pid, &status, __WALL);
         if (ret == -1) {
             perror("waitpid");
@@ -122,9 +129,9 @@ void* control_target(void* a) {
                     printf("Still waiting\n");
                 }
 
-                QueueBRes q_status;
-                while (q_status= queueb_pop(&action_q), q_status.succ) {
-                    Action* action= q_status.data;
+                void* q_status;
+                while (q_status= queueb_pop_blocking(&action_q), q_status) {
+                    Action* action= q_status;
 
                     if (!handle_action(action)) goto end;
                 }
