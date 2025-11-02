@@ -5,10 +5,13 @@
 #ifndef TARGET_H
 #define TARGET_H
 
-long long place_bp(void* address);
+#include <stdint.h>
+
+typedef uint64_t PROCESS_ID;
 
 typedef struct Target {
     long long (*place_bp)(void* addr);
+    PROCESS_ID (*target_launch_process)(const char* path, uint32_t argc, const char* argv[]);
 } Target;
 
 typedef enum TARGETS {
