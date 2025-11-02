@@ -5,6 +5,7 @@
 #include "Linux-x64.h"
 
 #include "../main.h"
+#include "../TargetOS/Linux.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -80,5 +81,7 @@ long long place_bp(void* address) {
 }
 
 int linux_x64_init_target(Target* target) {
+    linux_init_target(target);
+
     target->place_bp= place_bp;
 }

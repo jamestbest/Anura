@@ -134,37 +134,14 @@ BPAddressInfo* get_or_add_bp_address_info(void* address) {
     return addr_info;
 }
 
-pid_t launch_process(const char* path, const char* argv[]) {
-    pid_t pid= fork();
 
-    if (pid == 0) {
-        ptrace(PTRACE_TRACEME, getpid(), NULL, 0);
-
-        // we're the sub proc
-        int ret= execvp(path, argv);
-        if (ret == -1) {
-            printf("There was an error (%d: %s) writing over fork to create target program. Consider attaching.\n", errno, strerror(errno));
-            return -1;
-        }
-        exit(0);
-    }
-    return pid;
-}
-
-pid_t t_pid;
+PROCESS_ID t_pid;
 
 void vlog(bool is_t, const char* message, va_list args) {
     printf("LOG(%s): ", is_t ? "TARGET" : " HOST ");
     vprintf(message, args);
 
     fflush(stdout);
-}
-
-void log(bool is_t, const char* message, ...) {
-    va_list args;
-    va_start(args, message);
-    vlog(is_t, message, args);
-    va_end(args);
 }
 
 void tlog(const char* message, ...) {
@@ -208,23 +185,15 @@ int breakpoint_program(const char* program) {
         "test",
         NULL
     };
-    pid_t pid= launch_process(program, args);
-    // pid_t pid= fork();
-//    execv()
 
-    // if (pid == 0) {
-    //
-    //     // raise(SIGSTOP);
-    //     // target_func(false);
-    //     return 0;
-    // }
+    PROCESS_ID pid= target.target_launch_process(program, sizeof(args), args);
 
     t_pid= pid;
     long long res= ptrace(PTRACE_ATTACH, t_pid, 0, 0);
     hlog("The attach result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
 
 
-    printf("Set the t_pid to %d\n", pid);
+    printf("Set the t_pid to %lu\n", pid);
 
     return 0;
 }

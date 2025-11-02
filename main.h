@@ -5,13 +5,14 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+#include "Array.h"
 #include "QueueB.h"
+#include "Target.h"
 
 #include <stdint.h>
-#include "Array.h"
 
 extern QueueB action_q;
-extern pid_t t_pid;
+extern PROCESS_ID t_pid;
 
 typedef enum BP_TYPE {
     BP_HARDWARE,
@@ -91,7 +92,6 @@ typedef struct Action {
 Action* create_action(ACTION_TYPE type, ACTION_DATA data);
 
 void vlog(bool is_t, const char* message, va_list args);
-void log(bool is_t, const char* message, ...);
 void tlog(const char* message, ...);
 void hlog(const char* message, ...);
 int breakpoint_program(const char* program);
