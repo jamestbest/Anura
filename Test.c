@@ -70,9 +70,6 @@ int target_func(bool second) {
 }
 
 int main(int argc, char** argv) {
-    raise(SIGSTOP);
-    printf("Hello world! I received %d args\n", argc);
-
     target_func(false);
     return 0;
 }
