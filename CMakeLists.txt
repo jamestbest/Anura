@@ -23,7 +23,9 @@ add_executable(Anura main.c Array.c
         Target/Linux-x64.c
         Target/Linux-x64.h
         Target.c
-        Target.h)
+        Target.h
+        Tolkien.c
+        Tolkien.h)
 
 add_compile_options(-pthread)
 find_package(Threads REQUIRED)
