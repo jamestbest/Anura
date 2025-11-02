@@ -12,6 +12,7 @@ typedef uint64_t PROCESS_ID;
 typedef struct Target {
     long long (*place_bp)(void* addr);
     PROCESS_ID (*target_launch_process)(const char* path, uint32_t argc, const char* argv[]);
+    long long (*target_attach_process)(PROCESS_ID pid);
 } Target;
 
 typedef enum TARGETS {

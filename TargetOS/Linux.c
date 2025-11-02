@@ -10,7 +10,7 @@
 #include <sys/ptrace.h>
 #include <unistd.h>
 
-pid_t launch_process(const char* path, uint32_t argc, const char* argv[]) {
+PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
     pid_t pid= fork();
 
     if (pid == 0) {
@@ -21,9 +21,15 @@ pid_t launch_process(const char* path, uint32_t argc, const char* argv[]) {
 
         exit(0);
     }
+
     return pid;
+}
+
+long long attach_process(PROCESS_ID pid) {
+    return ptrace(PTRACE_ATTACH, pid, 0, 0);
 }
 
 void linux_init_target(Target* target) {
     target->target_launch_process= launch_process;
+    target->target_attach_process= attach_process;
 }

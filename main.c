@@ -9,16 +9,12 @@
 #include "Target.h"
 
 #include <assert.h>
-#include <elf.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/ptrace.h>
-#include <sys/user.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 int i=0;
@@ -159,7 +155,6 @@ void hlog(const char* message, ...) {
 }
 
 #define INT3 (0xCC)
-#include <sys/uio.h>
 #include <pthread.h>
 
 ssize_t process_vm_readv(pid_t pid,
@@ -187,13 +182,11 @@ int breakpoint_program(const char* program) {
     };
 
     PROCESS_ID pid= target.target_launch_process(program, sizeof(args), args);
-
     t_pid= pid;
-    long long res= ptrace(PTRACE_ATTACH, t_pid, 0, 0);
+
+    long long res= target.target_attach_process(t_pid);
     hlog("The attach result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
-
-
-    printf("Set the t_pid to %lu\n", pid);
+    printf("Set the t_pid to %llu\n", pid);
 
     return 0;
 }
@@ -229,41 +222,28 @@ void print_breakpoints() {
     }
 }
 
-int read_test(void* loc) {
-    char buff[40];
-    struct iovec l;
-    l.iov_base= buff;
-    l.iov_len= sizeof (buff);
-    struct iovec r;
-    r.iov_base= (void*)loc;
-    r.iov_len= sizeof (buff);
-    ssize_t read= process_vm_readv(t_pid, &l, 1, &r, 1, 0);
-    if (read != sizeof (buff)) {
-        perror("Cannot read vm readv\n");
-    }
-    hlog("Read %zu byte from target\n", read);
-    for (int j = 0; j < sizeof (buff); ++j) {
-        printf("%02hhX ", buff[j]);
-    }
-    putchar('\n');
-
-    return 0;
-}
-
-// #define ACTION_CONTINUE 1
-// #define ACTION_BREAKPOINT_SET 2
-// #define ACTION_EXIT 3
-
-typedef enum ACTIONS {
-    ACTION_NONE,
-
-    ACTION_CONTINUE,
-    ACTION_BREAKPOINT_SET,
-    ACTION_EXIT,
-} ACTIONS;
+// int read_test(void* loc) {
+//     char buff[40];
+//     struct iovec l;
+//     l.iov_base= buff;
+//     l.iov_len= sizeof (buff);
+//     struct iovec r;
+//     r.iov_base= (void*)loc;
+//     r.iov_len= sizeof (buff);
+//     ssize_t read= process_vm_readv(t_pid, &l, 1, &r, 1, 0);
+//     if (read != sizeof (buff)) {
+//         perror("Cannot read vm readv\n");
+//     }
+//     hlog("Read %zu byte from target\n", read);
+//     for (int j = 0; j < sizeof (buff); ++j) {
+//         printf("%02hhX ", buff[j]);
+//     }
+//     putchar('\n');
+//
+//     return 0;
+// }
 
 QueueB action_q;
-ACTIONS action= ACTION_NONE;
 void* bp_pos= 0;
 int bp_line= 0;
 
