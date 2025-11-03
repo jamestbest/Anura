@@ -80,8 +80,10 @@ long long place_bp(void* address) {
     return res;
 }
 
-int linux_x64_init_target(Target* target) {
-    linux_init_target(target);
+int linux_x64_init_target(Target* t) {
+    linux_init_target(t);
 
-    target->place_bp= place_bp;
+    t->place_bp= place_bp;
+
+    return 0;
 }

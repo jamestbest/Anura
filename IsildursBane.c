@@ -59,7 +59,7 @@ void* control_target(void* a) {
     int ret;
     int status;
 
-    breakpoint_program("/home/james/UoNDocs/Anura/cmake-build-debug/test");
+    breakpoint_program("/mnt/c/Users/jamescoward/CLionProjects/Anura/cmake-build-debug/test");
 
     ret = waitpid(t_pid, &status, 0);
     if (!WIFSTOPPED(status)) {
@@ -70,9 +70,9 @@ void* control_target(void* a) {
         printf("THIS WAS FROM EXEC\n");
     }
 
-
     ptrace(PTRACE_CONT, t_pid, NULL, 0);
 
+    printf("The tpid for /proc/ is %lu\n", t_pid);
     // have to find the runtime address; for now just a quick fetch from the /proc/<pid>/maps file
     char buff[100];
     sprintf(buff, "/proc/%lu/maps", t_pid);
@@ -81,9 +81,13 @@ void* control_target(void* a) {
     if (!f) perror("Unable to open /proc/<pid>/maps");
 
     char fbuff[500];
-    fread(fbuff, sizeof(char), sizeof(fbuff), f);
+    fread(fbuff, sizeof(char), sizeof(fbuff) - 1, f);
+    fbuff[499]= '\0';
     printf("The buffer:\n%s\n", fbuff);
     sscanf(fbuff, "%lx", &base);
+    base= 0x555555555000 - 0x1000; //todo this is going to be from Linux::v_to_p_addr (it is the proc map base - segment base)
+                                   // which is currently hard coded. NO ASLR!!! NO ASLR!!! NO ASLR!!! - i could read and map to the r-xp entry, but that feels like cheating
+                                   // just have to get v_to_p_addr done
 
     printf("The base is %lx and the tpid is %lu\n", base, t_pid);
 
@@ -149,7 +153,7 @@ void* control_target(void* a) {
                         continue;
                 }
             }
-        end_q_stat_loop:
+        end_q_stat_loop:;
         }
     }
 end:

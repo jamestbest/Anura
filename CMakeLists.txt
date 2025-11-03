@@ -3,6 +3,8 @@ project(Anura C)
 
 set(CMAKE_C_STANDARD 99)
 
+#add_compile_options(-fsanitize=address)
+#add_link_options(-fsanitize=address)
 
 add_executable(Anura main.c Array.c
         Sauron.c

@@ -642,7 +642,7 @@ void print_header() {
     printf("The header contains %u lines\n", LN_info.header.max_line);
     uint64_t zc= 0;
     uint64_t zs= 0;
-    for (int i = 0; i < LN_info.header.max_line; ++i) {
+    for (int i = 0; i < LN_info.header.max_line - 1; ++i) {
         uint32_t offset= LN_info.header.lines[i];
 
         if (offset != -1) {
