@@ -29,6 +29,8 @@ add_executable(Anura main.c Array.c
         Tolkien.c
         Tolkien.h)
 
+target_include_directories(Anura PUBLIC .)
+
 add_compile_options(-pthread)
 find_package(Threads REQUIRED)
 target_link_libraries(Anura PRIVATE Threads::Threads)

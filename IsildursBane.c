@@ -29,7 +29,7 @@ ACTION_HANDLE_RES handle_action(Action* action) {
         case ACTION_CF_CONTINUE: {
             printf("Continuing process\n");
             long long res= ptrace(PTRACE_CONT, t_pid, NULL, 0);
-            if (res) printf("Failed to continue process errno %lld of %s\n", res, strerror(res));
+            if (res) printf("Failed to continue process errno %d of %s\n", errno, strerror(errno));
             else printf("Continued process\n");
 
             return ACTION_HANDLE_PROC_WAIT;
@@ -41,7 +41,7 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             uint32_t line= action->data.BP_ADD.line;
             printf("GOT DATA\n");
 
-            long long res= target.place_bp(addr + base);
+            long long res= target.target_place_bp_at_addr(addr + base);
             if (res) printf("Failed to place bp at %d with errno %lld of %s\n", line, res, strerror(res));
             else printf("Placed bp at line %d on addr 0x%p\n", line, addr);
 
@@ -85,7 +85,7 @@ void* control_target(void* a) {
     fbuff[499]= '\0';
     printf("The buffer:\n%s\n", fbuff);
     sscanf(fbuff, "%lx", &base);
-    base= 0x555555555000 - 0x1000; //todo this is going to be from Linux::v_to_p_addr (it is the proc map base - segment base)
+    base= 0x555555554000; //todo this is going to be from Linux::v_to_p_addr (it is the proc map base - segment base)
                                    // which is currently hard coded. NO ASLR!!! NO ASLR!!! NO ASLR!!! - i could read and map to the r-xp entry, but that feels like cheating
                                    // just have to get v_to_p_addr done
 

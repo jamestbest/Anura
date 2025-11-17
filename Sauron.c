@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void print_program_header(Elf64_Phdr* header);
+
 bool verify_special(const uint8_t* start) {
     return memcmp(start, ELFMAG, SELFMAG) == 0;
 }
@@ -246,22 +248,78 @@ const char* get_et_str(unsigned int id) {
     };
 }
 
-typedef struct ELF64 {
-    Elf64_Ehdr header;
-    Elf64_Shdr* sections;
+ELF64 ELF;
 
-    struct {
-        void* text;
-        void* debug_line;
-        void* debug_line_str;
-        void* str;
-    } data;
-} ELF64;
+int decode_program_headers(FILE* elf_file, unsigned long p_off) {
+    fseek(elf_file, p_off, SEEK_SET);
 
-static ELF64 ELF;
+    uint header_c= ELF.header.e_phnum;
+    uint header_size= ELF.header.e_phentsize;
+
+    Elf64_Phdr* headers= malloc(header_c * header_size);
+    uint load_c= 0;
+
+    for (int i = 0; i < header_c; ++i) {
+        fread(&headers[i], header_size, 1, elf_file);
+        if (headers[i].p_type == PT_LOAD) load_c++;
+        print_program_header(&headers[i]);
+    }
+
+    // these should be sorted (assumed later) from:
+    //  https://refspecs.linuxfoundation.org/elf/elf.pdf
+    // PROGRAM LOADING AND DYNAMIC LINKING 2-3
+
+    ELF.ProgHeader.program_headers= headers;
+    ELF.ProgHeader= (struct ProgHeader) {
+        .program_headers= headers,
+        .load_segment_count= load_c,
+        .header_size= header_size,
+        .header_count= header_c
+    };
+
+    return 0;
+}
+
+const char* get_program_header_type_string(unsigned int id) {
+    switch (id) {
+        case PT_NULL: return "Program header table entry unused";
+        case PT_LOAD: return "Loadable program segment";
+        case PT_DYNAMIC: return "Dynamic linking information";
+        case PT_INTERP: return "Program interpreter";
+        case PT_NOTE: return "Auxiliary information";
+        case PT_SHLIB: return "Reserved";
+        case PT_PHDR: return "Entry for header table itself";
+        case PT_TLS: return "Thread-local storage segment";
+        case PT_NUM: return "Number of defined types";
+        case PT_GNU_EH_FRAME: return "GCC .eh_frame_hdr segment";
+        case PT_GNU_STACK: return "Indicates stack executability";
+        case PT_GNU_RELRO: return "Read-only after relocation";
+        case PT_SUNWBSS: return "Sun Specific segment";
+        case PT_SUNWSTACK: return "Stack segment";
+        default:
+            if (id >= PT_LOOS && id <= PT_HIOS) {
+                return "Unknown OS specific segement";
+            }
+            else if (id >= PT_LOPROC && id <= PT_HIPROC) {
+                return "Unknown processor specific segment";
+            }
+            return "<<ERROR>> Unknown program header id <</ERROR>>";
+    }
+}
+
+void print_program_header(Elf64_Phdr* header) {
+    printf("Program header (%s)\n", get_program_header_type_string(header->p_type));
+    printf("\t%c%c%c\n",
+        header->p_flags & PF_R ? 'R' : ' ',
+        header->p_flags & PF_W ? 'W' : ' ',
+        header->p_flags & PF_X ? 'X' : ' '
+    );
+}
 
 int decode(FILE* elf) {
     size_t read= fread(&ELF.header, sizeof (uint8_t), sizeof(ELF.header), elf);
+
+    // todo add read check
 
     if (!verify_special(ELF.header.e_ident)) {
         perror("Unable to verify ELF special sequence at start of file");
@@ -303,6 +361,8 @@ int decode(FILE* elf) {
         header.e_version,
         (void*)header.e_entry
     );
+
+    decode_program_headers(elf, header.e_phoff);
 
     fseek(elf, (long)header.e_shoff, SEEK_SET);
 

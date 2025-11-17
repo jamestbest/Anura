@@ -59,19 +59,20 @@ int tui() {
 
         if (strncmp(buff, "set", sizeof("set") - 1) == 0) {
             sscanf(buff, "set %d", &line);
-            uint64_t addr= line2startaddr(line);
-            if (addr == -1) {
+            LineAddrRes res= line2startaddr(line);
+            if (!res.succ) {
                 printf("There is no code on line %d\n", line);
                 continue;
             }
+
             queueb_push_blocking(
                 &action_q,
                 create_action(
                     ACTION_BP_ADD,
                     (ACTION_DATA){
                         .BP_ADD= {
-                            .line= line,
-                            .addr= (void*)addr
+                            .addr= res.addr,
+                            .line= line
                         }
                     }
                 )

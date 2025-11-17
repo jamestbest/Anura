@@ -74,8 +74,8 @@ typedef union ACTION_DATA {
     int NO_DATA;
 
     struct {
-        uint32_t line;
         void* addr;
+        uint32_t line;
     } BP_ADD;
 
     struct {

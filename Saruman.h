@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "Target.h"
 
 typedef struct DecodeRet {
     size_t bytes_read;
@@ -30,11 +31,12 @@ typedef struct ARange {
 extern const LC LC_ERR;
 extern const ARange ARange_ERR;
 
+// OLD OLD DEPRICATED DON@T USE
 LC addr2line(uintptr_t addr);
 ARange line2addr(uint32_t line);
 
 // THESE USE THE HEADER
-uint64_t line2startaddr(uint32_t l);
+LineAddrRes line2startaddr(uint32_t l);
 
 typedef struct LNData {
     uint16_t start_offset;

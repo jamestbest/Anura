@@ -96,6 +96,7 @@ const char* DW_LNS_STRS[]= {
 };
 
 #include "Array.h"
+#include "Target.h"
 
 ARRAY_PROTO(uint8_t, ubyte)
 ARRAY_ADD(uint8_t, ubyte)
@@ -668,16 +669,24 @@ void print_header() {
     }
 }
 
-uint64_t line2startaddr(uint32_t l) {
-    if (l > LN_info.header.max_line) return -1;
+const LineAddrRes LINE_ADDR_RES_FAIL= (LineAddrRes) {
+    .succ= false,
+    .addr= NULL
+};
+
+LineAddrRes line2startaddr(uint32_t l) {
+    if (l > LN_info.header.max_line) return LINE_ADDR_RES_FAIL;
 
     uint32_t off= LN_info.header.lines[l];
-    if (off == -1) return -1;
+    if (off == -1) return LINE_ADDR_RES_FAIL;
 
     LNEntry* entry= (LNEntry*)&LN_info.entries[off];
     LNData* data= (LNData*)entry + 1; // we only need the first instance as address is increasing from the LN program
 
-    return data->start_offset;
+    return (LineAddrRes) {
+        .succ= true,
+        .addr= (void*)data->start_offset
+    };
 }
 
 void on_new_row_header() {

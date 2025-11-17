@@ -83,7 +83,7 @@ long long place_bp(void* address) {
 int linux_x64_init_target(Target* t) {
     linux_init_target(t);
 
-    t->place_bp= place_bp;
+    t->target_place_bp_at_addr= place_bp;
 
     return 0;
 }
