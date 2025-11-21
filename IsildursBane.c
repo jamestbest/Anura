@@ -41,7 +41,8 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             uint32_t line= action->data.BP_ADD.line;
             printf("GOT DATA\n");
 
-            long long res= target.target_place_bp_at_addr(addr + base);
+            //action->data.BP_ADD.line
+            long long res= target.target_place_bp_at_line(line);
             if (res) printf("Failed to place bp at %d with errno %lld of %s\n", line, res, strerror(res));
             else printf("Placed bp at line %d on addr 0x%p\n", line, addr);
 
@@ -90,6 +91,8 @@ void* control_target(void* a) {
                                    // just have to get v_to_p_addr done
 
     printf("The base is %lx and the tpid is %lu\n", base, t_pid);
+
+    target.target_update_after_process_first_stopped();
 
     while (true) {
         printf("Starting to wait\n");

@@ -12,7 +12,13 @@
 #include <sys/ptrace.h>
 #include <unistd.h>
 
+#include "Array.h"
+
 #include <elf.h>
+#include <errno.h>
+#include <string.h>
+
+static void* v_to_p_addr(void* v_addr);
 
 PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
     pid_t pid= fork();
@@ -42,11 +48,22 @@ long long place_bp_at_line(uint32_t line) {
 
     if (!res.succ) return -1;
 
-    return target.target_place_bp_at_addr(res.addr);
+    void* runtime= v_to_p_addr(res.addr);
+
+    printf("Runtime addr is %p\n", runtime);
+    printf("Addr used is %p\n", res.addr + 0x555555554000);
+
+    return target.target_place_bp_at_addr(res.addr + 0x555555554000);
 }
 
 int decode_file(const char* filepath) {
     FILE* elf= fopen(filepath, "r");
+
+    if (!elf) {
+        printf("Cannot open filepath with errno %d %s\n", errno, strerror(errno));
+        return -1;
+    }
+
     return decode(elf);
 }
 
@@ -57,16 +74,96 @@ typedef struct ProcMap {
     void* end;
     uint8_t perms;
     uint64_t offset;
-    struct {
-        uint8_t major;
-        uint8_t minor;
-    } dev;
+    char* device;
     uint64_t inode;
     const char* path;
 } ProcMap;
 
-void load_proc_maps() {
+ARRAY_PROTO(ProcMap, ProcMap)
+ARRAY_ADD(ProcMap, ProcMap)
 
+ProcMapArray procMaps= ProcMapARRAY_EMPTY;
+
+void load_proc_maps() {
+    // open /proc/pid/maps
+    char buff[100];
+    sprintf(buff, "/proc/%lu/maps", target.pid);
+    FILE* f= fopen(buff, "r");
+
+    if (!f) {
+        perror("Unable to open /proc/<pid>/maps to load runtime address info");
+        return;
+    }
+
+    char* line_buff;
+    size_t line_buff_size= 0;
+
+    procMaps= ProcMap_arr_create();
+
+    while (getline(&line_buff, &line_buff_size, f) != -1) {
+        ProcMap map;
+
+        long long unsigned start, end, offset, inode;
+        char perms_str[5];
+        char device_str[32];
+
+        int chars_read;
+        int read= sscanf(
+            line_buff,
+            "%llx-%llx %4s %llx %31s %llx %n",
+            &start,
+            &end,
+            perms_str,
+            &offset,
+            device_str,
+            &inode,
+            &chars_read
+        );
+
+        char c= line_buff[chars_read];
+        while (c == '\t' || c == ' ') c= line_buff[++chars_read];
+
+        char* filename;
+        if (c != '\n') {
+            size_t filename_size= line_buff_size - chars_read + 1;
+            filename= malloc(sizeof(char) * filename_size);
+            memcpy(filename, &line_buff[chars_read], filename_size);
+            filename[filename_size - 1]= '\0';
+        } else {
+            filename= NULL;
+        }
+
+        uint8_t perms= 0;
+        size_t i= 0;
+        while (perms_str[i] != '\0') {
+            switch (perms_str[i]) {
+                case 'r': perms |= PF_R; break;
+                case 'w': perms |= PF_W; break;
+                case 'x': perms |= PF_X; break;
+            }
+            i++;
+        }
+
+        map= (ProcMap) {
+            .offset= offset,
+            .path= filename,
+            .end=(void*)end,
+            .base=(void*)start,
+            .device= device_str,
+            .inode= inode,
+            .perms= perms
+        };
+
+        ProcMap_arr_add(&procMaps, map);
+    }
+
+    procMaps.flags.sorted= true;
+
+    return;
+}
+
+void first_stopped() {
+    load_proc_maps();
 }
 
 int vaddr_in_segment_range(const void* addrp, const void* segmentp) {
@@ -96,18 +193,43 @@ ProgSeg* get_segment_enclosing_vaddr(void* v_addr) {
     return seg;
 }
 
+int vaddr_in_procmap_range(const void* addrp, const void* procmapp) {
+    const void* addr= *(const void**)addrp;
+    const ProcMap* procMap= (const ProcMap*)procmapp;
+
+    if (procMap->base > addr) {
+        return -1;
+    }
+    if (procMap->end < addr) {
+        return 1;
+    }
+
+    return 0;
+}
+
+ProcMap* get_procmap_at_vaddr(void* vaddr) {
+    uint pos= ProcMap_arr_search(&procMaps, &vaddr, vaddr_in_procmap_range);
+
+    if (pos == (uint)-1) return NULL;
+
+    return ProcMap_arr_ptr(&procMaps, pos);
+}
+
 void* v_to_p_addr(void* v_addr) {
     ProgSeg* segment= get_segment_enclosing_vaddr(v_addr);
 
     void* s_vaddr= (void*)segment->p_vaddr;
 
-//    ProcMap* proc_map= get_procmap_at_vaddr(s_vaddr);
-//    void* s_paddr= proc_map->base;
+    ProcMap* proc_map= get_procmap_at_vaddr(s_vaddr);
 
-//    return s_paddr + (v_addr - s_vaddr);
+    void* s_paddr= proc_map->base;
+
+    return s_paddr + (v_addr - s_vaddr);
 }
 
 void linux_init_target(Target* target) {
+    target->target_update_after_process_first_stopped= first_stopped;
+
     target->target_launch_process= launch_process;
     target->target_attach_process= attach_process;
 

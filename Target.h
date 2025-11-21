@@ -16,10 +16,14 @@ typedef struct LineAddrRes {
 } LineAddrRes;
 
 typedef struct Target {
+    PROCESS_ID pid;
+
     long long (*target_place_bp_at_line)(uint32_t line);
     long long (*target_place_bp_at_addr)(void* addr);
 
     LineAddrRes (*target_get_addr_of_line)(uint32_t line);
+
+    void (*target_update_after_process_first_stopped)();
 
     PROCESS_ID (*target_launch_process)(const char* path, uint32_t argc, const char* argv[]);
     long long (*target_attach_process)(PROCESS_ID pid);

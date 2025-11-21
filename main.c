@@ -182,11 +182,13 @@ int breakpoint_program(const char* program) {
     };
 
     PROCESS_ID pid= target.target_launch_process(program, sizeof(args), args);
+    target.pid= pid;
+
     t_pid= pid;
 
-    long long res= target.target_attach_process(t_pid);
+    long long res= target.target_attach_process(target.pid);
     hlog("The attach result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
-    printf("Set the t_pid to %llu\n", pid);
+    printf("Set the t_pid to %lu\n", pid);
 
     return 0;
 }

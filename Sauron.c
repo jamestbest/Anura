@@ -309,11 +309,12 @@ const char* get_program_header_type_string(unsigned int id) {
 
 void print_program_header(Elf64_Phdr* header) {
     printf("Program header (%s)\n", get_program_header_type_string(header->p_type));
-    printf("\t%c%c%c\n",
+    printf("\t%c%c%c ",
         header->p_flags & PF_R ? 'R' : ' ',
         header->p_flags & PF_W ? 'W' : ' ',
         header->p_flags & PF_X ? 'X' : ' '
     );
+//    printf()
 }
 
 int decode(FILE* elf) {
