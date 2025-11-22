@@ -3,24 +3,36 @@
 //
 
 #include "Linux.h"
-#include "Sauron.h"
-#include "Saruman.h"
-
-#include <sched.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/ptrace.h>
-#include <unistd.h>
 
 #include "Array.h"
+#include "Saruman.h"
+#include "Sauron.h"
 
 #include <elf.h>
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/ptrace.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static void* v_to_p_addr(void* v_addr);
 
+static ino_t file_inode;
+
 PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
+    struct stat file_stats;
+    int res= stat(path, &file_stats);
+
+    if (res != 0) {
+        perror("Unable to read file stats on process launch\n");
+        return -1;
+    }
+
+    printf("The file inode is for %s\n", path);
+    file_inode= file_stats.st_ino;
+
     pid_t pid= fork();
 
     if (pid == 0) {
@@ -28,15 +40,17 @@ PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
         printf("Im the sub proc with pid %d\n", getpid());
         // we're the sub proc
         int ret= execvp(path, (char* const*)argv);
-
-        exit(0);
+        perror("Sub process failed to execv\n");
+        exit(127);
     }
 
     return pid;
 }
 
 long long attach_process(PROCESS_ID pid) {
-    return ptrace(PTRACE_ATTACH, pid, 0, 0);
+    return ptrace(PTRACE_ATTACH, pid, NULL);
+//    return ptrace(PTRACE_ATTACH, pid, 0, 0);
+//    return ptrace(PTRACE_CONT, pid, NULL, SIGSTOP);
 }
 
 LineAddrRes get_addr_at_line(uint32_t line) {
@@ -60,7 +74,7 @@ int decode_file(const char* filepath) {
     FILE* elf= fopen(filepath, "r");
 
     if (!elf) {
-        printf("Cannot open filepath with errno %d %s\n", errno, strerror(errno));
+        printf("Cannot open filepath %s with errno %d %s\n", filepath, errno, strerror(errno));
         return -1;
     }
 
@@ -82,7 +96,8 @@ typedef struct ProcMap {
 ARRAY_PROTO(ProcMap, ProcMap)
 ARRAY_ADD(ProcMap, ProcMap)
 
-ProcMapArray procMaps= ProcMapARRAY_EMPTY;
+ProcMapArray proc_maps= ProcMapARRAY_EMPTY;
+ProcMapArray pt_load_maps= ProcMapARRAY_EMPTY;
 
 void load_proc_maps() {
     // open /proc/pid/maps
@@ -98,7 +113,8 @@ void load_proc_maps() {
     char* line_buff;
     size_t line_buff_size= 0;
 
-    procMaps= ProcMap_arr_create();
+    proc_maps= ProcMap_arr_create();
+    pt_load_maps= ProcMap_arr_create();
 
     while (getline(&line_buff, &line_buff_size, f) != -1) {
         ProcMap map;
@@ -110,7 +126,7 @@ void load_proc_maps() {
         int chars_read;
         int read= sscanf(
             line_buff,
-            "%llx-%llx %4s %llx %31s %llx %n",
+            "%llx-%llx %4s %llx %31s %llu %n",
             &start,
             &end,
             perms_str,
@@ -154,12 +170,16 @@ void load_proc_maps() {
             .perms= perms
         };
 
-        ProcMap_arr_add(&procMaps, map);
+        if (map.inode == file_inode) {
+            printf("GOt matching indoe\n");
+            ProcMap_arr_add(&pt_load_maps, map);
+        } else printf("Mismatch inode map %ld file %ld\n", map.inode, file_inode);
+
+        ProcMap_arr_add(&proc_maps, map);
     }
 
-    procMaps.flags.sorted= true;
-
-    return;
+    proc_maps.flags.sorted= true;
+    pt_load_maps.flags.sorted= true;
 }
 
 void first_stopped() {
@@ -193,14 +213,18 @@ ProgSeg* get_segment_enclosing_vaddr(void* v_addr) {
     return seg;
 }
 
-int vaddr_in_procmap_range(const void* addrp, const void* procmapp) {
-    const void* addr= *(const void**)addrp;
+int vaddr_in_pt_procmap_range(const void* addrp, const void* procmapp) {
+    const uintptr_t addr= *(const uintptr_t*)addrp;
     const ProcMap* procMap= (const ProcMap*)procmapp;
 
-    if (procMap->base > addr) {
+    size_t map_size= procMap->end - procMap->base;
+    printf("Proc map %p %p\n", procMap->base, procMap->end);
+    printf("Got addr %lx checking against %lx-%lx\n", addr, procMap->offset, procMap->offset + map_size);
+
+    if (procMap->offset > addr) {
         return -1;
     }
-    if (procMap->end < addr) {
+    if (procMap->offset + map_size < addr) {
         return 1;
     }
 
@@ -208,11 +232,12 @@ int vaddr_in_procmap_range(const void* addrp, const void* procmapp) {
 }
 
 ProcMap* get_procmap_at_vaddr(void* vaddr) {
-    uint pos= ProcMap_arr_search(&procMaps, &vaddr, vaddr_in_procmap_range);
+    printf("There are %zu entries\n", pt_load_maps.pos);
+    uint pos= ProcMap_arr_search(&pt_load_maps, &vaddr, vaddr_in_pt_procmap_range);
 
     if (pos == (uint)-1) return NULL;
 
-    return ProcMap_arr_ptr(&procMaps, pos);
+    return ProcMap_arr_ptr(&pt_load_maps, pos);
 }
 
 void* v_to_p_addr(void* v_addr) {
@@ -221,6 +246,11 @@ void* v_to_p_addr(void* v_addr) {
     void* s_vaddr= (void*)segment->p_vaddr;
 
     ProcMap* proc_map= get_procmap_at_vaddr(s_vaddr);
+
+    if (proc_map == NULL) {
+        perror("TEST");
+        return NULL;
+    }
 
     void* s_paddr= proc_map->base;
 
