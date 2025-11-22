@@ -63,7 +63,7 @@ int target_func(bool second) {
 
     t5();
 
-    if (second) exit(0);
+    if (second) return 0;
     target_func(true);
 
     return 0;
@@ -71,6 +71,8 @@ int target_func(bool second) {
 
 int main(int argc, char** argv) {
     target_func(false);
+
+    while (true) {}
     return 0;
 }
 
