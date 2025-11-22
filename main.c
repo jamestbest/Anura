@@ -272,7 +272,7 @@ int main(int argc, char* argv[]) {
     target.target_decode_file(program);
 
     pthread_t cmd_thread;
-    pthread_create(&cmd_thread, NULL, control_target, NULL);
+    pthread_create(&cmd_thread, NULL, control_target, (void*)program);
 
     tui();
 
