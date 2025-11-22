@@ -55,12 +55,13 @@ ACTION_HANDLE_RES handle_action(Action* action) {
     }
 }
 
-void* control_target(void* a) {
+void* control_target(void* filepath_p) {
     long res;
     int ret;
     int status;
+    char* filepath= filepath_p;
 
-    breakpoint_program("/mnt/c/Users/jamescoward/CLionProjects/Anura/cmake-build-debug/test");
+    breakpoint_program(filepath);
 
     ret = waitpid(t_pid, &status, 0);
     if (!WIFSTOPPED(status)) {
@@ -71,7 +72,22 @@ void* control_target(void* a) {
         printf("THIS WAS FROM EXEC\n");
     }
 
+    ptrace(PTRACE_SETOPTIONS, t_pid, 0, PTRACE_O_TRACEEXEC);
+    // the child is created but it's just a fork, it's about to run execv after CONT
     ptrace(PTRACE_CONT, t_pid, NULL, 0);
+
+    ret = waitpid(t_pid, &status, 0);
+    if (!WIFSTOPPED(status)) {
+        fprintf(stderr, "Tracee did not stop\n");
+    }
+
+    if (status >> 16 == PTRACE_EVENT_EXEC) {
+        printf("THIS WAS FROM EXEC\n");
+    } else {
+        perror("THIS WAS NOT FROM EXEC");
+    }
+
+//    sleep(2);
 
     printf("The tpid for /proc/ is %lu\n", t_pid);
     // have to find the runtime address; for now just a quick fetch from the /proc/<pid>/maps file
