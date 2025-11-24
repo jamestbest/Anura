@@ -25,7 +25,11 @@ add_executable(Anura main.c Array.c
         Target.c
         Target.h
         Tolkien.c
-        Tolkien.h)
+        Tolkien.h
+        MtDoom/MtDoom.c
+        MtDoom/MtDoom.h
+        MtDoom/lexer/Lexer.c
+        MtDoom/lexer/Lexer.h)
 
 add_compile_options(-pthread)
 find_package(Threads REQUIRED)

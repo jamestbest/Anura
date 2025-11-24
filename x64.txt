@@ -134,7 +134,7 @@ ALIAS sibb= reg
 
 ALIAS sibsi 5 bits= {
    sibs 100 =
-   sibs sibi= [sibi * (2 ^ sibs)]
+   sibs sibi= "[{sibi} * {2 ^ sibs}]"
 }
 
 ALIAS SIB 1 byte= {
@@ -154,9 +154,9 @@ ALIAS ModRM= {
     when mode == 64bit then "rip" + disp32
     when default then disp32
   }
-  00 reg RM= [reg]
-  01 reg RM disp8 = [reg + disp8]
-  10 reg RM disp32= [reg + disp32]
+  00 reg RM= "[{reg}]"
+  01 reg RM disp8 = "[{reg} + {disp8}]"
+  10 reg RM disp32= "[{reg} + {disp32}]"
   11 reg RM= reg
 }
 
