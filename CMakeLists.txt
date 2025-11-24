@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD 99)
 #add_compile_options(-fsanitize=address)
 #add_link_options(-fsanitize=address)
 
-add_executable(Anura main.c Array.c
+add_executable(Anura main.c shared/Array.c
         Sauron.c
         Sauron.h
         Saruman.c
@@ -31,9 +31,18 @@ add_executable(Anura main.c Array.c
         MtDoom/MtDoom.c
         MtDoom/MtDoom.h
         MtDoom/lexer/Lexer.c
-        MtDoom/lexer/Lexer.h)
+        MtDoom/lexer/Lexer.h
+
+        shared/Vector.c
+        shared/Helper_File.c
+        shared/Helper_String.c
+        shared/Helper_Math.c
+        shared/Errors.h
+        shared/Buffer.c
+)
 
 target_include_directories(Anura PUBLIC .)
+target_include_directories(Anura PUBLIC ./shared)
 
 add_compile_options(-pthread)
 find_package(Threads REQUIRED)
