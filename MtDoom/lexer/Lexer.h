@@ -4,7 +4,10 @@
 
 #ifndef LEXER_H
 #define LEXER_H
+
 #include <stdint.h>
+#include <stdbool.h>
+#include "shared/Array.h"
 
 typedef enum TokenType {
     KEYWORD,
@@ -19,39 +22,69 @@ typedef enum TokenType {
     LPAREN,
     RPAREN,
     LIT_NUM,
+    LIT_STRING,
     COMMA,
     NEQ,
     STAR,
     QUESTION,
     PIPE,
     POW,
+    TOKEN_TYPE_COUNT
 } TokenType;
 
 typedef enum keyword {
     ALIAS,
-    STRUCTURE,
-    FLAG,
-    DEFAULT,
-    BYTE,
     BIT,
+    BITS,
+    BYTE,
+    BYTES,
+    CALCULATE,
+    DATA,
+    DEFAULT,
+    FLAG,
+    IF,
     LEFT,
     RIGHT,
-    IF,
+    STRUCTURE,
     THEN,
     WHEN,
-    CALCULATE,
-    DATA
+    KEYWORD_COUNT
 } keyword;
 
 typedef union TokenData {
-    uint64_t lit_num;
+    struct LitNumData {
+        bool explicit_base10;
+        struct {
+            uint8_t digits;
+            uint64_t value;
+        } base2;
+        uint64_t base10;
+    } lit_num;
     keyword keyword;
     const char* identifier;
+    const char* lit_string;
 } TokenData;
+
+typedef struct TokenMeta {
+    uint16_t line;
+    uint16_t col;
+} TokenMeta;
 
 typedef struct Token {
     TokenType type;
+    TokenMeta meta;
     TokenData data;
 } Token;
+
+ARRAY_PROTO(Token, Token)
+
+typedef struct LexRet {
+    bool succ;
+    TokenArray tokens;
+} LexRet;
+
+LexRet lex(const char* filepath);
+
+extern const LexRet LEX_RET_FAIL;
 
 #endif //LEXER_H
