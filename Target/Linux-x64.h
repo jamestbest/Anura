@@ -7,9 +7,6 @@
 
 #include "../Target.h"
 
-long long place_bp(void* address);
 int linux_x64_init_target(Target* target);
-
-
 
 #endif //LINUX_X64_H

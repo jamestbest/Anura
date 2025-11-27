@@ -20,7 +20,7 @@ _Static_assert(SW_INT_TYPE SW_INT_CODE == SW_INT_CODE);
 
 _Static_assert(sizeof SW_INT_TYPE == sizeof ((BPInfo){0}.data.shadow), "The shadow element should encapsulate all data lost from the Software interrupt code");
 
-long long place_bp(void* address) {
+long long place_bp(void* address, uint32_t line) {
     long long r7= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[7]));
 
     bool bp_used[4]= {0};
@@ -54,6 +54,8 @@ long long place_bp(void* address) {
 
         BPAddressInfo* addr_info= get_or_add_bp_address_info(address);
         BPInfo_arr_add(&addr_info->bps, (BPInfo){
+            .addr= address,
+            .line= line,
             .type= BP_SOFTWARE,
             .data.shadow= shadow
         });
@@ -73,6 +75,8 @@ long long place_bp(void* address) {
 
     BPAddressInfo* addr_info= get_or_add_bp_address_info(address);
     BPInfo_arr_add(&addr_info->bps, (BPInfo) {
+        .addr= address,
+        .line= line,
         .type= BP_HARDWARE,
         .data.bp= free_bp
     });
@@ -80,10 +84,17 @@ long long place_bp(void* address) {
     return res;
 }
 
+void breakpoint_hit_cleanup() {
+    // clear R6 for the next
+    long long r6= 1 << 16 | 1 << 11; // Enable RTM & BLD (19-4 Vol. 3B)
+    ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[6]), r6);
+}
+
 int linux_x64_init_target(Target* t) {
     linux_init_target(t);
 
     t->target_place_bp_at_addr= place_bp;
+    t->target_breakpoint_hit_cleanup= breakpoint_hit_cleanup;
 
     return 0;
 }
