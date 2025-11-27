@@ -12,6 +12,7 @@
 void vlog(bool is_t, const char* message, va_list args) {
     printf("LOG(%s): ", is_t ? "TARGET" : " HOST ");
     vprintf(message, args);
+    fflush(stdout);
 }
 
 void tlog(const char* message, ...) {
