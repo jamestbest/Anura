@@ -87,6 +87,15 @@ int tui() {
                     (ACTION_DATA){.NO_DATA= 0}
                 )
             );
+        } else if (strncmp(buff, "astep", sizeof("astep") - 1) == 0) {
+            printf("Assembly level single step\n");
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_CF_SINGLE_STEP,
+                    (ACTION_DATA){.CF_SINGLE_STEP= {.assembly_level= true}}
+                )
+            );
         } else if (strncmp(buff, "exit", sizeof("exit") - 1) == 0) {
             printf("Exiting process\n");
             queueb_push_blocking(

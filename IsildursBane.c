@@ -48,6 +48,24 @@ ACTION_HANDLE_RES handle_action(Action* action) {
 
             return ACTION_HANDLE_CONTINUE;
         }
+
+        case ACTION_CF_SINGLE_STEP: {
+            bool assembly_level= action->data.CF_SINGLE_STEP.assembly_level;
+            printf("Control got single step at %s level\n", assembly_level ? "assembly" : "line");
+            if (assembly_level) {
+                long long res= target.target_single_step_assembly();
+
+                if (res != 0) {
+                    printf("Failed to single step target with err code %lld as %s\n", res, strerror(res));
+                    return ACTION_HANDLE_CONTINUE;
+                }
+
+                return ACTION_HANDLE_PROC_WAIT;
+            } else {
+                printf("Got request to single step line; not impl\n");
+            }
+            break;
+        }
         case ACTION_CF_EXIT:
             ptrace(PTRACE_KILL, t_pid, NULL, 0);
 
@@ -70,6 +88,8 @@ void* control_target(void* filepath_p) {
 
     if (status >> 16 == PTRACE_EVENT_EXEC) {
         printf("THIS WAS FROM EXEC\n");
+    } else {
+        printf("FIRST CALL WAS NOT EXEC\n");
     }
 
     ptrace(PTRACE_SETOPTIONS, t_pid, 0, PTRACE_O_TRACEEXEC);
@@ -87,28 +107,23 @@ void* control_target(void* filepath_p) {
         perror("THIS WAS NOT FROM EXEC");
     }
 
-//    sleep(2);
-
-    printf("The tpid for /proc/ is %lu\n", t_pid);
-    // have to find the runtime address; for now just a quick fetch from the /proc/<pid>/maps file
-    char buff[100];
-    sprintf(buff, "/proc/%lu/maps", t_pid);
-    FILE* f= fopen(buff, "r");
-
-    if (!f) perror("Unable to open /proc/<pid>/maps");
-
-    char fbuff[500];
-    fread(fbuff, sizeof(char), sizeof(fbuff) - 1, f);
-    fbuff[499]= '\0';
-    printf("The buffer:\n%s\n", fbuff);
-    sscanf(fbuff, "%lx", &base);
-    base= 0x555555554000; //todo this is going to be from Linux::v_to_p_addr (it is the proc map base - segment base)
-                                   // which is currently hard coded. NO ASLR!!! NO ASLR!!! NO ASLR!!! - i could read and map to the r-xp entry, but that feels like cheating
-                                   // just have to get v_to_p_addr done
-
-    printf("The base is %lx and the tpid is %lu\n", base, t_pid);
-
     target.target_update_after_process_first_stopped();
+
+    void* q_status;
+    while (q_status= queueb_pop_blocking(&action_q), q_status) {
+        Action* action= q_status;
+
+        switch (handle_action(action)) {
+            case ACTION_HANDLE_EXIT:
+                goto end;
+            case ACTION_HANDLE_PROC_WAIT:
+                goto end_q_stat_loop1;
+            case ACTION_HANDLE_CONTINUE:
+                continue;
+        }
+    }
+end_q_stat_loop1:;
+
 
     while (true) {
         printf("Starting to wait\n");
@@ -124,11 +139,6 @@ void* control_target(void* filepath_p) {
             break;
         }
 
-        // res= ptrace(PTRACE_PEEKDATA, t_pid, &i, 0);
-        // long value = (int)(res & 0xffffffffUL);
-        // hlog("i is : %d\n", value);
-        // printf("err: %ld as %s with t_pid %lu\n", res, strerror(errno), t_pid);
-
         long long r6= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[6]));
 
         long long rip= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, regs.rip));
@@ -136,25 +146,20 @@ void* control_target(void* filepath_p) {
             // if we're not hardware i.e. software then we are one ahead
             rip--;
         }
-        hlog("The tracee stopped via breakpoint at %p which is in line %u\n", rip, addr2line(rip - base).line);
 
-        res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[7]));
-        // print_dr7(res);
-        res= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[6]));
-        // print_dr6(res);
+        BPAddressInfo* bp= BPAddressInfo_arr_search_ie(&bp_info, (void*)rip);
+        if (!bp || bp->bps.pos == 0) {
+            hlog("The tracee stopped via a non breakpoint event with rip= %p\n", (void*)rip);
+        } else if (bp->bps.pos == 1) {
+            BPInfo* info= BPInfo_arr_ptr(&bp->bps, 0);
+            hlog("The tracee stopped via %s breakpoint at %p which is in line %u\n", BP_TYPE_STRS[info->type], rip, info->line);
+        } else {
+            hlog("The tracee stopped via an address with multiple breakpoints created at lines");
+            for (int i= 0; i < bp->bps.pos; ++i) printf(" %u%c", BPInfo_arr_ptr(&bp->bps, i)->line, i == bp->bps.pos - 1 ? ' ' : ',');
+            printf("\n");
+        }
 
-        // BPAddressInfo* addr_info= BPAddressInfo_arr_search_ie(&bp_info, (void*)rip);
-        // if (!addr_info) {
-            // printf("The target was stopped at a non-breakpoint location %p\n", (void*)rip);
-        // } else {
-            // BPInfo* bp= BPInfo_arr_ptr(&addr_info->bps, 0);
-            // hlog("Bp triggered is a %s breakpoint at address %p (%u)\n", bp->type == BP_SOFTWARE ? "SOFTWARE" : "HARDWARE", (void*)rip, addr2line(rip - base).line);
-        // }
-
-        // clear R6 for the next
-        r6= 1 << 16 | 1 << 11; // Enable RTM & BLD (19-4 Vol. 3B)
-        ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[6]), r6);
-
+        target.target_breakpoint_hit_cleanup();
 
         if (WIFSTOPPED(status)) {
             hlog("Target stopped by signal %d\n", WSTOPSIG(status));
