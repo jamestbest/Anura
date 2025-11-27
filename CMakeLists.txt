@@ -39,6 +39,8 @@ add_executable(Anura main.c shared/Array.c
         shared/Helper_Math.c
         shared/Errors.h
         shared/Buffer.c
+        MtDoom/parser/Parser.c
+        MtDoom/parser/Parser.h
 )
 
 target_include_directories(Anura PUBLIC .)
