@@ -1,5 +1,5 @@
 // pages
-//  2916- opcode map (1 byte)
+//  2916- opcode map (1 BYTE)
 //  2910- opcode map key
 //  527 - SIB information
 //  2949- instr encoding
@@ -15,8 +15,8 @@
 //  some places expect base 10, i.e. anywhere that isn't inside {} e.g. 4 bits
 //  most places expect base 2 written as 0011 1011
 //  numbers are written from high bit - low bit and will go until 8 bits are found
-//  e.g. 1010 101 ow -- this is one byte as any non-alias identifier is 1 bit in size
-//  e.g. 10 reg 001  -- this is one byte (assuming reg is a 3 bit ALIAS)
+//  e.g. 1010 101 ow -- this is one BYTE as any non-alias identifier is 1 bit in size
+//  e.g. 10 reg 001  -- this is one BYTE (assuming reg is a 3 bit ALIAS)
 
 ALIAS prefix= {
     REX
@@ -28,7 +28,7 @@ STRUCTURE lprefix* prefix? op
 
 // assume we're in long mode
 //  so assume REX exists -- I don't want to do include protected mode
-//   with stuff like single byte inc, just keep to long mode
+//   with stuff like single BYTE inc, just keep to long mode
 //  SO is this --v needed?? -- I assume not
 FLAG mode= 64bit | 32bit | 16bit default 64bit
 FLAG opmode= 64bit | 32bit | 16bit | 8bit default 32bit
@@ -44,32 +44,32 @@ FLAG ow
 //       or for Brrr
 //       or for B(RM.bbb)
 // REX.B = Extension of the ModR/M r/m field, SIB base field, or Opcode reg field
-ALIAS REX 1 byte= {
+ALIAS REX 1 BYTE= {
   0100 .w .r .x .b
 }
 
 // these bits have been written in the high-low level, is this ok to assume?
-//  when reading new bytes we just read high bit as we get the whole byte at once
+//  when reading new BYTEs we just read high bit as we get the whole BYTE at once
 // dot prefix? for accessing values within? or the alias listing?
-ALIAS VEX 1 byte= {
+ALIAS VEX 1 BYTE= {
   1100 0100 .R .X .B .m(5) .W .v(4) .L .pp(2)
   1100 0101 .R .v(4) .L .pp(2)
 }
 
-ALIAS lprefix 1 byte= {
+ALIAS lprefix 1 BYTE= {
   lp1
   lp2
   lp3
   lp4
 }
 
-ALIAS lp1 1 byte= {
+ALIAS lp1 1 BYTE= {
   0xF0= LOCK
   0xF2= REPNE,REPNZ,BND  // BND has some restrictions to do with what the instr is
   0xF3= REP,REPE,REPZ
 }
 
-ALIAS lp2 1 byte= {
+ALIAS lp2 1 BYTE= {
   0x2E= CS,BNT
   0x36= SS
   0x3E= DS,BT
@@ -78,23 +78,23 @@ ALIAS lp2 1 byte= {
   0x65= GS
 }
 
-ALIAS lp3 1 byte= {
+ALIAS lp3 1 BYTE= {
   0x66= OO
 }
 
-ALIAS lp4 1 byte= {
+ALIAS lp4 1 BYTE= {
   0x67= AO
 }
 
-ALIAS reg 3 bits= {
+ALIAS reg 3 BITS= {
   000= AX, AL, AL, EAX, RAX
   001= CX, CL, AL, ECX, RCX
-  
+
   100= SP, AH, AL, ESP, RSP
 }
 
 // some instructions access SPL etc. instead of AH etc.
-ALIAS regT 3 bits= {
+ALIAS regT 3 BITS= {
   000= AX, AL, AL, EAX, RAX
   001= CX, CL, AL, ECX, RCX
 
@@ -109,7 +109,7 @@ RULE RIGHT ON reg, regT {
   CHOOSE 4 if opmode= 64bit
 }
 
-ALIAS cc 4 bits= {
+ALIAS cc 4 BITS= {
   0000= O
   0001= NO
   0010= B,C,NAE
@@ -128,30 +128,30 @@ ALIAS cc 4 bits= {
   1111= NLE,G
 }
 
-ALIAS sibs 2 bits
+ALIAS sibs 2 BITS
 ALIAS sibi= reg
 ALIAS sibb= reg
 
-ALIAS sibsi 5 bits= {
+ALIAS sibsi 5 BITS= {
    sibs 100 =
    sibs sibi= "[{sibi} * {2 ^ sibs}]"
 }
 
-ALIAS SIB 1 byte= {
+ALIAS SIB 1 BYTE= {
   sibsi 101 = {
-    if Mod == 00 then sibsi + disp32
-    if Mod == 01 then sibsi + disp8 + [EBP]
-    if Mod == 10 then sibsi + disp32 + [EBP]
+    if Mod == 00 then "{sibsi} + {disp32}"
+    if Mod == 01 then "{sibsi} + {disp8} + [{EBP}]"
+    if Mod == 10 then "{sibsi} + {disp32} + [{EBP}]"
   }
-  sibsi sibb = sibsi + sibb
+  sibsi sibb = "{sibsi} + {sibb}"
 }
 
-ALIAS Mod 2 bits= {}
-ALIAS RM 3 bits
+ALIAS Mod 2 BITS= {}
+ALIAS RM 3 BITS
 ALIAS ModRM= {
   11 reg 100 SIB= SIB
   00 reg 101 disp32= {
-    when mode == 64bit then "rip" + disp32
+    when mode == 64bit then "rip + {disp32}"
     when default then disp32
   }
   00 reg RM= "[{reg}]"
@@ -188,23 +188,23 @@ CALCULATE opmode= {
   }
 }
 
-DATA imm x bits= {
-  if opmode == 8bit then 1 byte
-  if opmode == 16bit then 2 bytes
-  if opmode == 32bit then 4 bytes
-  if opmode == 64bit then 8 bytes
+DATA imm x BITS= {
+  if opmode == 8bit then 1 BYTE
+  if opmode == 16bit then 2 BYTES
+  if opmode == 32bit then 4 BYTES
+  if opmode == 64bit then 8 BYTES
 }
 
-DATA immM32 x bits= {
-  if opmode == 8bit then 1 byte
-  if opmode == 16bit then 2 bytes
-  if opmode == 32bit then 4 bytes
-  if opmode == 64bit then 4 bytes
+DATA immM32 x BITS= {
+  if opmode == 8bit then 1 BYTE
+  if opmode == 16bit then 2 BYTES
+  if opmode == 32bit then 4 BYTES
+  if opmode == 64bit then 4 BYTES
 }
 
-DATA disp8 1 byte
-DATA disp16 2 bytes
-DATA disp32 4 bytes
+DATA disp8 1 BYTE
+DATA disp16 2 BYTES
+DATA disp32 4 BYTES
 
 // opcodes are matched up to the next non-0|1
 //  i.e. each level is expanded to it's level of 1|0s
@@ -214,7 +214,7 @@ ALIAS MOV= {
   1000 100 ow ModRM= MOV RM, regT
   1000 101 ow ModRM= MOV regT, RM
   1100 011 ow Mod 000 RM imm = MOV RM, imm
- 
+
   1011 ow reg imm= MOV regT, imm
 }
 
@@ -232,8 +232,8 @@ ALIAS CMOV= {
   0100 cc ModRM = CMOV|cc reg, rm
 }
 
-if vs when semantic for something that can back when assemble
-vs something that is based on a mode set at the start
+// if vs when semantic for something that can back when assemble
+// vs something that is based on a mode set at the start
 
 
 
@@ -245,11 +245,11 @@ vs something that is based on a mode set at the start
 
 // example of ARM64 adc
 FLAG sf
-ALIAS S 1 bit= {
+ALIAS S 1 BIT= {
   0=""
   1="S"
 }
-ALIAS regA 5 bits= {
+ALIAS regA 5 BITS= {
   00000= W0, X0
   00001= W1, X1
   11110= W30, X30
