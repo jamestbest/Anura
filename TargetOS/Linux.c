@@ -17,7 +17,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void* v_to_p_addr(void* v_addr);
+static void* virtual_to_runtime_addr(void* v_addr);
 
 static ino_t file_inode;
 
@@ -37,7 +37,7 @@ PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
 
     if (pid == 0) {
         ptrace(PTRACE_TRACEME, getpid(), NULL, 0);
-        printf("Im the sub proc with pid %d\n", getpid());
+        printf("Im the sub proc with pid %d about to become %s\n", getpid(), path);
         // we're the sub proc
         int ret= execvp(path, (char* const*)argv);
         perror("Sub process failed to execv\n");
@@ -49,8 +49,6 @@ PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
 
 long long attach_process(PROCESS_ID pid) {
     return ptrace(PTRACE_ATTACH, pid, NULL);
-//    return ptrace(PTRACE_ATTACH, pid, 0, 0);
-//    return ptrace(PTRACE_CONT, pid, NULL, SIGSTOP);
 }
 
 LineAddrRes get_addr_at_line(uint32_t line) {
@@ -58,16 +56,16 @@ LineAddrRes get_addr_at_line(uint32_t line) {
 }
 
 long long place_bp_at_line(uint32_t line) {
-    LineAddrRes res= line2startaddr(line);
+    LineAddrRes res= get_addr_at_line(line);
 
     if (!res.succ) return -1;
 
-    void* runtime= v_to_p_addr(res.addr);
+    void* runtime= virtual_to_runtime_addr(res.addr);
 
     printf("Runtime addr is %p\n", runtime);
     printf("Addr used is %p\n", res.addr + 0x555555554000);
 
-    return target.target_place_bp_at_addr(res.addr + 0x555555554000);
+    return target.target_place_bp_at_addr(runtime, line);
 }
 
 int decode_file(const char* filepath) {
@@ -240,7 +238,7 @@ ProcMap* get_procmap_at_vaddr(void* vaddr) {
     return ProcMap_arr_ptr(&pt_load_maps, pos);
 }
 
-void* v_to_p_addr(void* v_addr) {
+void* virtual_to_runtime_addr(void* v_addr) {
     ProgSeg* segment= get_segment_enclosing_vaddr(v_addr);
 
     void* s_vaddr= (void*)segment->p_vaddr;
@@ -257,6 +255,10 @@ void* v_to_p_addr(void* v_addr) {
     return s_paddr + (v_addr - s_vaddr);
 }
 
+long long single_step_assembly() {
+    return ptrace(PTRACE_SINGLESTEP, target.pid, 0, NULL);
+}
+
 void linux_init_target(Target* target) {
     target->target_update_after_process_first_stopped= first_stopped;
 
@@ -267,4 +269,6 @@ void linux_init_target(Target* target) {
 
     target->target_get_addr_of_line= get_addr_at_line;
     target->target_place_bp_at_line= place_bp_at_line;
+
+    target->target_single_step_assembly= single_step_assembly;
 }
