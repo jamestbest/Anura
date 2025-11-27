@@ -27,8 +27,6 @@ FILE* c_file;
 static bool load_line();
 static int  lex_line();
 
-static void print_token(Token* token);
-
 static void lex_comment();
 static int  lex_string();
 static void lex_identifier();

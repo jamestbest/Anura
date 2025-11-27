@@ -54,7 +54,7 @@ typedef enum keyword {
 typedef union TokenData {
     struct LitNumData {
         bool explicit_base10;
-        struct {
+        struct Base2NumInfo {
             uint8_t digits;
             uint64_t value;
         } base2;
@@ -84,6 +84,7 @@ typedef struct LexRet {
 } LexRet;
 
 LexRet lex(const char* filepath);
+void print_token(Token* token);
 
 extern const LexRet LEX_RET_FAIL;
 
