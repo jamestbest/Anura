@@ -2,6 +2,7 @@
 
 #include "Array.h"
 #include "IsildursBane.h"
+#include "MtDoom/MtDoom.h"
 #include "Palantir.h"
 #include "QueueB.h"
 #include "Saruman.h"
@@ -110,12 +111,12 @@ int BP_type_is_user(BP_TYPE type) {
     return type == BP_HARDWARE || type == BP_SOFTWARE;
 }
 
-int cmp_addr(void* bpa, void* bpb) {
+int compare_bp_addr_info(void* bpa, void* bpb) {
     return bpa - bpb;
 }
 
 ARRAY_ADD(BPInfo, BPInfo)
-ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, cmp_addr, address)
+ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 
 BPAddressInfoArray bp_info;
 
@@ -259,6 +260,8 @@ Action* create_action(ACTION_TYPE type, ACTION_DATA data) {
 }
 
 int main(int argc, char* argv[]) {
+//    disassemble_to_str(NULL);
+
     if (argc <= 1) {
         perror("Usage; expected at least one argument for the program path\n");
         return 1;

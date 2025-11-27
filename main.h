@@ -30,6 +30,9 @@ int BP_type_is_user(BP_TYPE type);
 typedef struct BPInfo {
     BP_TYPE type;
 
+    void* addr;
+    uint32_t line;
+
     union {
         // we could just save the contents of the word, but there may be another bp or code having been changed in between,
         //  so we'll just store the single byte. This won't help if something else overwrites the underlying value
@@ -47,7 +50,8 @@ typedef struct BPAddressInfo {
     BPInfoArray bps;
 } BPAddressInfo;
 
-ARRAY_PROTO(BPAddressInfo, BPAddressInfo)
+int compare_bp_addr_info(void* bpa, void* bpb);
+ARRAY_PROTO_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 
 extern BPAddressInfoArray bp_info;
 
@@ -67,7 +71,7 @@ typedef enum ACTION_TYPE {
     ACTION_CF_SINGLE_STEP,
     ACTION_CF_STEP_OVER,
     ACTION_CF_STEP_INFO,
-    ACTION_CF_CONTINUE
+    ACTION_CF_CONTINUE,
 } ACTION_TYPE;
 
 typedef union ACTION_DATA {
@@ -82,6 +86,10 @@ typedef union ACTION_DATA {
         uint32_t line;
         void* addr;
     } BP_REMOVE;
+
+    struct {
+        bool assembly_level;
+    } CF_SINGLE_STEP;
 } ACTION_DATA;
 
 typedef struct Action {
