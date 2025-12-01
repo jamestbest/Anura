@@ -88,7 +88,7 @@ bool queueb_resize(QueueB* queue, size_t new_size) {
 
 
 QueueBRes queueb_pop(QueueB* queue) {
-    pthread_mutex_unlock(&queue->lock);
+    pthread_mutex_lock(&queue->lock);
 
     if (queue->pos == 0) {
         pthread_mutex_unlock(&queue->lock);

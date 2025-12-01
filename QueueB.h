@@ -28,7 +28,7 @@ typedef struct QueueBRes {
 } QueueBRes;
 
 typedef struct QueueBAll {
-    void* data;
+    void** data;
     size_t len;
 } QueueBAll;
 

@@ -73,6 +73,7 @@ void* arr_search_e(Array* array, const void* s_e, int (*cmp)(const void* a, cons
     void typename##_arr_destroy(typename##Array* array);                       \
 
 #define ARRAY_PROTO_CMP(type, typename, generic_cmp, cmp_elem)                 \
+    ARRAY_PROTO(type, typename)                                                \
     type* typename##_arr_search_ie(                                            \
         typename##Array* array,                                                \
         const typeof((type){}.cmp_elem) s_e                                    \

@@ -6,8 +6,35 @@
 #define ANURA_SAURON_H
 
 #include <stdio.h>
+#include <elf.h>
+#include <stdlib.h>
 
 int decode(FILE* elf);
+
+typedef struct ELF64 {
+    Elf64_Ehdr header;
+    struct ProgHeader {
+        Elf64_Phdr* program_headers;
+
+        // meta info
+        struct {
+            uint header_count;
+            uint header_size;
+            uint load_segment_count;
+        };
+    } ProgHeader;
+
+    Elf64_Shdr* sections;
+
+    struct {
+        void* text;
+        void* debug_line;
+        void* debug_line_str;
+        void* str;
+    } data;
+} ELF64;
+
+extern ELF64 ELF;
 
 typedef enum DW_FORM {
     DW_FORM_addr= 1,
