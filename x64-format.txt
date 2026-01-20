@@ -27,11 +27,11 @@ RULE <LEFT | RIGHT> ON <ALIAS>
   	    100= SP, AH, AL, ESP, RSP
     }
     RULE RIGHT ON reg {
-  	    CHOOSE 0 if opmode= 16bit
+  	    CHOOSE 0 if opmode == 16bit
   	    CHOOSE 1 if ow == 0 and REX.w != 1
   	    CHOOSE 2 if ow == 0
-  	    CHOOSE 3 if opmode= 32bit
-  	    CHOOSE 4 if opmode= 64bit
+  	    CHOOSE 3 if opmode == 32bit
+  	    CHOOSE 4 if opmode == 64bit
     }
   this means that once consumed e.g. 001, we choose from the right
    based on the rules
