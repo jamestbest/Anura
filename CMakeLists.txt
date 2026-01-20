@@ -9,8 +9,8 @@ set(CMAKE_C_STANDARD 99)
 add_executable(Anura main.c shared/Array.c
         Sauron.c
         Sauron.h
-        Saruman.c
-        Saruman.h
+        Saruman/Saruman.c
+        Saruman/Saruman.h
         Palantir.c
         Palantir.h
         QueueB.c
@@ -41,6 +41,14 @@ add_executable(Anura main.c shared/Array.c
         shared/Buffer.c
         MtDoom/parser/Parser.c
         MtDoom/parser/Parser.h
+        MtDoom/parser/ShuntingYard.c
+        MtDoom/parser/ShuntingYard.h
+        Saruman/FrameInfo.c
+        Saruman/FrameInfo.h
+        Saruman/DWARFParsing.c
+        Saruman/DWARFParsing.h
+        Saruman/FrameInfoInternal.h
+        Saruman/eh_header.h
 )
 
 target_include_directories(Anura PUBLIC .)
