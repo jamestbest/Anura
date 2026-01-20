@@ -20,12 +20,16 @@ typedef enum NodeType {
     NT_IDENT,
     NT_FIELD,
 
-    NT_STRING
+    NT_LIT_STRING,
+    NT_LIT_NUM,
 } NodeType;
 
 typedef struct Node {
     NodeType type;
 } Node;
+
+VECTOR_PROTO(Node, Node)
+VECTOR_ADD(Node, Node)
 
 #define COMMON_NODE Node base;
 
@@ -43,10 +47,26 @@ typedef struct IdentNode {
 
 VECTOR_PROTO(IdentNode, IdentNode)
 
-typedef struct AliasOrNode {
+typedef struct Alias {
     COMMON_NODE
-    IdentNodeVector choices;
-} AliasOrNode;
+    const char* identifier;
+    uint32_t bits;
+} Alias;
+
+#define COMMON_ALIAS Alias a_base;
+
+// An alias that just represetents some literal data
+typedef struct AliasDataNode {
+    COMMON_ALIAS
+} AliasDataNode;
+
+typedef struct AliasMirrorNode {
+    COMMON_ALIAS
+    struct {
+        const char* mirror_name;
+        Node* mirror_node;
+    };
+};
 
 typedef struct FieldNode {
     COMMON_NODE
@@ -67,27 +87,102 @@ typedef struct AliasDescNode {
     FieldNodeVector fields;
 } AliasDescNode;
 
+typedef struct RuleNodeIf {
+    COMMON_NODE
+    Node* condition;
+    Node* output;
+} RuleNodeIf;
+
+typedef struct RuleNodeWhen {
+    COMMON_NODE
+    Node* condition;
+    Node* output;
+} RuleNodeWhen;
+
 typedef struct LeftRule {
-    
+
 } LeftRule;
 
-typedef struct RuleNode {
+typedef struct LeftRules {
+    // left rules are always a list of literals or aliases
+
+} LeftRule;
+
+typedef struct RuleNodeLR {
     COMMON_NODE
     LeftRule left;
-//    RightRule right;
-} RuleNode;
+    RightRule right;
+} RuleNodeLR;
 
-VECTOR_PROTO(RuleNode, RuleNode)
-
-typedef struct AliasRulesNode {
+typedef struct RuleNodeL {
     COMMON_NODE
-    RuleNodeVector rules;
-};
+    LeftRule left;
+} RuleNodeL;
+
+typedef union Rule {
+    RuleNodeIf rule_if;
+    RuleNodeWhen rule_when;
+    RuleNodeLR rule_lr;
+    RuleNodeL rule_l;
+} Rule;
+
+VECTOR_PROTO(Rule, Rule)
+VECTOR_ADD(Rule, Rule)
+
+/*
+ * This is the = {} and contains
+ * a list of rules, seperated on new lines
+ */
+typedef struct BracedRules {
+    RuleVector rules;
+} BracedRules;
+
+typedef struct AliasOrNode {
+    COMMON_ALIAS
+    BracedRules rules;
+} AliasOrNode;
 
 typedef struct ParseRet {
     bool succ;
     RootNode root;
 } ParseRet;
+
+// a string literal can contains {}
+//  which is an expression
+// e.g. "{sibsi} + {disp32 * 2} + [{EBP}]"
+typedef struct LitStringData {
+    const char* string;
+    NodeVector expressions;
+} LitStringData;
+
+typedef struct LitNode {
+    COMMON_NODE
+
+    union LitData {
+        const LitStringData lit_string;
+        struct LitNumData lit_number;
+    } data;
+    Token* token;
+} LitNode;
+
+typedef struct BinNode {
+    COMMON_NODE
+
+    Node* left;
+    Node* right;
+
+    BinaryOperator op;
+} BinNode;
+
+typedef union ExprNode {
+    IdentNode ident;
+    LitNode lit;
+} ExprNode;
+
+Token* current();
+Token* consume();
+
+LitNode* add_lit_node(NodeType lit_type);
 
 ParseRet parse(TokenArray* tokens);
 
