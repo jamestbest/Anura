@@ -32,6 +32,9 @@ typedef struct Target {
     int (*target_decode_file)(const char* filepath);
 
     long long (*target_single_step_assembly)();
+
+    void (*target_interrupt)();
+    void (*target_interrupt_handler_setup)();
 } Target;
 
 typedef enum TARGETS {
