@@ -4,7 +4,7 @@
 
 #include "Sauron.h"
 
-#include "Saruman.h"
+#include "Saruman/Saruman.h"
 
 #include <elf.h>
 #include <stdbool.h>
