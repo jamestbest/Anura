@@ -8,6 +8,7 @@
 #include "../TargetOS/Linux.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -90,11 +91,28 @@ void breakpoint_hit_cleanup() {
     ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[6]), r6);
 }
 
+void interrupt() {
+    kill(t_pid, SIGINT);
+}
+
+void interrupt_handler(int sig) {
+    signal(sig, SIG_IGN); // ignore the signal :)
+
+    // we'll send this to the other process
+    target.target_interrupt();
+}
+
+void interrupt_handler_setup() {
+    signal(SIGINT, interrupt_handler);
+}
+
 int linux_x64_init_target(Target* t) {
     linux_init_target(t);
 
     t->target_place_bp_at_addr= place_bp;
     t->target_breakpoint_hit_cleanup= breakpoint_hit_cleanup;
+    t->target_interrupt= interrupt;
+    t->target_interrupt_handler_setup= interrupt_handler_setup;
 
     return 0;
 }
