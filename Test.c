@@ -20,6 +20,10 @@ void tlog(const char* message, ...) {
     va_start(args, message);
     vlog(true, message, args);
     va_end(args);
+
+    for (int i= 0; i < 10; i++) {
+        int a= 0, b= i << 2;
+    }
 }
 
 void t2() {
