@@ -58,7 +58,9 @@ FindRes vec_search_e(Vector* vec, const void** s_e, int(*cmp)(const void* a, con
         size_t capacity;                                                            \
     } type_name##Vector;                                                            \
     bool type_name##_vec_add(type_name##Vector* vec, const type* elem);             \
-    type* type_name##_vec_get_unsafe(type_name##Vector* vec, size_t idx);
+    type* type_name##_vec_get_unsafe(type_name##Vector* vec, size_t idx);           \
+    type* type_name##_vec_peek(type_name##Vector* vec);                             \
+    type* type_name##_vec_pop(type_name##Vector* vec);                              \
 
 #define VECTOR_ADD(type, type_name)                                                 \
     bool type_name##_vec_add(type_name##Vector* vec, const type* elem) {            \
@@ -87,7 +89,15 @@ FindRes vec_search_e(Vector* vec, const void** s_e, int(*cmp)(const void* a, con
                                                                                     \
     type* type_name##_vec_get_unsafe(type_name##Vector* vec, size_t idx) {          \
         return vector_get_unsafe((Vector*)vec, idx);                                \
-    }
+    }                                                                               \
+                                                                                    \
+    type* type_name##_vec_peek(type_name##Vector* vec) {                            \
+        return vector_get_unsafe((Vector*)vec, vec->pos - 1);                       \
+    }                                                                               \
+                                                                                    \
+    type* type_name##_vec_pop(type_name##Vector* vec) {                             \
+        return vector_pop_unsafe((Vector*)vec);                                     \
+    }                                                                               \
 
 
 #define VECTOR_CMP(type, type_name, generic_cmp, comparable_element)                \
