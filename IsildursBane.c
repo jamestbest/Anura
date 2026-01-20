@@ -5,7 +5,6 @@
 #include "IsildursBane.h"
 
 #include "main.h"
-#include "Saruman.h"
 #include "Target.h"
 
 #include <errno.h>
