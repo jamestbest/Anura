@@ -4,7 +4,8 @@
 
 #include "Saruman.h"
 
-#include "Sauron.h"
+#include "../Sauron.h"
+#include "DWARFParsing.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -95,8 +96,8 @@ const char* DW_LNS_STRS[]= {
     [DW_LNS_set_isa]= "set_isa"
 };
 
+#include "../Target.h"
 #include "Array.h"
-#include "Target.h"
 
 ARRAY_PROTO(uint8_t, ubyte)
 ARRAY_ADD(uint8_t, ubyte)
@@ -133,74 +134,6 @@ typedef struct DW_LInfo64 {
     uint64_t file_names_count; // THIS IS ULEB128 encoded in the file
     uint8_t* file_names;
 } DW_LInfo64;
-
-uint64_t decode_uleb128(uint8_t* start) {
-    uint64_t res= 0;
-    uint64_t shift= 0;
-    uint8_t byte;
-    size_t bi= 0;
-    do {
-        byte= start[bi++];
-        res |= (byte & 0b01111111) << shift;
-        shift += 7;
-    } while ((byte & 0b10000000) != 0);
-
-    return res;
-}
-
-
-#define READ_AND_ADV(type, s) \
-    *(type*)s; s+= sizeof (type);
-
-#define RAA(elem) \
-    {typeof(&elem)temp=(void*)base; elem=*temp; base+= sizeof (elem);}
-
-typedef struct ULEB128 {
-    uint64_t v;
-    uint8_t size;
-} ULEB128;
-
-typedef struct LEB128 {
-    int64_t v;
-    uint8_t size;
-} LEB128;
-
-ULEB128 read_uleb128(uint8_t* start) {
-    uint64_t res= 0;
-    uint8_t i= 0, s= 0, b;
-    do {
-        b= start[i++];
-        res |= (b & 0x7f) << s;
-        s += 7;
-    } while ((b & 0x80) != 0);
-
-    return (ULEB128) {
-        .size= i,
-        .v= res
-    };
-}
-
-LEB128 read_leb128(uint8_t* start) {
-    int64_t res= 0;
-    uint8_t shift= 0;
-
-    uint8_t size= 64; // 64 bits in the result variable
-    uint8_t b, i=0;
-
-    do {
-        b= start[i++];
-        res |= (b & 0x7f) << shift;
-        shift += 7;
-    } while ((b & 0x80) != 0);
-
-    if ((shift < size) && ((b & 0x40) != 0))
-        res |= (~0 << shift);
-
-    return (LEB128) {
-        .v= res,
-        .size= i
-    };
-}
 
 DW_LInfo64 info;
 uint8_t* text_data= NULL;
@@ -406,14 +339,11 @@ int read_header(uint8_t* start, char* string_data) {
     void* bc_start; // byte code start
     void* bc_end;
 
-    bool bit64= false;
+    MODE mode;
+
+    base= read_initial_length(base, &info.ul_64, &mode);
     // The base is a sequence of bytes that can be read at the start
-    RAA(info.ul_32);
-    if (info.ul_32 == 0xFFFFFFFF) {
-        bit64= true;
-        RAA(info.ul_64);
-    }
-    bc_end= (void*)(base + (uint64_t)(bit64 ? info.ul_64 : info.ul_32));
+    bc_end= (void*)(base + info.ul_64);
 
     // THE HEADER INFORMATION IS DIFFERENT BETWEEN VERSIONS
     RAA(info.version);
@@ -427,12 +357,9 @@ int read_header(uint8_t* start, char* string_data) {
         info.seg_sel_size= 0; // we assume no segment selector for now, although a dwarf version this old may be a 16-bit platform
     }
 
-    RAA(info.hl_32)
-    if (info.hl_32 == 0xFFFFFFFF) {
-        RAA(info.hl_64);
-    }
+    base= read_initial_length(base, &info.hl_64, &mode);
 
-    bc_start= (void*)(base + (uint64_t)(bit64 ? info.hl_64 : info.hl_32));
+    bc_start= (void*)(base + info.hl_64);
     printf("ByteCode starts at addr %p from base of %p\n", bc_start, start);
 
     RAA(info.min_instr_length);
@@ -446,7 +373,6 @@ int read_header(uint8_t* start, char* string_data) {
     RAA(info.line_base);
     RAA(info.line_range);
     RAA(info.op_base);
-
 
     // The rest we have to create
     size_t standard_opcodes= info.op_base - 1;

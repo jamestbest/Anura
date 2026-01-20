@@ -5,10 +5,11 @@
 #ifndef SARUMAN_H
 #define SARUMAN_H
 
-#include <stdint.h>
+#include "../Target.h"
+
 #include <stdbool.h>
 #include <stddef.h>
-#include "Target.h"
+#include <stdint.h>
 
 typedef struct DecodeRet {
     size_t bytes_read;
