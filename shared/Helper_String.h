@@ -77,4 +77,6 @@ void fnewline(FILE* f);
 
 char* str_cat_dyn(const char* stra, const char* strb);
 
+UTF8Pos getutf8(const char* string);
+
 #endif //ATOMIC_HELPER_STRING_H
