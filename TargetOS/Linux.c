@@ -4,8 +4,8 @@
 
 #include "Linux.h"
 
+#include "../Saruman/Saruman.h"
 #include "Array.h"
-#include "Saruman.h"
 #include "Sauron.h"
 
 #include <elf.h>
