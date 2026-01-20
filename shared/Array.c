@@ -98,6 +98,20 @@ void arr_add(Array* array, const void* element) {
     array->flags.sorted= false;
 }
 
+void arr_insert(Array* array, size_t idx, const void* element) {
+    if (arr_is_at_capacity(array))
+        arr_resize(array);
+
+    // copy all at the idx and to the right one across
+    memcpy(
+        &array->arr[(idx + 1) * array->element_size],
+        &array->arr[idx * array->element_size],
+        (array->pos - idx) * array->element_size
+    );
+
+    arr_set(array, idx, element);
+}
+
 // add to the array a value that is not the size of the array element size
 void arr_add_dyn(Array* array, const void* element, const size_t element_size) {
     if (arr_is_at_capacity(array))

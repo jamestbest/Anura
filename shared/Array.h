@@ -33,6 +33,7 @@ void arr_resize(Array* array);
 void arr_add(Array* array, const void* element);
 void* arr_add_i(Array* arr);
 void arr_add_dyn(Array* array, const void* element, size_t element_size);
+void arr_insert(Array* array, size_t idx, const void* element);
 void arr_set(Array* array, size_t index, const void* element);
 void arr_set_dyn(Array* array, size_t index, const void* element, size_t element_size);
 bool arr_remove(Array* array, uint index);
@@ -59,10 +60,11 @@ void* arr_search_e(Array* array, const void* s_e, int (*cmp)(const void* a, cons
     extern const typename##Array typename##ARRAY_EMPTY;                        \
                                                                                \
     void typename##_arr_add(typename##Array* arr, const type element);         \
+    void typename##_arr_insert(typename##Array* arr, size_t idx, type elem);   \
     type typename##_arr_get(const typename##Array* arr, const uint index);     \
     type* typename##_arr_ptr(const typename##Array* arr, const uint index);    \
     type typename##_arr_pop(typename##Array* arr);                             \
-    type typename##_arr_peek(const typename##Array* arr);                      \
+    type* typename##_arr_peek(const typename##Array* arr);                     \
     typename##Array typename##_arr_construct(uint elem_c);                     \
     typename##Array typename##_arr_create();                                   \
     bool typename##_arr_is_at_capacity(const typename##Array* array);          \
@@ -92,6 +94,16 @@ void* arr_search_e(Array* array, const void* s_e, int (*cmp)(const void* a, cons
     int typename##_arr_cmp_i(                                                  \
         const void* a, const void* b                                           \
     );                                                                         \
+    void typename##_arr_add_sorted(                                            \
+        typename##Array* array,                                                \
+        const type elem                                                        \
+    );                                                                         \
+    size_t typename##_arr_insertion_point_i(                                   \
+        const typeof((type){0}.cmp_elem) key,                                  \
+        const void* base,                                                      \
+        const size_t nmemb,                                                    \
+        const size_t size                                                      \
+    );                                                                         \
 
 #define ARRAY_ADD(type, typename)                                              \
     const typename##Array typename##ARRAY_EMPTY= {                             \
@@ -110,6 +122,10 @@ void* arr_search_e(Array* array, const void* s_e, int (*cmp)(const void* a, cons
          return arr_add_i((Array*)arr);                                        \
     }                                                                          \
                                                                                \
+    void typename##_arr_insert(typename##Array* arr, size_t idx, type elem) {  \
+        arr_insert(arr, idx, &elem);                                           \
+    }                                                                          \
+                                                                               \
     type typename##_arr_get(const typename##Array* arr, const uint index) {    \
          return *(type*)arr_ptr((Array*)arr, index);                           \
     }                                                                          \
@@ -122,8 +138,8 @@ void* arr_search_e(Array* array, const void* s_e, int (*cmp)(const void* a, cons
         return *(type*)arr_pop((Array*)arr);                                   \
     }                                                                          \
                                                                                \
-    type typename##_arr_peek(const typename##Array* arr) {                     \
-        return *(type*)arr_peek((Array*)arr);                                  \
+    type* typename##_arr_peek(const typename##Array* arr) {                    \
+        return (type*)arr_peek((Array*)arr);                                   \
     }                                                                          \
                                                                                \
     typename##Array typename##_arr_construct(uint elem_c) {                    \
@@ -239,6 +255,49 @@ void* arr_search_e(Array* array, const void* s_e, int (*cmp)(const void* a, cons
             typename##_arr_search_cmp_i                                        \
         );                                                                     \
     }                                                                          \
+                                                                               \
+    void typename##_arr_add_sorted_i(                                          \
+        typename##Array* array,                                                \
+        const type elem                                                        \
+    ) {                                                                        \
+        if (!array->flags.sorted)                                              \
+            typename##_arr_sort_i(array);                                      \
+                                                                               \
+        size_t insert_point= typename##_arr_insertion_point_i(                 \
+            elem.cmp_elem,                                                     \
+            array->arr,                                                        \
+            array->pos,                                                        \
+            sizeof(type)                                                       \
+        );                                                                     \
+                                                                               \
+        typename##_arr_insert(array, insert_point, elem);                      \
+                                                                               \
+        array->flags.sorted= true;                                             \
+    }                                                                          \
+                                                                               \
+    size_t typename##_arr_insertion_point_i(                                   \
+        const typeof((type){0}.cmp_elem) key,                                  \
+        const void* base,                                                      \
+        const size_t nmemb,                                                    \
+        const size_t size                                                      \
+    ) {                                                                        \
+        size_t left= 0, right= nmemb;                                          \
+                                                                               \
+        while (left < right) {                                                 \
+            size_t mid= left + (right - left) / 2;                             \
+            const type* elem= base + mid * size;                               \
+                                                                               \
+            if (generic_cmp(elem->cmp_elem, key) < 0) {                        \
+                left= mid + 1;                                                 \
+            } else {                                                           \
+                right= mid;                                                    \
+            }                                                                  \
+        }                                                                      \
+                                                                               \
+        return left;                                                           \
+    }                                                                          \
+
+
 
 #define ARRAY_ADD_CMP(type, typename, generic_cmp, cmp_elem)                   \
     ARRAY_ADD(type, typename)                                                  \
