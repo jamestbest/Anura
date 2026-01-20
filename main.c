@@ -5,7 +5,7 @@
 #include "MtDoom/MtDoom.h"
 #include "Palantir.h"
 #include "QueueB.h"
-#include "Saruman.h"
+#include "Saruman/Saruman.h"
 #include "Sauron.h"
 #include "Target.h"
 
@@ -277,7 +277,8 @@ int main(int argc, char* argv[]) {
     pthread_t cmd_thread;
     pthread_create(&cmd_thread, NULL, control_target, (void*)program);
 
-    tui();
+    tui_setup();
+    tui_loop();
 
     printf("Waiting for command thread to join\n");
     // here we can assume that the process has died

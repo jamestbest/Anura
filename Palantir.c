@@ -8,18 +8,19 @@
 
 #include "Palantir.h"
 
+#include "main.h"
 #include "QueueB.h"
-#include "Saruman.h"
+#include "Saruman/Saruman.h"
 
 #include <errno.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "main.h"
 
-int setup() {
-
+int tui_setup() {
+    target.target_interrupt_handler_setup();
 }
 
 /*                 UI HANDLING
@@ -48,7 +49,7 @@ int setup() {
  * as they'll both be in the generator list.
  */
 
-int tui() {
+int tui_loop() {
     while (true) {
         printf("cmd: ");
         char buff[100];
