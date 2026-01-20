@@ -17,7 +17,7 @@ Buffer line_buff;
 Vector lines;
 
 ARRAY_ADD(Token, Token)
-TokenArray tokens;
+static TokenArray tokens;
 
 char* c_char;
 char* line_start_char;
@@ -106,6 +106,16 @@ TokenMeta token_meta() {
     };
 }
 
+void add_binary_op(BinaryOperator type) {
+    Token t= (Token){
+        .type= BINARY_OP,
+        .meta= token_meta(),
+        .data.bin_op= type
+    };
+
+    Token_arr_add(&tokens, t);
+}
+
 void add_simple_token(TokenType type) {
     Token t= (Token) {
         .type= type,
@@ -128,7 +138,7 @@ int lex_line() {
                 break;
             case '=': {
                 if (peek() == '=') {
-                    add_simple_token(EQUALITY);
+                    add_binary_op(EQUALITY);
                     consume();
                     break;
                 }
@@ -139,16 +149,16 @@ int lex_line() {
             case ')': add_simple_token(RPAREN); break;
             case '{': add_simple_token(LBRACE); break;
             case '}': add_simple_token(RBRACE); break;
-            case '.': add_simple_token(DOT); break;
+            case '.': add_binary_op(DOT); break;
             case ',': add_simple_token(COMMA); break;
-            case '*': add_simple_token(STAR); break;
+            case '*': add_binary_op(STAR); break;
             case '?': add_simple_token(QUESTION); break;
-            case '|': add_simple_token(PIPE); break;
-            case '^': add_simple_token(POW); break;
+            case '|': add_binary_op(PIPE); break;
+            case '^': add_binary_op(POW); break;
             case '!': {
                 if (peek() != '=') goto lex_line_no_simple;
 
-                add_simple_token(NEQ);
+                add_binary_op(NEQUALITY);
                 break;
             }
             default: goto lex_line_no_simple;
@@ -238,26 +248,34 @@ const char* KEYWORD_STRINGS[KEYWORD_COUNT]= {
     [DATA]= "DATA"
 };
 
+const char* keyword_string(keyword kw) {
+    return KEYWORD_STRINGS[kw];
+}
+
 const char* TOKEN_TYPE_STRS[TOKEN_TYPE_COUNT]= {
     [KEYWORD]= "KEYWORD",
-    [EQUALITY]= "EQUALITY",
     [ASSIGN]= "ASSIGN",
     [IDENTIFIER]= "IDENTIFIER",
     [LBRACE]= "LBRACE",
     [RBRACE]= "RBRACE",
     [DELIMITER]= "DELIMITER",
     [COMMENT]= "COMMENT",
-    [DOT]= "DOT",
     [LPAREN]= "LPAREN",
     [RPAREN]= "RPAREN",
     [LIT_NUM]= "LIT_NUM",
     [LIT_STRING]= "LIT_STRING",
     [COMMA]= "COMMA",
-    [NEQ]= "NEQ",
-    [STAR]= "STAR",
     [QUESTION]= "QUESTION",
-    [PIPE]= "PIPE",
-    [POW]= "POW"
+    [BINARY_OP]= "BINARY OP"
+};
+
+const char* BINARY_OP_STRINGS[BINARY_OP_COUNT]= {
+    [EQUALITY]= "EQUALITY (==)",
+    [NEQUALITY]= "NEQUALITY (!=)",
+    [DOT]= "DOT (.)",
+    [STAR]= "STAR (*)",
+    [PIPE]= "PIPE (|)",
+    [POW]= "POW (**)",
 };
 
 int identifier_comp(const void* ppa, const void* ppb) {
@@ -459,6 +477,24 @@ void print_token(Token* token) {
             printf("%s", KEYWORD_STRINGS[token->data.keyword]);
             break;
         }
+
+        case ASSIGN:
+        case LBRACE:
+        case RBRACE:
+        case DELIMITER:
+        case COMMENT:
+        case LPAREN:
+        case RPAREN:
+        case COMMA:
+        case QUESTION:
+            break;
+
+        case BINARY_OP:
+            printf("`%s`", BINARY_OP_STRINGS[token->data.bin_op]);
+            break;
+
+        default:
+            assert(false);
     }
 
     printf("}\n");

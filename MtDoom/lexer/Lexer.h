@@ -11,26 +11,31 @@
 
 typedef enum TokenType {
     KEYWORD,
-    EQUALITY,
     ASSIGN,
     IDENTIFIER,
     LBRACE,
     RBRACE,
     DELIMITER,
     COMMENT,
-    DOT,
     LPAREN,
     RPAREN,
     LIT_NUM,
     LIT_STRING,
     COMMA,
-    NEQ,
-    STAR,
     QUESTION,
-    PIPE,
-    POW,
+    BINARY_OP,
     TOKEN_TYPE_COUNT
 } TokenType;
+
+typedef enum BinaryOperator {
+    EQUALITY,
+    NEQUALITY,
+    DOT,
+    STAR,
+    PIPE,
+    POW,
+    BINARY_OP_COUNT
+} BinaryOperator;
 
 typedef enum keyword {
     ALIAS,
@@ -61,6 +66,7 @@ typedef union TokenData {
         uint64_t base10;
     } lit_num;
     keyword keyword;
+    BinaryOperator bin_op;
     const char* identifier;
     const char* lit_string;
 } TokenData;
@@ -85,6 +91,7 @@ typedef struct LexRet {
 
 LexRet lex(const char* filepath);
 void print_token(Token* token);
+const char* keyword_string(keyword kw);
 
 extern const LexRet LEX_RET_FAIL;
 
