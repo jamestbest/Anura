@@ -102,11 +102,11 @@ ALIAS regT 3 BITS= {
 }
 
 RULE RIGHT ON reg, regT {
-  CHOOSE 0 if opmode= 16bit
-  CHOOSE 1 if ow == 0 and REX.w != 1
-  CHOOSE 2 if ow == 0
-  CHOOSE 3 if opmode= 32bit
-  CHOOSE 4 if opmode= 64bit
+  CHOOSE 0 if opmode == 16bit
+  CHOOSE 1 if opmode == 8bit and REX.w != 1
+  CHOOSE 2 if opmode == 8bit
+  CHOOSE 3 if opmode == 32bit
+  CHOOSE 4 if opmode == 64bit
 }
 
 ALIAS cc 4 BITS= {
@@ -167,12 +167,13 @@ ALIAS op= {
 }
 
 ALIAS op2= {
-  0xE6 ModRM REQUIRE REP= CVTDQ2PD xyzreg, xyzrm=  // change on E/VEX
-  0x1E 0xFA  REQUIRE REP= ENDBR64
+  0xE6 ModRM= CVTDQ2PD xyzreg, xyzrm=  // change on E/VEX //  REQUIRE REP
+  0x1E 0xFA = ENDBR64
   CMOV
 }
 
 CALCULATE opmode= {
+  if ow then 8bit
   when mode == 64bit then {
     if REX.w then 64bit
     if lp3 then 16bit
@@ -188,23 +189,28 @@ CALCULATE opmode= {
   }
 }
 
-DATA imm x BITS= {
-  if opmode == 8bit then 1 BYTE
-  if opmode == 16bit then 2 BYTES
-  if opmode == 32bit then 4 BYTES
-  if opmode == 64bit then 8 BYTES
+ALIAS imm8 1 BYTE
+ALIAS imm16 2 BYTES
+ALIAS imm32 4 BYTES
+ALIAS imm64 8 BYTES
+
+ALIAS imm= {
+  if opmode == 8bit then imm8
+  if opmode == 16bit then imm16
+  if opmode == 32bit then imm32
+  if opmode == 64bit then imm64
 }
 
-DATA immM32 x BITS= {
-  if opmode == 8bit then 1 BYTE
-  if opmode == 16bit then 2 BYTES
-  if opmode == 32bit then 4 BYTES
-  if opmode == 64bit then 4 BYTES
+ALIAS immM32= {
+  if opmode == 8bit then imm8
+  if opmode == 16bit then imm16
+  if opmode == 32bit then imm32
+  if opmode == 64bit then imm32
 }
 
-DATA disp8 1 BYTE
-DATA disp16 2 BYTES
-DATA disp32 4 BYTES
+ALIAS disp8 1 BYTE
+ALIAS disp16 2 BYTES
+ALIAS disp32 4 BYTES
 
 // opcodes are matched up to the next non-0|1
 //  i.e. each level is expanded to it's level of 1|0s
