@@ -49,10 +49,15 @@ add_executable(Anura main.c shared/Array.c
         Saruman/DWARFParsing.h
         Saruman/FrameInfoInternal.h
         Saruman/eh_header.h
+        MtDoom/output/default.c
+        MtDoom/output/default.h
+        MtDoom/output/Generator.c
+        MtDoom/output/Generator.h
+        MtDoom/output/GeneratorInternal.h
 )
 
 target_include_directories(Anura PUBLIC .)
-target_include_directories(Anura PUBLIC ./shared)
+target_include_directories(Anura PUBLIC ./shared ./MtDoom)
 
 add_compile_options(-pthread)
 find_package(Threads REQUIRED)
