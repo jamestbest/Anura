@@ -123,7 +123,7 @@ void* arr_search_e(Array* array, const void* s_e, int (*cmp)(const void* a, cons
     }                                                                          \
                                                                                \
     void typename##_arr_insert(typename##Array* arr, size_t idx, type elem) {  \
-        arr_insert(arr, idx, &elem);                                           \
+        arr_insert((Array*)arr, idx, &elem);                                   \
     }                                                                          \
                                                                                \
     type typename##_arr_get(const typename##Array* arr, const uint index) {    \
