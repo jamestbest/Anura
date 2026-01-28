@@ -3,6 +3,7 @@
 //
 
 #include "ShuntingYard.h"
+#include "ShuntingYardInternal.h"
 
 VECTOR_PROTO(Token, Token)
 VECTOR_ADD(Token, Token)
@@ -49,8 +50,8 @@ Node* shunt() {
                 while (t2= Token_vec_peek(&operator_stack), t2 != NULL) {
                     if (t2->type == LPAREN) break;
 
-                    int o1_p= PRECEDENCE[t->data.bin_op];
-                    int o2_p= PRECEDENCE[t2->data.bin_op];
+                    const int o1_p= PRECEDENCE[t->data.bin_op];
+                    const int o2_p= PRECEDENCE[t2->data.bin_op];
                     if (!(
                         (o2_p > o1_p) ||
                         ((o2_p == o1_p) && ASSOC[t->data.bin_op] == ASSOC_LEFT)
