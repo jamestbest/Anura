@@ -50,4 +50,6 @@ uint32_t raa_utf8(uint8_t** start);
 PointerEncoding raa_pointer_encoding(uint8_t** start);
 Pointer raa_pointer_value_from_PE(uint8_t** start, PointerEncoding pe);
 
+void print_expression(DW_EXPR* expression);
+
 #endif //DWARFPARSING_H

@@ -231,3 +231,7 @@ uint32_t raa_utf8(uint8_t** start) {
 
     return res.value;
 }
+
+void print_expression(DW_EXPR* expression) {
+    printf("<<TODO>> expr <<TODO>>");
+}
