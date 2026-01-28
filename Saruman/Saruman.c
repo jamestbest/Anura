@@ -636,7 +636,7 @@ void on_new_row_header() {
                 assert(false);
             }
 
-            LNEntry* entry= &LN_info.entries[entry_off];
+            LNEntry* entry= (LNEntry*)&LN_info.entries[entry_off];
             if (entry->cc == 0) assert(false);
 
             LNData* child= &((LNData*)(entry + 1))[entry->cc - 1];
@@ -655,7 +655,7 @@ void on_new_row_header() {
 
             if (entry_off == -1) {
                 // add a new entry
-                LNEntry* entry= LN_info.next_free;
+                LNEntry* entry= (LNEntry*)LN_info.next_free;
                 entry->cc= 1;
                 entry->max_size= 1;
 
@@ -672,7 +672,7 @@ void on_new_row_header() {
             } else {
                 // add another entry (>1) so we might have to move others
                 // around
-                LNEntry* entry= &LN_info.entries[entry_off];
+                LNEntry* entry= (LNEntry*)&LN_info.entries[entry_off];
                 LN_info.last_entry= entry_off;
                 uint32_t extra_size= 0;
                 if (entry->max_size < entry->cc + 1) {
@@ -707,7 +707,7 @@ void on_new_row_header() {
     } else {
         // this is a special case for the first row being added
         //  we just find the line entry and add the default data
-        LNEntry* entry= LN_info.next_free;
+        LNEntry* entry= (LNEntry*)LN_info.next_free;
         *entry= (LNEntry) {
             .cc= 1,
             .max_size= 1
