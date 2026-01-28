@@ -10,9 +10,8 @@
 
 typedef enum NodeType {
     NT_ROOT,
-    NT_ALIAS_OR_STMT,
-    NT_ALIAS_DESC_STMT,
-    NT_ALIAS_RULES_STMT,
+    NT_ALIAS,
+    NT_DATA,
     NT_STRUCTURE_STMT,
     NT_STATEMENTS,
     NT_FLAG_STATEMENT,
@@ -55,19 +54,6 @@ typedef struct Alias {
 
 #define COMMON_ALIAS Alias a_base;
 
-// An alias that just represetents some literal data
-typedef struct AliasDataNode {
-    COMMON_ALIAS
-} AliasDataNode;
-
-typedef struct AliasMirrorNode {
-    COMMON_ALIAS
-    struct {
-        const char* mirror_name;
-        Node* mirror_node;
-    };
-};
-
 typedef struct FieldNode {
     COMMON_NODE
     bool named;
@@ -82,10 +68,11 @@ typedef struct FieldNode {
 
 VECTOR_PROTO(FieldNode, FieldNode)
 
-typedef struct AliasDescNode {
+typedef struct DataNode {
     COMMON_NODE
+    const char* name;
     FieldNodeVector fields;
-} AliasDescNode;
+} DataNode;
 
 typedef struct RuleNodeIf {
     COMMON_NODE
@@ -106,7 +93,11 @@ typedef struct LeftRule {
 typedef struct LeftRules {
     // left rules are always a list of literals or aliases
 
-} LeftRule;
+} LeftRules;
+
+typedef struct RightRule {
+
+} RightRule;
 
 typedef struct RuleNodeLR {
     COMMON_NODE
@@ -159,7 +150,7 @@ typedef struct LitNode {
     COMMON_NODE
 
     union LitData {
-        const LitStringData lit_string;
+        LitStringData lit_string;
         struct LitNumData lit_number;
     } data;
     Token* token;

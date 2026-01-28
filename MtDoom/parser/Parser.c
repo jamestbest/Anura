@@ -21,6 +21,7 @@ Token* current();
 Token* consume();
 static Token* expect(TokenType type);
 static Token* expect_keyword(keyword kw);
+static Token* expect_binary_op(BinaryOperator op);
 static void skip(TokenType type);
 static Token* peek();
 static Token* peer(uint distance);
@@ -127,7 +128,33 @@ int parse_braced_rule(RuleVector* rules) {
     }
 
     return parse_l_or_lr_rule(rules);
+}
 
+int parse_l_or_lr_rule(RuleVector* rules) {
+    LeftRule l_rule= parse_left_rule();
+
+    if (expect_binary_op(EQUALITY)) {
+        RightRule r_rule= parse_right_rule();
+
+        Rule_vec_add(rules, (Rule){.rule_lr=
+            {
+                .base= {.type= NT_},
+                .left= l_rule,
+                .right= r_rule
+            }
+        });
+
+        return SUCCESS;
+    }
+
+    Rule_vec_add(rules, (Rule) {
+        .rule_l= {
+            .base= {.type= NT_},
+            .left= l_rule
+        }
+    });
+
+    return SUCCESS;
 }
 
 int parse_braced_rules(BracedRules* results) {
@@ -161,14 +188,14 @@ int parse_alias_list(Alias a_base) {
 
     alias_node->a_base= a_base;
 
-    if (!expect(EQUALITY)) {
+    if (!expect_binary_op(EQUALITY)) {
         return unexpected("Alias list statement after alias identifier", current());
     }
 
-    return parse_braced_rules(&alias_node.rules);
+    return parse_braced_rules(&alias_node->rules);
 }
 
-uint64_t convert_lit_num_to_base10(struct LitNumData lit_num, bool expecting_base10) {
+uint64_t convert_lit_num_to_base10(const struct LitNumData lit_num, const bool expecting_base10) {
     if (lit_num.explicit_base10) {
         return lit_num.base10;
     }
@@ -243,6 +270,14 @@ Token* consume() {
 
 Token* expect_keyword(keyword kw) {
     if (current()->type != KEYWORD || current()->data.keyword != kw) {
+        return NULL;
+    }
+
+    return consume();
+}
+
+Token* expect_binary_op(BinaryOperator op) {
+    if (current()->type != BINARY_OP || current()->data.bin_op != op) {
         return NULL;
     }
 
@@ -377,3 +412,4 @@ LitNode* add_lit_node(NodeType lit_type) {
 Vector create_children() {
     return vector_create();
 }
+
