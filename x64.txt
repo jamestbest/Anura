@@ -44,14 +44,14 @@ FLAG ow
 //       or for Brrr
 //       or for B(RM.bbb)
 // REX.B = Extension of the ModR/M r/m field, SIB base field, or Opcode reg field
-ALIAS REX 1 BYTE= {
+DATA REX= {
   0100 .w .r .x .b
 }
 
 // these bits have been written in the high-low level, is this ok to assume?
 //  when reading new BYTEs we just read high bit as we get the whole BYTE at once
 // dot prefix? for accessing values within? or the alias listing?
-ALIAS VEX 1 BYTE= {
+DATA VEX= {
   1100 0100 .R .X .B .m(5) .W .v(4) .L .pp(2)
   1100 0101 .R .v(4) .L .pp(2)
 }
@@ -86,12 +86,18 @@ ALIAS lp4 1 BYTE= {
   0x67= AO
 }
 
-ALIAS reg 3 BITS= {
-  000= AX, AL, AL, EAX, RAX
-  001= CX, CL, AL, ECX, RCX
+ALIAS reg 4 BITS = {
+  0000= AX, AL, AL, EAX, RAX
+  0001= CX, CL, AL, ECX, RCX
 
-  100= SP, AH, AL, ESP, RSP
+  0100= SP, AH, AL, ESP, RSP
+
+  1000= R8B, R8
 }
+
+ALIAS regi 3 BITS = MAP reg REX.x regi
+ALIAS regb 3 bits = MAP reg REX.b regb
+ALIAS regr 3 bits = MAP reg REX.r regr
 
 // some instructions access SPL etc. instead of AH etc.
 ALIAS regT 3 BITS= {
@@ -128,20 +134,20 @@ ALIAS cc 4 BITS= {
   1111= NLE,G
 }
 
-ALIAS sibs 2 BITS
+DATA sibs 2 BITS= {.val(2)}
 ALIAS sibi= reg
 ALIAS sibb= reg
 
 ALIAS sibsi 5 BITS= {
-   sibs 100 =
-   sibs sibi= "[{sibi} * {2 ^ sibs}]"
+   sibs 100 = ""
+   sibs sibi= "[{sibi} * {2 ^ sibs.val}]"
 }
 
 ALIAS SIB 1 BYTE= {
   sibsi 101 = {
     if Mod == 00 then "{sibsi} + {disp32}"
-    if Mod == 01 then "{sibsi} + {disp8} + [{EBP}]"
-    if Mod == 10 then "{sibsi} + {disp32} + [{EBP}]"
+    if Mod == 01 then "{sibsi} + {disp8} + [EBP]"
+    if Mod == 10 then "{sibsi} + {disp32} + [EBP]"
   }
   sibsi sibb = "{sibsi} + {sibb}"
 }
@@ -189,10 +195,10 @@ CALCULATE opmode= {
   }
 }
 
-ALIAS imm8 1 BYTE
-ALIAS imm16 2 BYTES
-ALIAS imm32 4 BYTES
-ALIAS imm64 8 BYTES
+DATA imm8 1 BYTE
+DATA imm16 2 BYTES
+DATA imm32 4 BYTES
+DATA imm64 8 BYTES
 
 ALIAS imm= {
   if opmode == 8bit then imm8
@@ -208,9 +214,9 @@ ALIAS immM32= {
   if opmode == 64bit then imm32
 }
 
-ALIAS disp8 1 BYTE
-ALIAS disp16 2 BYTES
-ALIAS disp32 4 BYTES
+DATA disp8 1 BYTE
+DATA disp16 2 BYTES
+DATA disp32 4 BYTES
 
 // opcodes are matched up to the next non-0|1
 //  i.e. each level is expanded to it's level of 1|0s
@@ -244,7 +250,11 @@ ALIAS CMOV= {
 
 
 
-
+ALIAS Test= {
+    TEST2
+    if test3 == TEST3_ then TEST4
+    Test5 01101 = "[Output]"
+}
 
 
 
