@@ -64,4 +64,7 @@ typedef struct Instruction {
     IData data;
 } Instruction;
 
+void frame_info_init();
+void frame_info_destroy();
+
 #endif //FRAMEINFO_H
