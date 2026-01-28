@@ -79,4 +79,6 @@ char* str_cat_dyn(const char* stra, const char* strb);
 
 UTF8Pos getutf8(const char* string);
 
+char* capitalised(const char* str);
+
 #endif //ATOMIC_HELPER_STRING_H

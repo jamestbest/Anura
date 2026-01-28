@@ -354,3 +354,14 @@ size_t fputs_upper(FILE* stream, const char* string) {
 
     return s - string;
 }
+
+char* capitalised(const char* str) {
+    const size_t len= strlen(str);
+    char* res= malloc((len + 1) * sizeof (char));
+
+    for (size_t pos = 0; pos < len; pos++) {
+        res[pos]= toupper(str[pos]);
+    }
+
+    return res;
+}
