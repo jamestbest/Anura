@@ -16,70 +16,33 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "Errors.h"
+#include "Helper_String.h"
 
-typedef enum AugDataType {
-    AUG_DATA_NONE,
-    AUG_DATA_EH,
-    AUG_DATA_AUG
-} AugDataType;
+static CIEOArray CIEs;
+static FDEArray FDEs;
 
-typedef struct CIE_Entry {
-    uint64_t length;
-    uint8_t version;
+CIE_Entry* get_cie_entry_from_offset(uint64_t offset) {
+    CIEAndOffset* res= CIEO_arr_search_ie(&CIEs, offset);
+    if (!res) return NULL;
 
-    struct {
-        uint8_t* aug_string;
-        AugDataType type;
+    assert(res->offset == offset);
+    return res->entry;
+}
 
-        union {
-            uint64_t eh_data;
-            struct {
-                Pointer P_personality_routine_handler;
+void add_cie_entry(CIE_Entry* entry, uint64_t offset) {
+    CIEO_arr_add_sorted_i(&CIEs, (CIEAndOffset) {.entry= entry, .offset= offset});
+}
 
-                PointerEncoding L_pointer_encoding;
-                PointerEncoding P_pointer_encoding;
-                PointerEncoding R_pointer_encoding;
+void frame_info_init() {
+    CIEs= CIEO_arr_create();
+    FDEs= FDE_arr_create();
+}
 
-                bool has_fde_L_pointer_encoding; // L in aug
-                bool has_personality_routine_handler; // P in aug
-                bool has_fde_address_pointer_encoding; // R in aug
-            };
-        };
-    } aug_data;
-
-    uint8_t address_size;
-    uint8_t segment_selector_size;
-    uint64_t code_alignment_factor;
-    int64_t data_alignment_factor;
-    uint64_t return_address_register;
-    uint8_t* initial_instructions;
-    uint32_t instructions_size;
-    uint8_t* padding;
-} CIE_Entry;
-
-typedef struct FDE_Entry {
-    uint64_t length;
-    CIE_Entry* cie_entry;
-    uint64_t segment_selector;
-    uint64_t initial_location;
-    uint64_t address_range;
-    uint8_t* instructions;
-    uint32_t instructions_size;
-    uint8_t* padding;
-} FDE_Entry;
-
-static FDE_Entry read_fde_entry(
-    uint8_t* header_base,
-    uint8_t* base,
-    const uint8_t* end,
-    uint64_t cie_offset
-);
-
-static CIE_Entry read_cie_entry(uint8_t** base);
-
-static Instruction decode_op(uint8_t** start);
-static void execute_op(Instruction instr);
-static void decode_and_execute_op(uint8_t** start);
+void frame_info_destroy() {
+    CIEO_arr_destroy(&CIEs);
+    FDE_arr_destroy(&FDEs);
+}
 
 int read_header(uint8_t* start) {
     uint64_t length;
@@ -113,47 +76,58 @@ int read_header(uint8_t* start) {
         }
     }
 
+    int res= SUCCESS;
     if (is_cie) {
-        read_cie_entry(base);
+        CIE_Entry* cie= malloc(sizeof(CIE_Entry));
+        *cie= (CIE_Entry) {.length= length, .offset_location= (uint64_t)start};
+        res= read_cie_entry(&base, mode, cie);
+
+        if (res != SUCCESS) {
+            free(cie);
+            return res;
+        }
+
+        add_cie_entry(cie, (uint64_t)start);
     } else {
-        read_fde_entry(start, base, header_end, fde_offset);
+        CIE_Entry* cie= get_cie_entry_from_offset(fde_offset);
+        FDE_Entry fde= (FDE_Entry) {.length= length, .cie_entry= cie, .offset_location= (uint64_t)start};
+        res= read_fde_entry(start, base, header_end, &fde);
     }
+
+    return res;
 }
 
-CIE_Entry read_cie_entry(uint8_t** start, MODE mode) {
+int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry) {
     uint8_t* base= *start;
 
-    uint8_t version;
-    RAA(version);
+    RAA(entry->version);
 
-    const uint8_t* augmentation= raa_null_term_string(&base);
-    const uint8_t* aug_data= base;
+    uint8_t* augmentation= raa_null_term_string(&base);
+    uint8_t* aug_data= base;
 
-    CIE_Entry entry= (CIE_Entry) {
-        .aug_data= {
-            .has_fde_L_pointer_encoding= false,
-            .has_fde_address_pointer_encoding= false,
-            .has_personality_routine_handler= false,
-            .type= AUG_DATA_NONE
-        }
+    entry->aug_data= (struct AugData) {
+        .has_fde_L_pointer_encoding= false,
+        .has_fde_address_pointer_encoding= false,
+        .has_personality_routine_handler= false,
+        .type= AUG_DATA_NONE
     };
 
-    const uint8_t* aug_eatable= augmentation;
+    uint8_t* aug_eatable= augmentation;
     uint32_t fchr= raa_utf8(&aug_eatable);
 
     if (fchr == '\0') {
-      entry.aug_data.type= AUG_DATA_NONE;
+      entry->aug_data.type= AUG_DATA_NONE;
     } else if (strcmp((const char*)augmentation, DW_AUG_STARTER_EH_STR) == 0) {
         // this is an old augmentation string that means
         //  there is some data postceding
 
         // the documentation on the eh data is as follows
-        //On 32 bit architectures, this is a 4 byte value that... On 64 bit architectures, this is a 8 byte value that... This field is only present if the Augmentation String contains the string "eh".
+        //On 32-bit architectures, this is a 4 byte value that... On 64-bit architectures, this is an 8 byte value that... This field is only present if the Augmentation String contains the string "eh".
         // that is to say, there isn't any
         uint8_t eh_data_bytes= mode == MODE_32bit ? 4 : 8;
 
-        entry.aug_data.type= AUG_DATA_EH;
-        entry.aug_data.eh_data= raa_uint(&base, eh_data_bytes);
+        entry->aug_data.type= AUG_DATA_EH;
+        entry->aug_data.eh_data= raa_uint(&base, eh_data_bytes);
 
     } else if (fchr == DW_AUG_STARTER_CHR) {
         // this character is required for there to be data
@@ -167,21 +141,21 @@ CIE_Entry read_cie_entry(uint8_t** start, MODE mode) {
             switch (chr) {
                 case DW_AUG_OPTION_LSDA_CHR: {
                     // there is an argument in BOTH the CIE (this) and the FDE
-                    entry.aug_data.has_fde_L_pointer_encoding= true;
-                    entry.aug_data.L_pointer_encoding= raa_pointer_encoding(&aug_data);
+                    entry->aug_data.has_fde_L_pointer_encoding= true;
+                    entry->aug_data.L_pointer_encoding= raa_pointer_encoding(&aug_data);
                     break;
                 }
                 case DW_AUG_OPTION_PERSONAILTY_ROUTINE_CHR: {
                     // there are TWO arguments in the CIE (this)
-                    entry.aug_data.has_personality_routine_handler= true;
-                    entry.aug_data.P_pointer_encoding= raa_pointer_encoding(&aug_data);
-                    entry.aug_data.P_personality_routine_handler= raa_pointer_value_from_PE(&aug_data, entry.aug_data.P_pointer_encoding);
+                    entry->aug_data.has_personality_routine_handler= true;
+                    entry->aug_data.P_pointer_encoding= raa_pointer_encoding(&aug_data);
+                    entry->aug_data.P_personality_routine_handler= raa_pointer_value_from_PE(&aug_data, entry->aug_data.P_pointer_encoding);
                     break;
                 }
                 case DW_AUG_OPTION_ADDRESS_POINTER_CHR: {
                     // There is an argument in the CIE (this) and describes the address pointers in the FDEs
-                    entry.aug_data.has_fde_address_pointer_encoding= true;
-                    entry.aug_data.R_pointer_encoding= raa_pointer_encoding(&aug_data);
+                    entry->aug_data.has_fde_address_pointer_encoding= true;
+                    entry->aug_data.R_pointer_encoding= raa_pointer_encoding(&aug_data);
                     break;
                 }
                 default:
@@ -190,71 +164,40 @@ CIE_Entry read_cie_entry(uint8_t** start, MODE mode) {
         }
     }
 
-    RAA(entry.address_size);
-    RAA(entry.segment_selector_size);
+    RAA(entry->address_size);
+    RAA(entry->segment_selector_size);
 
-    entry.code_alignment_factor= raa_uleb128(&base).v;
-    entry.data_alignment_factor= raa_leb128(&base).v;
-    entry.return_address_register= raa_uleb128(&base).v;
-    entry.initial_instructions= base;
+    entry->code_alignment_factor= raa_uleb128(&base).v;
+    entry->data_alignment_factor= raa_leb128(&base).v;
+    entry->return_address_register= raa_uleb128(&base).v;
+    entry->initial_instructions= base;
 
-    return entry;
+    return SUCCESS;
 }
 
-typedef struct CIEAndOffset {
-    uint64_t offset;
-    CIE_Entry* entry;
-} CIEAndOffset;
-
-int u64_cmp(uint64_t a, uint64_t b) {
-    if (a < b) return -1;
-    return a > b;
-}
-
-ARRAY_PROTO_CMP(CIEAndOffset, CIEO, u64_cmp, offset)
-ARRAY_ADD_CMP(CIEAndOffset, CIEO, u64_cmp, offset)
-
-CIEOArray CIEs;
-
-CIE_Entry* get_cie_entry_from_offset(uint64_t offset) {
-    CIEAndOffset* res= CIEO_arr_search_ie(&CIEs, offset);
-    if (!res) return NULL;
-
-    assert(res->offset == offset);
-    return res->entry;
-}
-
-void add_cie_entry(CIE_Entry* entry, uint64_t offset) {
-    CIEO_arr_add_sorted_i(&CIEs, (CIEAndOffset) {.entry= entry, .offset= offset});
-}
-
-FDE_Entry read_fde_entry(
+int read_fde_entry(
     uint8_t* header_base,
     uint8_t* base,
     const uint8_t* end,
-    uint64_t cie_offset
+    FDE_Entry* entry
 ) {
-    FDE_Entry entry;
-
-    entry.cie_entry= get_cie_entry_from_offset(cie_offset);
-
-    if (entry.cie_entry->segment_selector_size != 0) {
-        uint64_t segment_selector= raa_uint(&base, entry.cie_entry->segment_selector_size);
+    if (entry->cie_entry->segment_selector_size != 0) {
+        uint64_t segment_selector= raa_uint(&base, entry->cie_entry->segment_selector_size);
         log("Decoding of Frame info FDE entry uses segment selector %lu (is this an old program?)\n", segment_selector);
 
-        entry.segment_selector= segment_selector;
+        entry->segment_selector= segment_selector;
     }
 
-    uint8_t addr_size= entry.cie_entry->address_size;
+    uint8_t addr_size= entry->cie_entry->address_size;
 
-    entry.initial_location= raa_uint(&base, addr_size);
-    entry.address_range= raa_uint(&base, addr_size);
+    entry->initial_location= raa_uint(&base, addr_size);
+    entry->address_range= raa_uint(&base, addr_size);
 
     while (base < end) {
-        decode_and_execute_op(&base);
+        decode_and_execute_op(&base, entry->cie_entry);
     }
 
-    return entry;
+    return SUCCESS;
 }
 
 uint64_t read_address(uint8_t** base_ptr, CIE_Entry* cie) {
@@ -386,17 +329,17 @@ void execute_initial_instr_for(uint8_t register_id, CIE_Entry* cie) {
     uint8_t* op= cie->initial_instructions;
 
     while (op < cie->initial_instructions + cie->instructions_size) {
-        Instruction instr= decode_op(&op);
+        Instruction instr= decode_op(&op, cie);
         uint8_t reg= instr.data.register_id;
 
-        if (reg == (int16_t)-1) {
+        if (reg == (uint8_t)-1) {
             // this is an instruction that does not contain register information
             continue;
         }
 
         if (reg == register_id) {
             // this is a matching instruction and so we should execute it
-            execute_op(instr);
+            execute_op(instr, cie);
             break;
         }
     }
@@ -440,13 +383,13 @@ Instruction decode_op(uint8_t** start, CIE_Entry* cie) {
             instr.data.d_delta= low * code_align;
             break;
         case DW_CFA_advance_loc1:
-            instr.data.d_delta= raa_uint(start, 1);
+            instr.data.d_delta= raa_uint(start, 1) * code_align;
             break;
         case DW_CFA_advance_loc2:
-            instr.data.d_delta= raa_uint(start, 2);
+            instr.data.d_delta= raa_uint(start, 2) * code_align;
             break;
         case DW_CFA_advance_loc4:
-            instr.data.d_delta= raa_uint(start, 4);
+            instr.data.d_delta= raa_uint(start, 4) * code_align;
             break;
 
         case DW_CFA_def_cfa: {
@@ -661,7 +604,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
             set_register(
                 instr.data.register_id,
                 DW_CFA_undefined,
-                {0}
+                (RRData){0}
             );
 
             break;
@@ -671,7 +614,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
             set_register(
                 instr.data.register_id,
                 DW_CFA_same_value,
-                {0}
+                (RRData){0}
             );
 
             break;
@@ -683,7 +626,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
             set_register(
                 instr.data.register_id,
                 DW_CFA_offset,
-                {.offset= instr.data.d_offset}
+                (RRData){.offset= instr.data.d_offset}
             );
 
             break;
@@ -694,7 +637,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
             set_register(
                 instr.data.register_id,
                 DW_CFA_val_offset,
-                {.offset= instr.data.d_offset}
+                (RRData){.offset= instr.data.d_offset}
             );
 
             break;
@@ -704,7 +647,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
             set_register(
                 instr.data.register_id,
                 DW_CFA_register,
-                {.reg= instr.data.d_register}
+                (RRData){.reg= instr.data.d_register}
             );
 
             break;
@@ -718,7 +661,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
             set_register(
                 instr.data.register_id,
                 instr.opcode,
-                {.expr= instr.data.d_expr}
+                (RRData){.expr= instr.data.d_expr}
             );
 
             break;
@@ -754,7 +697,162 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
     }
 }
 
-void decode_and_execute_op(uint8_t** start) {
-    Instruction instr= decode_op(start);
-    execute_op(instr);
+void decode_and_execute_op(uint8_t** start, CIE_Entry* cie) {
+    Instruction instr= decode_op(start, cie);
+    execute_op(instr, cie);
+}
+
+
+const char* instruction_op_str(FI_OPCODE op) {
+    switch (op) {
+        case DW_CFA_set_loc: return "DW_CFA_set_loc";
+        case DW_CFA_advance_loc: return "DW_CFA_advance_loc";
+        case DW_CFA_advance_loc1: return "DW_CFA_advance_loc1";
+        case DW_CFA_advance_loc2: return "DW_CFA_advance_loc2";
+        case DW_CFA_advance_loc4: return "DW_CFA_advance_loc4";
+        case DW_CFA_def_cfa: return "DW_CFA_def_cfa";
+        case DW_CFA_def_cfa_sf: return "DW_CFA_def_cfa_sf";
+        case DW_CFA_def_cfa_register: return "DW_CFA_def_cfa_register";
+        case DW_CFA_def_cfa_offset: return "DW_CFA_def_cfa_offset";
+        case DW_CFA_def_cfa_offset_sf: return "DW_CFA_def_cfa_offset_sf";
+        case DW_CFA_def_cfa_expression: return "DW_CFA_def_cfa_expression";
+        case DW_CFA_undefined: return "DW_CFA_undefined";
+        case DW_CFA_same_value: return "DW_CFA_same_value";
+        case DW_CFA_offset: return "DW_CFA_offset";
+        case DW_CFA_offset_extended: return "DW_CFA_offset_extended";
+        case DW_CFA_offset_extended_sf: return "DW_CFA_offset_extended_sf";
+        case DW_CFA_val_offset: return "DW_CFA_val_offset";
+        case DW_CFA_val_offset_sf: return "DW_CFA_val_offset_sf";
+        case DW_CFA_register: return "DW_CFA_register";
+        case DW_CFA_expression: return "DW_CFA_expression";
+        case DW_CFA_val_expression: return "DW_CFA_val_expression";
+        case DW_CFA_restore: return "DW_CFA_restore";
+        case DW_CFA_restore_extended: return "DW_CFA_restore_extended";
+        case DW_CFA_remember_state: return "DW_CFA_remember_state";
+        case DW_CFA_restore_state: return "DW_CFA_restore_state";
+        case DW_CFA_nop: return "DW_CFA_nop";
+        default: return "<<ERROR>> Invalid op code <<ERROR>>";
+    }
+}
+
+void print_instruction(Instruction* instr, FDE_Entry* fde) {
+    printf("Instr (%s)", instruction_op_str(instr->opcode));
+    if (fde->cie_entry == NULL) printf("<<ERROR>> FDE's CIE entry is invalid unable to print some data <<ERROR>>");
+    switch (instr->opcode) {
+        case DW_CFA_set_loc:
+            printf(": Create new table row with location");
+            if (fde->cie_entry && fde->segment_selector != 0) printf("SS%lu:", fde->segment_selector);
+            printf("%lu", instr->data.d_addr);
+            break;
+
+        case DW_CFA_advance_loc:
+        case DW_CFA_advance_loc1:
+        case DW_CFA_advance_loc2:
+        case DW_CFA_advance_loc4:
+            printf(": Create new table row with delta %u", instr->data.d_delta);
+            break;
+
+        case DW_CFA_def_cfa:
+        case DW_CFA_def_cfa_sf:
+            printf(": Set CFA Rule to Register %u + Offset %ld", instr->data.register_id, instr->data.d_offset);
+            break;
+
+        case DW_CFA_def_cfa_register:
+            printf(": Set CFA Rule to Register %u + Offset; Keep old offset", instr->data.register_id);
+            break;
+
+        case DW_CFA_def_cfa_offset:
+        case DW_CFA_def_cfa_offset_sf:
+            printf(": Set CFA Rule to Register + Offset %ld; Keep old register", instr->data.d_offset);
+            break;
+
+        case DW_CFA_def_cfa_expression:
+            printf(": Set CFA to expression:  ");
+            print_expression(instr->data.d_expr);
+            break;
+
+        case DW_CFA_undefined:
+            printf(": Set Register %u to undefined", instr->data.register_id);
+            break;
+
+        case DW_CFA_same_value:
+            printf(": Set Register %u to same value", instr->data.register_id);
+            break;
+
+        case DW_CFA_offset:
+        case DW_CFA_offset_extended:
+        case DW_CFA_offset_extended_sf:
+            printf(": Set Register %u to Offset %ld", instr->data.register_id, instr->data.d_offset);
+            break;
+
+        case DW_CFA_val_offset:
+        case DW_CFA_val_offset_sf:
+            printf(": Set Register %u to Value %ld", instr->data.register_id, instr->data.d_offset);
+            break;
+
+        case DW_CFA_register:
+            printf(": Set Register %u to Register %u", instr->data.register_id, instr->data.d_register);
+            break;
+
+        case DW_CFA_expression:
+            printf(": Set Register %u to Expression: ", instr->data.register_id);
+            print_expression(instr->data.d_expr);
+            break;
+
+        case DW_CFA_val_expression:
+            printf(": Set Register %u to Value Expression: ", instr->data.register_id);
+            print_expression(instr->data.d_expr);
+            break;
+
+        case DW_CFA_restore:
+        case DW_CFA_restore_extended:
+            printf(": Restore value from initial instructions for Register %u", instr->data.register_id);
+            break;
+
+        case DW_CFA_remember_state:
+            printf(": Push state to stack");
+            break;
+
+        case DW_CFA_restore_state:
+            printf(": Pop state from stack");
+            break;
+
+        case DW_CFA_nop:
+            printf(": Nop");
+            break;
+    }
+}
+
+void print_instructions(const char* prefix, uint8_t* instructions, uint64_t instructions_size, FDE_Entry* entry) {
+    uint8_t* base= instructions;
+
+    if (entry == NULL || entry->cie_entry == NULL) {
+        printf("%sEntry %p has CIE %p; unable to print instruction", prefix, entry, entry != NULL ? entry->cie_entry : NULL);
+        return;
+    }
+
+    while (base < instructions + instructions_size) {
+        Instruction instr= decode_op(&base, entry->cie_entry);
+        putz(prefix);
+        print_instruction(&instr, entry);
+    }
+}
+
+void print_fde(FDE_Entry* entry) {
+    printf("FDE Entry @%lx | %lx bytes\n", entry->offset_location, entry->length);
+    if (entry->cie_entry == NULL) printf(" - Linked CIE: <ERROR> Invalid linked cie <ERROR>\n");
+    else printf(" - Linked CIE: @%lx\n", entry->cie_entry->offset_location);
+
+    printf(" - Addr range: ");
+    if (entry->cie_entry && entry->cie_entry->segment_selector_size != 0) {
+        printf("SS%lu:", entry->segment_selector);
+    }
+    printf("[%lx-%lx]\n", entry->initial_location, entry->initial_location + entry->address_range);
+    printf(" - Instructions (%u bytes):\n", entry->instructions_size);
+    if (entry->cie_entry == NULL) printf("     <<ERROR>> Unable to print instructions as the CIE entry linked is invalid <<ERROR>>\n");
+    else print_instructions("      ", entry->instructions, entry->instructions_size, entry->cie_entry);
+}
+
+void print_cie(CIE_Entry* entry) {
+
 }
