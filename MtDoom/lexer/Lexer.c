@@ -446,12 +446,23 @@ int error(const char* message, ...) {
     return FAIL;
 }
 
+void fprint_lit_num(FILE* file, const struct LitNumData* num) {
+    if (num->explicit_base10) {
+        fprintf(file, "%#lx", num->base10);
+    } else {
+        fprintf(file, "0b");
+        for (int i = 0; i < num->base2.digits; ++i) {
+            fprintf(file, "%c", num->base2.value >> i & 1 ? '1' : '0');
+        }
+    }
+}
+
 void print_token(Token* token) {
     printf("Token (%.2u:%.2u) %s {", token->meta.line, token->meta.col, TOKEN_TYPE_STRS[token->type]);
 
     switch (token->type) {
         case LIT_NUM: {
-            struct LitNumData data= token->data.lit_num;
+            const struct LitNumData data= token->data.lit_num;
             if (data.explicit_base10) {
                 printf("BASE 10 (EXPL): %ld (%lx)", data.base10, data.base10);
             } else {

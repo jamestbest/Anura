@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include "shared/Array.h"
 
 typedef enum TokenType {
@@ -92,6 +93,8 @@ typedef struct LexRet {
 LexRet lex(const char* filepath);
 void print_token(Token* token);
 const char* keyword_string(keyword kw);
+
+void fprint_lit_num(FILE* file, const struct LitNumData* num);
 
 extern const LexRet LEX_RET_FAIL;
 
