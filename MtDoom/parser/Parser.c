@@ -413,3 +413,14 @@ Vector create_children() {
     return vector_create();
 }
 
+void fprint_simple_num(FILE* file, const SimpleNumData* num) {
+    if (num->show_as_bin) {
+        fprintf(file, "0b");
+        for (int i = 0; i < num->bits; ++i) {
+            fprintf(file, "%c", num->value >> i & 1 ? '1' : '0');
+        }
+    } else {
+        fprintf(file, "%#lx", num->value);
+    }
+}
+
