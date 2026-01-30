@@ -32,7 +32,8 @@ STRUCTURE lprefix* prefix? op
 //  SO is this --v needed?? -- I assume not
 FLAG mode= 64bit | 32bit | 16bit default 64bit
 FLAG opmode= 64bit | 32bit | 16bit | 8bit default 32bit
-FLAG ow
+
+DATA ow 1 bit
 
 // REX.W is for OPERAND size
 // REX.W = 64 Bit Operand Size
@@ -45,13 +46,17 @@ FLAG ow
 //       or for B(RM.bbb)
 // REX.B = Extension of the ModR/M r/m field, SIB base field, or Opcode reg field
 DATA REX= {
-  0100 .w .r .x .b
+  0100 .w=0 .r .x .b
 }
 
 // these bits have been written in the high-low level, is this ok to assume?
 //  when reading new BYTEs we just read high bit as we get the whole BYTE at once
 // dot prefix? for accessing values within? or the alias listing?
 DATA VEX= {
+  // the two formats here are just to show how it gets parsed
+  // the generated output combines these two together
+  // which means fields that appear in both should have the same
+  // default values
   1100 0100 .R .X .B .m(5) .W .v(4) .L .pp(2)
   1100 0101 .R .v(4) .L .pp(2)
 }
@@ -152,8 +157,8 @@ ALIAS SIB 1 BYTE= {
   sibsi sibb = "{sibsi} + {sibb}"
 }
 
-ALIAS Mod 2 BITS= {}
-ALIAS RM 3 BITS
+DATA Mod 2 BITS
+DATA RM 3 BITS
 ALIAS ModRM= {
   11 reg 100 SIB= SIB
   00 reg 101 disp32= {
@@ -182,19 +187,21 @@ CALCULATE opmode= {
   if ow then 8bit
   when mode == 64bit then {
     if REX.w then 64bit
-    if lp3 then 16bit
+    if lp3? then 16bit
     if default then 32bit
   }
   when mode == 32bit then {
-    if lp3 then 16bit
+    if lp3? then 16bit
     if default then 32bit
   }
   when mode == 16bit then {
-    if lp3 then 32bit
+    if lp3? then 32bit
     if default then 16bit
   }
 }
 
+// all data pieces should have an _value that is a
+// byte array with all of the bits that are parsed
 DATA imm8 1 BYTE
 DATA imm16 2 BYTES
 DATA imm32 4 BYTES
@@ -241,7 +248,7 @@ ALIAS ADC= {
 }
 
 ALIAS CMOV= {
-  0100 cc ModRM = CMOV|cc reg, rm
+  0100 cc ModRM = "CMOV{cc} {reg}, {rm}"
 }
 
 // if vs when semantic for something that can back when assemble
