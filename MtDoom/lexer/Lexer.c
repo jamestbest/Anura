@@ -153,7 +153,6 @@ int lex_line() {
             case ',': add_simple_token(COMMA); break;
             case '*': add_binary_op(STAR); break;
             case '?': add_simple_token(QUESTION); break;
-            case '|': add_binary_op(PIPE); break;
             case '^': add_binary_op(POW); break;
             case '!': {
                 if (peek() != '=') goto lex_line_no_simple;
@@ -274,7 +273,6 @@ const char* BINARY_OP_STRINGS[BINARY_OP_COUNT]= {
     [NEQUALITY]= "NEQUALITY (!=)",
     [DOT]= "DOT (.)",
     [STAR]= "STAR (*)",
-    [PIPE]= "PIPE (|)",
     [POW]= "POW (**)",
 };
 

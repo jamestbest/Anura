@@ -33,10 +33,14 @@ typedef enum BinaryOperator {
     NEQUALITY,
     DOT,
     STAR,
-    PIPE,
     POW,
     BINARY_OP_COUNT
 } BinaryOperator;
+
+typedef enum UnaryOperator {
+    NOT, // !
+    EXISTS // ?
+} UnaryOperator;
 
 typedef enum keyword {
     ALIAS,
