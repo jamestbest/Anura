@@ -59,9 +59,19 @@ add_executable(Anura main.c shared/Array.c
 target_include_directories(Anura PUBLIC .)
 target_include_directories(Anura PUBLIC ./shared ./MtDoom)
 
+
 add_compile_options(-pthread)
 find_package(Threads REQUIRED)
 target_link_libraries(Anura PRIVATE Threads::Threads)
 
 target_compile_options(Anura PUBLIC -g)
 add_executable(test Test.c)
+add_executable(Palantir Palantir/Palantir.c Palantir/Palantir.h)
+
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GTK4 REQUIRED gtk4)
+
+target_include_directories(Palantir PRIVATE ${GTK4_INCLUDE_DIRS})
+target_link_libraries(Palantir PRIVATE ${GTK4_LIBRARIES})
+target_compile_options(Palantir PRIVATE ${GTK4_CFLAGS_OTHER})
