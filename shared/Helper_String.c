@@ -277,10 +277,9 @@ uint pututf8(const char* string) {
     return info.bytes;
 }
 
-// remove those pesky `\`
-void putz_santitize(char* string) {
+void fputz_sanitize(FILE* file, char* string) {
     if (!string) {
-        putz("<<NULL>>");
+        fputz(file, "<<NULL>>");
         return;
     }
 
@@ -305,13 +304,18 @@ void putz_santitize(char* string) {
         }
         const char save = string[pos];
         string[pos] = '\0';
-        printf("%s%s", start_point, buff);
+        fprintf(file, "%s%s", start_point, buff);
         string[pos] = save;
 
         start_point = &string[++pos];
     }
 
-    printf("%s", start_point);
+    fprintf(file, "%s", start_point);
+}
+
+// remove those pesky `\`
+void putz_santitize(char* string) {
+    fputz_sanitize(stdout, string);
 }
 
 void newline() {

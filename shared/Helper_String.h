@@ -67,6 +67,7 @@ bool is_newline(uint32_t a);
 void fputz(FILE* file, const char* string);
 void putz(const char* string);
 void putz_santitize(char* string);
+void fputz_sanitize(FILE* file, char* string);
 
 size_t fputs_upper(FILE* stream, const char* string);
 
