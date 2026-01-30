@@ -9,6 +9,9 @@
 #include <stdint.h>
 
 #include "shared/Vector.h"
+#include "shared/Buffer.h"
+
+typedef void(*generator_function)(Buffer* buffer);
 
 typedef struct ByteStream {
     uint8_t* raw_stream;
@@ -47,11 +50,21 @@ typedef struct StrSlice {
 #define EXPECT_BITS(num) expect_bits(COUNT_ALT_BASE_DIGITS(num), num)
 
 bool expect_bits(uint8_t bits, uint64_t bit_pattern);
+int init();
+
+typedef enum AVAL_STATUS {
+    AVAL_STATUS_SELECTED=254,
+    AVAL_STATUS_NONE=255,
+} AVAL_STATUS;
 
 typedef struct AVAL {
     Vector choices;
     char* chosen_val;
-    uint8_t chosen_idx;
+    AVAL_STATUS chosen_idx;
+    bool parsed_successfully;
 } AVAL;
+
+int evaluate_string(char* string, ...);
+void set_aval(AVAL* dst, char* data);
 
 #endif //ANURA_DEFAULT_H
