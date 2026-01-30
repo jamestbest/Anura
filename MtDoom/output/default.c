@@ -47,3 +47,43 @@ bool expect_bits(const uint8_t bits, const uint64_t bit_pattern) {
 
     return true;
 }
+
+int evaluate_string(char* string, ...) {
+    va_list args;
+    va_start(args, string);
+
+    Buffer buffer;
+
+    size_t idx= 0;
+    size_t start= 0;
+    while (string[idx] != '\0') {
+        const char c= string[idx];
+
+        if (c == '{') {
+            string[idx]= '\0';
+            buffer_concat(&buffer, &string[start]);
+            string[idx]= '{';
+            while (string[idx] != '}') idx++;
+            idx++;
+            start= idx;
+
+            const generator_function f= va_arg(args, generator_function);
+            f(&buffer);
+        } else {
+            idx++;
+        }
+    }
+
+    if (string[start] != '\0') {
+        buffer_concat(&buffer, &string[start]);
+    }
+
+    va_end(args);
+
+    return SUCCESS;
+}
+
+void set_aval(AVAL* dst, char* data) {
+    dst->chosen_val= data;
+    dst->chosen_idx= AVAL_STATUS_SELECTED;
+}
