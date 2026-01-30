@@ -2,6 +2,8 @@
 // Created by jamestbest on 1/27/26.
 //
 
+#include <stdint.h>
+
 #include "Vector.h"
 #include "MtDoom/output/default.h"
 #include "shared/Buffer.h"
@@ -36,7 +38,12 @@ typedef enum FLAG_MODE {
 
 FLAG_MODE flag_mode= FLAG_MODE_64bit;
 
-//FLAG ow
+//DATA ow 1 bit
+typedef struct DATA_OW {
+    uint8_t _value: 1;
+} DATA_OW;
+DATA_OW data_ow;
+
 uint64_t FLAG_OW= 0;
 
 /*
@@ -187,8 +194,8 @@ AVAL AVAL_SIBI;
     ALIAS ModRM= {
         11 reg 100 SIB= SIB
         00 reg 101 disp32= {
-        when mode == 64bit then "rip + {disp32}"
-        when default then disp32
+            when mode == 64bit then "rip + {disp32}"
+            when default then disp32
         }
         00 reg RM= "[{reg}]"
         01 reg RM disp8 = "[{reg} + {disp8}]"
@@ -196,6 +203,7 @@ AVAL AVAL_SIBI;
         11 reg RM= reg
     }
  */
+
 ParseRet parse_ModRM() {
     if (EXPECT_BITS(0b11) && parse_reg() && EXPECT_BITS(0b100) && parse_SIB()) {
         AVAL_MODRM= AVAL_SIB;
@@ -224,3 +232,18 @@ ParseRet parse_disp32() {
 
 }
 
+// ALIAS SIB 1 BYTE= {
+//     sibsi 101 = {
+//         if Mod == 00 then "{sibsi} + {disp32}"
+//         if Mod == 01 then "{sibsi} + {disp8} + [EBP]"
+//         if Mod == 10 then "{sibsi} + {disp32} + [EBP]"
+//     }
+//     sibsi sibb = "{sibsi} + {sibb}"
+// }
+ParseRet parse_SIB() {
+    if (parse_sibsi().success && EXPECT_BITS(0b101)) {
+        if (DATA_MOD.value == 0b00) {
+            AVAL_SIB= eval_string_00(); // "{sibsi} + {disp32}"
+        }
+    }
+}
