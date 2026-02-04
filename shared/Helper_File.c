@@ -115,3 +115,36 @@ bool get_line(FILE* file, Buffer* buffer) {
 
     return true;
 }
+
+char* make_path(const char* dir, const char* file, const char* extension) {
+    Buffer buff= buffer_create(BUFF_MIN);
+
+    size_t p_len= strlen(dir);
+    size_t s_len= strlen(file);
+
+    if (file[0] == '/') {
+        file++;
+        s_len--;
+    }
+    if (p_len > 0 && dir[p_len - 1] == '/') {
+        p_len--;
+    }
+
+    buffer_fconcat(&buff,
+        "%*.*s/*.*s%s%s",
+        p_len, p_len, dir,
+        s_len, s_len, file,
+        extension == NULL ? "" : ".",
+        extension == NULL ? "" : extension
+    );
+
+    char* res= buffer_steal(&buff, 0);
+    buffer_destroy(&buff);
+
+    return res;
+}
+
+// e.g. /x/y/z/ + /a/b => /x/y/z/a/b
+char* append_paths(const char* prefix, const char* suffix) {
+    return make_path(prefix, suffix, NULL);
+}

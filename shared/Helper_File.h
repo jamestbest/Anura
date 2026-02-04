@@ -25,6 +25,8 @@ char* get_path(const char* dir, const char* file);
 bool get_line(FILE* file, Buffer* buffer);
 char* get_file_name(const char* file_path);
 char* get_file_name_stripped(const char* file_path);
+char* append_paths(const char* prefix, const char* suffix);
+char* make_path(const char* dir, const char* file, const char* extension);
 
 FILE* open_file(const char* cwd, const char* filename, const char* mode);
 
