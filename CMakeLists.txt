@@ -28,6 +28,32 @@ add_executable(Anura main.c shared/Array.c
         Target.h
         Tolkien.c
         Tolkien.h
+
+        shared/Vector.c
+        shared/Helper_File.c
+        shared/Helper_String.c
+        shared/Helper_Math.c
+        shared/Errors.h
+        shared/Buffer.c
+        Saruman/FrameInfo.c
+        Saruman/FrameInfo.h
+        Saruman/DWARFParsing.c
+        Saruman/DWARFParsing.h
+        Saruman/FrameInfoInternal.h
+        Saruman/eh_header.h
+
+)
+
+add_executable(MtDoom
+        MtDoom/output/default.c
+        MtDoom/output/default.h
+        MtDoom/output/Generator.c
+        MtDoom/output/Generator.h
+        MtDoom/output/GeneratorInternal.h
+        MtDoom/parser/Parser.c
+        MtDoom/parser/Parser.h
+        MtDoom/parser/ShuntingYard.c
+        MtDoom/parser/ShuntingYard.h
         MtDoom/MtDoom.c
         MtDoom/MtDoom.h
         MtDoom/lexer/Lexer.c
@@ -39,25 +65,11 @@ add_executable(Anura main.c shared/Array.c
         shared/Helper_Math.c
         shared/Errors.h
         shared/Buffer.c
-        MtDoom/parser/Parser.c
-        MtDoom/parser/Parser.h
-        MtDoom/parser/ShuntingYard.c
-        MtDoom/parser/ShuntingYard.h
-        Saruman/FrameInfo.c
-        Saruman/FrameInfo.h
-        Saruman/DWARFParsing.c
-        Saruman/DWARFParsing.h
-        Saruman/FrameInfoInternal.h
-        Saruman/eh_header.h
-        MtDoom/output/default.c
-        MtDoom/output/default.h
-        MtDoom/output/Generator.c
-        MtDoom/output/Generator.h
-        MtDoom/output/GeneratorInternal.h
+        shared/Array.c
 )
 
-target_include_directories(Anura PUBLIC .)
-target_include_directories(Anura PUBLIC ./shared ./MtDoom)
+include_directories(.)
+include_directories(./shared ./MtDoom)
 
 
 add_compile_options(-pthread)
