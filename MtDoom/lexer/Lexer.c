@@ -12,6 +12,7 @@
 
 #include <limits.h>
 #include <string.h>
+#include <math.h>
 
 Buffer line_buff;
 Vector lines;
@@ -106,6 +107,16 @@ TokenMeta token_meta() {
     };
 }
 
+void add_unary_op(UnaryOperator op) {
+    Token t= (Token) {
+        .type= UNARY_OP,
+        .meta= token_meta(),
+        .data.unary_op= op
+    };
+
+    Token_arr_add(&tokens, t);
+}
+
 void add_binary_op(BinaryOperator type) {
     Token t= (Token){
         .type= BINARY_OP,
@@ -152,10 +163,13 @@ int lex_line() {
             case '.': add_binary_op(DOT); break;
             case ',': add_simple_token(COMMA); break;
             case '*': add_binary_op(STAR); break;
-            case '?': add_simple_token(QUESTION); break;
+            case '?': add_unary_op(EXISTS); break;
             case '^': add_binary_op(POW); break;
             case '!': {
-                if (peek() != '=') goto lex_line_no_simple;
+                if (peek() != '=') {
+                    add_unary_op(NOT);
+                    break;
+                }
 
                 add_binary_op(NEQUALITY);
                 break;
@@ -239,6 +253,7 @@ const char* KEYWORD_STRINGS[KEYWORD_COUNT]= {
     [BIT]= "BIT",
     [BITS]= "BITS",
     [LEFT]= "LEFT",
+    [META]= "META",
     [RIGHT]= "RIGHT",
     [IF]= "IF",
     [THEN]= "THEN",
@@ -264,7 +279,7 @@ const char* TOKEN_TYPE_STRS[TOKEN_TYPE_COUNT]= {
     [LIT_NUM]= "LIT_NUM",
     [LIT_STRING]= "LIT_STRING",
     [COMMA]= "COMMA",
-    [QUESTION]= "QUESTION",
+    [UNARY_OP]= "UNARY OP",
     [BINARY_OP]= "BINARY OP"
 };
 
@@ -274,6 +289,12 @@ const char* BINARY_OP_STRINGS[BINARY_OP_COUNT]= {
     [DOT]= "DOT (.)",
     [STAR]= "STAR (*)",
     [POW]= "POW (**)",
+    [PIPE]="PIPE (|)"
+};
+
+const char* UNARY_OP_STRINGS[UNARY_OP_COUNT]= {
+    [NOT]= "NOT (!)",
+    [EXISTS]= "EXISTS (?)"
 };
 
 int identifier_comp(const void* ppa, const void* ppb) {
@@ -283,8 +304,24 @@ int identifier_comp(const void* ppa, const void* ppb) {
     return strcasecmp(pa, pb);
 }
 
-void lex_identifier_from(const char* start) {
-    int col_diff= start - line_start_char;
+keyword map_keyword(keyword kw) {
+    switch (kw) {
+        case BIT:
+        case BITS:
+            return BITS;
+        case BYTE:
+        case BYTES:
+            return BYTES;
+        case WHEN:
+        case IF:
+            return IF;
+        default:
+            return kw;
+    }
+}
+
+void lex_identifier_from(char* start) {
+    size_t col_diff= start - line_start_char;
     col= col_diff;
     TokenMeta meta= token_meta();
 
@@ -311,7 +348,7 @@ void lex_identifier_from(const char* start) {
         Token t= (Token) {
             .type= KEYWORD,
             .meta= meta,
-            .data.keyword= k
+            .data.keyword= map_keyword(k)
         };
 
         free(identifier);
@@ -337,7 +374,7 @@ int lex_number() {
     // this is because the default changes
     TokenMeta meta= token_meta();
 
-    const char* start= c_char;
+    char* start= c_char;
     const char* end;
 
     bool explicit_base10= false;
@@ -374,6 +411,7 @@ int lex_number() {
     }
 
     char* strtoll_end10;
+    bool is_base16= explicit_base10;
     long long base10res= strtoll(start, &strtoll_end10, 0);
     if (
         strtoll_end10 == start ||
@@ -394,7 +432,12 @@ int lex_number() {
                 .value= base2res,
                 .digits= strtoll_end2 - start
             },
-            .base10= base10res
+            .base10= { //[[todo]] check this
+                .value= base10res,
+                .digits= is_base16 ? (strtoll_end10 - start) << 2 :
+                                     base10res > 0 ? (int)floor(log2((double)base10res)) + 1 :
+                                                     1
+            }
         }
     };
 
@@ -446,7 +489,7 @@ int error(const char* message, ...) {
 
 void fprint_lit_num(FILE* file, const struct LitNumData* num) {
     if (num->explicit_base10) {
-        fprintf(file, "%#lx", num->base10);
+        fprintf(file, "%#lx", num->base10.value);
     } else {
         fprintf(file, "0b");
         for (int i = 0; i < num->base2.digits; ++i) {
@@ -462,12 +505,12 @@ void print_token(Token* token) {
         case LIT_NUM: {
             const struct LitNumData data= token->data.lit_num;
             if (data.explicit_base10) {
-                printf("BASE 10 (EXPL): %ld (%lx)", data.base10, data.base10);
+                printf("BASE 10 (EXPL): %ld (%lx)", data.base10.value, data.base10.value);
             } else {
                 printf(
                     "BASE 10: %ld (%lx)   BASE 2: %ld WITH %d digits",
-                    data.base10,
-                    data.base10,
+                    data.base10.value,
+                    data.base10.value,
                     data.base2.value,
                     data.base2.digits
                 );
@@ -495,11 +538,14 @@ void print_token(Token* token) {
         case LPAREN:
         case RPAREN:
         case COMMA:
-        case QUESTION:
             break;
 
         case BINARY_OP:
             printf("`%s`", BINARY_OP_STRINGS[token->data.bin_op]);
+            break;
+
+        case UNARY_OP:
+            printf("`%s`", UNARY_OP_STRINGS[token->data.unary_op]);
             break;
 
         default:

@@ -23,8 +23,8 @@ typedef enum TokenType {
     LIT_NUM,
     LIT_STRING,
     COMMA,
-    QUESTION,
     BINARY_OP,
+    UNARY_OP,
     TOKEN_TYPE_COUNT
 } TokenType;
 
@@ -34,19 +34,21 @@ typedef enum BinaryOperator {
     DOT,
     STAR,
     POW,
+    PIPE,
     BINARY_OP_COUNT
 } BinaryOperator;
 
 typedef enum UnaryOperator {
     NOT, // !
-    EXISTS // ?
+    EXISTS, // ?
+    UNARY_OP_COUNT
 } UnaryOperator;
 
 typedef enum keyword {
     ALIAS,
-    BIT,
+    BIT, // DOES NOT EXIST PAST LEXER
     BITS,
-    BYTE,
+    BYTE, // DOES NOT EXIST PAST LEXER
     BYTES,
     CALCULATE,
     DATA,
@@ -54,26 +56,30 @@ typedef enum keyword {
     FLAG,
     IF,
     LEFT,
+    META,
     RIGHT,
     STRUCTURE,
     THEN,
-    WHEN,
+    WHEN, // CURRENTLY SEMANTICALLY THE SAME AS IF
     KEYWORD_COUNT
 } keyword;
+
+typedef struct BaseNumInfo {
+    uint8_t digits;
+    uint64_t value;
+} BaseNumInfo;
 
 typedef union TokenData {
     struct LitNumData {
         bool explicit_base10;
-        struct Base2NumInfo {
-            uint8_t digits;
-            uint64_t value;
-        } base2;
-        uint64_t base10;
+        BaseNumInfo base2;
+        BaseNumInfo base10;
     } lit_num;
     keyword keyword;
     BinaryOperator bin_op;
+    UnaryOperator unary_op;
     const char* identifier;
-    const char* lit_string;
+    char* lit_string;
 } TokenData;
 
 typedef struct TokenMeta {
