@@ -17,6 +17,9 @@
 //  numbers are written from high bit - low bit and will go until 8 bits are found
 //  e.g. 1010 101 ow -- this is one BYTE as any non-alias identifier is 1 bit in size
 //  e.g. 10 reg 001  -- this is one BYTE (assuming reg is a 3 bit ALIAS)
+META {
+    .name= "x64"
+}
 
 ALIAS prefix= {
     REX
@@ -49,9 +52,6 @@ DATA REX= {
   0100 .w=0 .r .x .b
 }
 
-// these bits have been written in the high-low level, is this ok to assume?
-//  when reading new BYTEs we just read high bit as we get the whole BYTE at once
-// dot prefix? for accessing values within? or the alias listing?
 DATA VEX= {
   // the two formats here are just to show how it gets parsed
   // the generated output combines these two together
@@ -69,47 +69,43 @@ ALIAS lprefix 1 BYTE= {
 }
 
 ALIAS lp1 1 BYTE= {
-  0xF0= LOCK
-  0xF2= REPNE,REPNZ,BND  // BND has some restrictions to do with what the instr is
-  0xF3= REP,REPE,REPZ
+  0xF0= "LOCK"
+  0xF2= "REPNE"  // REPNE,REPNZ,BND; BND has some restrictions to do with what the instr is
+  0xF3= "REP"
 }
 
 ALIAS lp2 1 BYTE= {
-  0x2E= CS,BNT
-  0x36= SS
-  0x3E= DS,BT
-  0x26= ES
-  0x64= FS
-  0x65= GS
+  0x2E= "CS"
+  0x36= "SS"
+  0x3E= "DS"
+  0x26= "ES"
+  0x64= "FS"
+  0x65= "GS"
 }
 
 ALIAS lp3 1 BYTE= {
-  0x66= OO
+  0x66= "OO"
 }
 
 ALIAS lp4 1 BYTE= {
-  0x67= AO
+  0x67= "AO"
 }
 
 ALIAS reg 4 BITS = {
-  0000= AX, AL, AL, EAX, RAX
-  0001= CX, CL, AL, ECX, RCX
+  0000= "AX", "AL", "AL", "EAX", "RAX"
+  0001= "CX", "CL", "AL", "ECX", "RCX"
 
-  0100= SP, AH, AL, ESP, RSP
+  0100= "SP", "AH", "AL", "ESP", "RSP"
 
   1000= R8B, R8
 }
 
-ALIAS regi 3 BITS = MAP reg REX.x regi
-ALIAS regb 3 bits = MAP reg REX.b regb
-ALIAS regr 3 bits = MAP reg REX.r regr
-
 // some instructions access SPL etc. instead of AH etc.
 ALIAS regT 3 BITS= {
-  000= AX, AL, AL, EAX, RAX
-  001= CX, CL, AL, ECX, RCX
+  000= "AX", "AL", "AL", "EAX", "RAX"
+  001= "CX", "CL", "AL", "ECX", "RCX"
 
-  100= SP, SPL, AL, ESP, RSP
+  100= "SP", "SPL", "AL", "ESP", "RSP"
 }
 
 RULE RIGHT ON reg, regT {
@@ -121,31 +117,42 @@ RULE RIGHT ON reg, regT {
 }
 
 ALIAS cc 4 BITS= {
-  0000= O
-  0001= NO
-  0010= B,C,NAE
-  0011= NB,NC,AE
-  0100= E,Z
-  0101= NE,NZ
-  0110= BE,NA
-  0111= NBE,A
-  1000= S
-  1001= NS
-  1010= P,PE
-  1011= NP,PO
-  1100= L,NGE
-  1101= NL,GE
-  1110= LE,NG
-  1111= NLE,G
+  0000= "O"
+  0001= "NO"
+  0010= "B"
+  0011= "NB"
+  0100= "E"
+  0101= "NE"
+  0110= "BE"
+  0111= "NBE"
+  1000= "S"
+  1001= "NS"
+  1010= "P"
+  1011= "NP"
+  1100= "L"
+  1101= "NL"
+  1110= "LE"
+  1111= "NLE"
 }
 
-DATA sibs 2 BITS= {.val(2)}
-ALIAS sibi= reg
-ALIAS sibb= reg
+DATA regx 3 BITS
+DATA sibs 2 BITS
+
+ALIAS regi 3 BITS = {
+    regx = MAP reg REX.x regx
+}
+ALIAS regb 3 bits = MAP reg REX.b regb
+ALIAS regr 3 bits = MAP reg REX.r regr
+
+// ALIAS rega = reg
+// is turned into
+// ALIAS rega = {
+//     reg = reg
+// }
 
 ALIAS sibsi 5 BITS= {
    sibs 100 = ""
-   sibs sibi= "[{sibi} * {2 ^ sibs.val}]"
+   sibs regi= "[{regi} * {2 ^ sibs}]"
 }
 
 ALIAS SIB 1 BYTE= {
@@ -154,7 +161,7 @@ ALIAS SIB 1 BYTE= {
     if Mod == 01 then "{sibsi} + {disp8} + [EBP]"
     if Mod == 10 then "{sibsi} + {disp32} + [EBP]"
   }
-  sibsi sibb = "{sibsi} + {sibb}"
+  sibsi regb = "{regi} + {regb}"
 }
 
 DATA Mod 2 BITS
@@ -208,17 +215,17 @@ DATA imm32 4 BYTES
 DATA imm64 8 BYTES
 
 ALIAS imm= {
-  if opmode == 8bit then imm8
-  if opmode == 16bit then imm16
-  if opmode == 32bit then imm32
-  if opmode == 64bit then imm64
+  if opmode == 8bit then {imm8=imm8}
+  if opmode == 16bit then {imm16=imm16}
+  if opmode == 32bit then {imm32=imm32}
+  if opmode == 64bit then {imm64=imm64}
 }
 
 ALIAS immM32= {
-  if opmode == 8bit then imm8
-  if opmode == 16bit then imm16
-  if opmode == 32bit then imm32
-  if opmode == 64bit then imm32
+  if opmode == 8bit then {imm8=imm8}
+  if opmode == 16bit then {imm16=imm16}
+  if opmode == 32bit then {imm32=imm32}
+  if opmode == 64bit then {imm32=imm32}
 }
 
 DATA disp8 1 BYTE
