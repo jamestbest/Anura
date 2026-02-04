@@ -7,6 +7,6 @@
 
 #include "Parser.h"
 
-Node* shunt();
+ParseRet shunt();
 
 #endif //SHUNTINGYARD_H
