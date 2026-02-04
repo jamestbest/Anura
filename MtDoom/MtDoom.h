@@ -8,5 +8,6 @@
 #include <stdint.h>
 
 const char* disassemble_to_str(const uint8_t* data);
+int generate_dissassembler(const char* isdl_file_path, char* output_folder);
 
 #endif //MTDOOM_H
