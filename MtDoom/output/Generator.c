@@ -22,13 +22,13 @@ static int generate_statement(Node* statement);
 static int generate_alias_statement(AliasNode* alias);
 static int generate_l_rule(RuleNodeL* rule, uint8_t depth);
 static int generate_left_rules(LeftRules* left_rules, uint8_t depth, bool include_return);
-static int generate_rules(RuleVector* rules, uint8_t depth, AliasNode* alias);
+static int generate_rules(RuleArray* rules, uint8_t depth, AliasNode* alias);
 static int generate_lr_rule(RuleNodeLR* rule, uint8_t depth, AliasNode* alias);
 static int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias);
 static int generate_if_rule(RuleNodeIf* node, uint8_t depth, AliasNode* alias);
 static int generate_when_rule(RuleNodeWhen* node, uint8_t depth, AliasNode* alias);
 static int generate_string_eval(const LitStringData* string);
-static int generate_expression(ExprNode* expr);
+static int generate_expression(Node* expr);
 static int generate_ident(const IdentNode* ident);
 static int generate_ident_as_value(const IdentNode* ident);
 static int generate_operand(OperandNode* node);
@@ -83,8 +83,8 @@ int generate_data_statement(DataNode* data) {
         cname
     );
 
-    for (int i = 0; i < data->fields.pos; ++i) {
-        FieldNode* field= FieldNode_vec_get_unsafe(&data->fields, i);
+    for (int i = 0; i < data->all_fields.pos; ++i) {
+        FieldNode* field= FieldNode_vec_get_unsafe(&data->all_fields, i);
 
         if (!field->named) {
             fprintf(hfile,"\t// IMM: ");
@@ -146,9 +146,9 @@ int generate_alias_statement(AliasNode* alias) {
     return SUCCESS;
 }
 
-int generate_rules(RuleVector* rules, uint8_t depth, AliasNode* alias) {
+int generate_rules(RuleArray* rules, uint8_t depth, AliasNode* alias) {
     for (int i = 0; i < rules->pos; ++i) {
-        Rule* rule= Rule_vec_get_unsafe(rules, i);
+        Rule* rule= Rule_arr_ptr(rules, i);
 
         switch (rule->base.type) {
             case NT_RULE_IF: generate_if_rule((RuleNodeIf*)rule, depth, alias); break;
@@ -166,7 +166,7 @@ int generate_if_rule(RuleNodeIf* node, uint8_t depth, AliasNode* alias) {
     fprintf(ofile, "if (");
     generate_expression(node->condition);
     fprintf(ofile, ") {\n");
-    generate_right_rules(node->output, depth + 1, alias);
+    generate_right_rules(&node->output, depth + 1, alias);
     fprintf(ofile, "}\n");
 
     return SUCCESS;
@@ -176,14 +176,14 @@ int generate_when_rule(RuleNodeWhen* node, uint8_t depth, AliasNode* alias) {
     fprintf(ofile, "if (");
     generate_expression(node->condition);
     fprintf(ofile, ") {\n");
-    generate_right_rules(node->output, depth + 1, alias);
+    generate_right_rules(&node->output, depth + 1, alias);
     fprintf(ofile, "}\n");
 
     return SUCCESS;
 }
 
-int generate_expression(ExprNode* expr) {
-    switch (((Node*)expr)->type) {
+int generate_expression(Node* expr) {
+    switch (expr->type) {
         case NT_IDENT: {
             generate_ident((IdentNode*)expr);
             break;
@@ -207,18 +207,27 @@ int generate_expression(ExprNode* expr) {
     return SUCCESS;
 }
 
+const char* link_name(Node* link) {
+    switch (link->type) {
+        case NT_FLAG: return ((FlagNode*)link)->name;
+        case NT_ALIAS: return ((AliasNode*)link)->identifier;
+        case NT_DATA: return ((DataNode*)link)->name;
+        default: assert(false);
+    }
+}
+
 int generate_unary(UnaryNode* unary) {
     switch (unary->op) {
         case NOT:
             fprintf(ofile, "!(");
-            generate_operand(unary->operand);
+            generate_operand(&unary->operand);
             fprintf(ofile, ")");
             break;
         case EXISTS: {
-            const AliasNode* alias= (AliasNode*)unary->operand;
+            const IdentNode* ident= unary->operand.ident;
             fprintf(ofile,
                 "aval_%s.parsed_successfully",
-                alias->identifier
+                link_name(ident->link)
             );
             break;
         }
@@ -249,20 +258,22 @@ int generate_binary(BinNode* node) {
         case EQUALITY:
         case NEQUALITY:
         case STAR:
-            generate_operand(node->left);
+            generate_operand(&node->left);
             fprintf(ofile, " %s ", bin_op_to_symbol(node->op));
-            generate_operand(node->right);
+            generate_operand(&node->right);
             break;
-        case DOT:
-            generate_ident((IdentNode*)node->left);
-            fprintf(ofile, " %s ", bin_op_to_symbol(node->op));
-            generate_ident((IdentNode*)node->right);
+        case DOT: {
+            const DataNode* data= (DataNode*)node->left.ident->link;
+            const IdentNode* ident= node->right.ident;
+
+            fprintf(ofile, "data_%s.%s", data->name, ident->token->data.identifier);
             break;
+        }
         case POW:
             fprintf(ofile, "pow(");
-            generate_operand(node->left);
+            generate_operand(&node->left);
             fprintf(ofile, ", ");
-            generate_operand(node->right);
+            generate_operand(&node->right);
             fprintf(ofile, ")");
             break;
         case BINARY_OP_COUNT:
@@ -276,11 +287,11 @@ int generate_binary(BinNode* node) {
 int generate_operand(OperandNode* node) {
     switch (((Node*)node)->type) {
         case NT_IDENT: {
-            generate_ident_as_value(&node->ident);
+            generate_ident_as_value(node->ident);
             break;
         }
         case NT_LIT_NUM: {
-            fprint_simple_num(ofile, &node->lit.data.lit_number);
+            fprint_simple_num(ofile, &node->lit->data.lit_number);
             break;
         }
         case NT_LIT_STRING: {
@@ -317,11 +328,6 @@ int generate_ident(const IdentNode* ident) {
             const FlagNode* flag= (FlagNode*)ident->link;
             fprintf(ofile, "flag_%s", flag->name);
         }
-        case NT_FIELD: {
-            const FieldNode* field= (FieldNode*)ident->link;
-            const DataNode* data= field->data_node;
-            fprintf(ofile, "data_%s.%s", data->name, field->named_info.name);
-        }
         default: assert(false);
     }
 
@@ -342,28 +348,40 @@ int generate_lr_rule(RuleNodeLR* rule, uint8_t depth, AliasNode* alias) {
 int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias) {
     generate_prefix(depth);
     switch (rule->base->type) {
-        case NT_ALIAS: {
-            const AliasNode* r_alias= rule->alias;
+        case NT_IDENT: {
             fprintf(ofile,
-                "set_aval(&AVAL_%s, AVAL_%s);",
-                alias->capitalised,
-                r_alias->capitalised
+                "set_aval(&aval_%s, ",
+                alias->capitalised
             );
+
+            switch (rule->ident->link->type) {
+                case NT_ALIAS: {
+                    const AliasNode* r_alias= (AliasNode*)rule->ident->link;
+                    fprintf(ofile,
+                        "aval_%s",
+                        r_alias->capitalised
+                    );
+                    break;
+                }
+                case NT_DATA: {
+                    const DataNode* data= (DataNode*)rule->ident->link;
+                    fprintf(ofile,
+                        "data_to_aval(data_%s)",
+                        data->capitalised
+                    );
+                    break;
+                }
+                default: assert(false);
+            }
+
+            fprintf(ofile, ");");
             break;
         }
-        case NT_DATA: {
-            const DataNode* data= rule->data;
-            fprintf(ofile,
-                "set_aval(&AVAL_%s, data_to_aval(DATA_%s));",
-                alias->capitalised,
-                data->capitalised
-            );
-            break;
-        }
+
         case NT_LIT_STRING: {
             const LitNode* lit= rule->lit;
             fprintf(ofile,
-                "set_aval(&AVAL_%s, ",
+                "set_aval(&aval_%s, ",
                 alias->capitalised
             );
             generate_string_eval(&lit->data.lit_string);
@@ -473,22 +491,31 @@ int generate_left_rules(LeftRules* left_rules, uint8_t depth, bool include_retur
         const LeftRule* sub_rule= LeftRule_arr_ptr(left_rules, i);
 
         switch (sub_rule->base->type) {
-            case NT_ALIAS: {
-                const AliasNode* alias= sub_rule->alias;
+            case NT_IDENT: {
+                const IdentNode* ident= sub_rule->ident;
+                const char* name;
+
+                switch (ident->link->type) {
+                    case NT_ALIAS: {
+                        const AliasNode* alias= (AliasNode*)ident->link;
+                        name= alias->identifier;
+                        break;
+                    }
+                    case NT_DATA: {
+                        const DataNode* data= (DataNode*)ident->link;
+                        name= data->name;
+                        break;
+                    }
+                    default: assert(false);
+                }
+
                 fprintf(ofile,
                     "parse_%s().success",
-                    alias->identifier
+                    name
                 );
                 break;
             }
-            case NT_DATA: {
-                const DataNode* data= sub_rule->data;
-                fprintf(ofile,
-                    "parse_%s().success",
-                    data->name
-                );
-                break;
-            }
+
             case NT_LIT_NUM: {
                 const LitNode* lit= sub_rule->lit;
                 fprintf(ofile,
@@ -532,7 +559,7 @@ const char* types_to_string(NodeType type) {
         case NT_ROOT: return "NT_ROOT";
         case NT_ALIAS: return "NT_ALIAS";
         case NT_DATA: return "NT_DATA";
-        case NT_STRUCTURE_STMT: return "NT_STRUCTURE_STMT";
+        case NT_STRUCTURE: return "NT_STRUCTURE_STMT";
         case NT_STATEMENTS: return "NT_STATEMENTS";
         case NT_FLAG: return "NT_FLAG_STATEMENT";
         case NT_BRACED_RULES: return "NT_BRACED_RULES";
