@@ -12,11 +12,15 @@ typedef enum NodeType {
     NT_ROOT,
     NT_ALIAS,
     NT_DATA,
-    NT_STRUCTURE_STMT,
+    NT_DATA_FIELD,
+    NT_STRUCTURE,
     NT_STATEMENTS,
     NT_FLAG,
+    NT_FLAG_VALUE,
+    NT_CALCULATE,
 
     NT_BRACED_RULES,
+    NT_IF_BRACED_RULES,
 
     NT_RULE_IF,
     NT_RULE_WHEN,
@@ -50,13 +54,18 @@ struct AliasNode;
 struct DataNode;
 
 VECTOR_PROTO(Node, Node)
-VECTOR_ADD(Node, Node)
 
 #define COMMON_NODE Node base;
+
+typedef struct MetaData {
+    bool parsed;
+    const char* name;
+} MetaData;
 
 typedef struct RootNode {
     COMMON_NODE
     Vector child_nodes;
+    MetaData meta;
 } RootNode;
 
 typedef struct IdentNode {
@@ -67,6 +76,8 @@ typedef struct IdentNode {
     Node* link;
     Token* token;
 } IdentNode;
+
+VECTOR_PROTO(IdentNode, IdentNode)
 
 // a string literal can contains {}
 //  which is an expression
@@ -87,16 +98,22 @@ typedef struct LitNode {
     Token* token;
 } LitNode;
 
+struct BinNode;
+struct UnaryNode;
+
 typedef union OperandNode {
-    LitNode lit;
-    IdentNode ident;
+    Node* node;
+    LitNode* lit;
+    IdentNode* ident;
+    struct UnaryNode* unary;
+    struct BinNode* bin;
 } OperandNode;
 
 typedef struct BinNode {
     COMMON_NODE
 
-    OperandNode* left;
-    OperandNode* right;
+    OperandNode left;
+    OperandNode right;
 
     BinaryOperator op;
 } BinNode;
@@ -104,25 +121,18 @@ typedef struct BinNode {
 typedef struct UnaryNode {
     COMMON_NODE
 
-    OperandNode* operand;
+    OperandNode operand;
 
     UnaryOperator op;
 } UnaryNode;
 
-typedef union ExprNode {
-    IdentNode ident;
-    LitNode lit;
-    BinNode binary;
-    UnaryNode unary;
-} ExprNode;
-
 typedef struct FieldNode {
     COMMON_NODE
-    struct DataNode* data_node;
+    // struct DataNode* data_node;
     union {
         struct NamedFieldInfo {
             const char* name;
-            const char* default_value;
+            SimpleNumData default_value;
             uint8_t bits;
             bool has_default;
         } named_info;
@@ -132,12 +142,14 @@ typedef struct FieldNode {
 } FieldNode;
 
 VECTOR_PROTO(FieldNode, FieldNode)
+ARRAY_PROTO(FieldNodeVector, FieldNodeVector)
 
 typedef struct DataNode {
     COMMON_NODE
     const char* name;
     const char* capitalised;
-    FieldNodeVector fields;
+    FieldNodeVector all_fields;
+    FieldNodeVectorArray rows;
     size_t bits;
 } DataNode;
 
@@ -146,53 +158,69 @@ typedef struct FlagNode {
     const char* name;
     const char* capitalised;
     Vector enum_values;
-    char* default_value;
+    size_t default_value;
 } FlagNode;
+
+typedef struct FlagValueNode {
+    COMMON_NODE
+    FlagNode* flag;
+    size_t enum_pos;
+} FlagValueNode;
 
 typedef union LeftRule {
     Node* base;
-    struct AliasNode* alias;
-    struct DataNode* data;
-    struct LitNode* lit;
+    IdentNode* ident;
+    LitNode* lit;
 } LeftRule;
 
+typedef enum MarkedType {
+    MARKED_QUESTION,
+    MARKED_STAR,
+    MARKER_NONE,
+} MarkedType;
+
+typedef struct MarkedIdent {
+    MarkedType type;
+    Node* ident;
+} MarkedIdent;
+
+ARRAY_PROTO(MarkedIdent, MarkedIdent)
+
+typedef struct StructureNode {
+    COMMON_NODE
+    MarkedIdentArray rules;
+} StructureNode;
+
 ARRAY_PROTO(LeftRule, LeftRule)
-ARRAY_ADD(LeftRule, LeftRule)
 
 typedef LeftRuleArray LeftRules;
 
-struct Rule;
-
-VECTOR_PROTO(struct Rule, Rule)
-VECTOR_ADD(struct Rule, Rule)
-
-/*
- * This is the = {} and contains
- * a list of rules, separated on new lines
- */
-typedef struct BracedRules {
-    COMMON_NODE;
-    RuleVector rules;
-} BracedRules;
+struct BracedRules;
+struct IfBracedRules;
 
 typedef union RightRule {
     Node* base;
-    BracedRules* brace;
-    struct AliasNode* alias;
-    struct DataNode* data;
-    struct LitNode* lit;
+    struct BracedRules* brace;
+    IdentNode* ident;
+    LitNode* lit;
 } RightRule;
+
+typedef union IfFlagRule {
+    Node* base;
+    struct FlagValueNode* flag;
+    struct IfBracedRules* brace;
+} IfFlagRule;
 
 typedef struct RuleNodeIf {
     COMMON_NODE
-    ExprNode* condition;
-    RightRule* output;
+    Node* condition;
+    RightRule output;
 } RuleNodeIf;
 
 typedef struct RuleNodeWhen {
     COMMON_NODE
-    ExprNode* condition;
-    RightRule* output;
+    Node* condition;
+    RightRule output;
 } RuleNodeWhen;
 
 typedef struct RuleNodeLR {
@@ -218,6 +246,24 @@ typedef struct Rule {
     RuleData data;
 } Rule;
 
+ARRAY_PROTO(Rule, Rule)
+
+ARRAY_PROTO(IfFlagRule, IfFlagRule)
+
+/*
+ * This is the = {} and contains
+ * a list of rules, separated on new lines
+ */
+typedef struct BracedRules {
+    COMMON_NODE;
+    RuleArray rules;
+} BracedRules;
+
+typedef struct IfBracedRules {
+    COMMON_NODE;
+    IfFlagRuleArray rules;
+} IfBracedRules;
+
 typedef struct AliasNode {
     COMMON_NODE
     const char* identifier;
@@ -226,18 +272,45 @@ typedef struct AliasNode {
     BracedRules rules;
 } AliasNode;
 
+typedef struct CalcNode {
+    COMMON_NODE
+    const char* identifier;
+    const char* capitalised;
+    IfBracedRules rules;
+} CalcNode;
+
 typedef struct ParseRet {
     bool succ;
-    RootNode root;
+    Node* node;
 } ParseRet;
+
+typedef struct Parsed {
+    bool succ;
+    RootNode root;
+    uint8_t* node_buffer;
+} Parsed;
 
 Token* current();
 Token* consume();
 
 LitNode* add_lit_node(NodeType lit_type);
+LitNode* add_lit_string_node(char* string);
+LitNode* add_lit_number_node(struct LitNumData num, Token* tok);
+IdentNode* add_ident_node(Token* tok, Node* link);
+UnaryNode* add_unary_node(UnaryOperator op, OperandNode operand);
+BinNode* add_binary_node(const BinaryOperator op, OperandNode left, OperandNode right);
+
+Node* check_link(const char* identifier);
+
+ParseRet add_to_symbol_table(const char* name, Node* link);
+
+SimpleNumData complex_to_simple_num(struct LitNumData num, bool context_binary);
 
 void fprint_simple_num(FILE* file, const SimpleNumData* num);
 
-ParseRet parse(TokenArray* tokens);
+Parsed parse(TokenArray* tokens);
+
+extern const ParseRet PARSE_RET_FAIL;
+extern const ParseRet PARSE_RET_SUCC;
 
 #endif // ANURA_PARSER_H
