@@ -191,7 +191,7 @@ uint arr_search(Array* array, const void* search_elem, int (*cmp_func)(const voi
         cmp_func
     );
 
-    if (!pos) return -1;
+    if (!pos) return ARR_NOT_FOUND;
 
     return (pos - array->arr) / array->element_size;
 }

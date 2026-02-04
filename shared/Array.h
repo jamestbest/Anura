@@ -312,4 +312,6 @@ void* arr_search_e(Array* array, const void* s_e, int (*cmp)(const void* a, cons
     ARRAY_ADD(type, typename)                                                  \
     ARRAY_CMP(type, typename, generic_cmp, comparable_element)                 \
 
+#define ARR_NOT_FOUND (-1)
+
 #endif //ARRAY_H
