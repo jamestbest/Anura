@@ -12,6 +12,16 @@ bool bit_from_raw_stream(const uint8_t* stream, const uint64_t idx) {
     return ((stream[idx / 8]) >> (7 - (idx % 8)) & 1);
 }
 
+bool bit_from_stream(const ByteStream* stream, const uint64_t idx, bool* succ) {
+    if (idx > stream->max_pointer) {
+        *succ= false;
+        return false;
+    }
+
+    *succ= true;
+    return bit_from_raw_stream(stream->raw_stream, idx);
+}
+
 int consume_lit_binary(
     ByteStream* bytes,
     const uint8_t* binary_pattern,
@@ -33,8 +43,18 @@ ByteStream init_stream(uint8_t* raw_stream) {
     };
 }
 
+// [[todo]] add the error checking from bit_from_stream
 bool read_bit(ByteStream* stream) {
     return bit_from_raw_stream(stream->raw_stream, stream->pointer++);
+}
+
+uint64_t read_bits(ByteStream* stream, uint32_t bits) {
+    uint64_t res= 0;
+    for (int i = 0; i < bits; ++i) {
+        const bool bit= read_bit(stream);
+        res= (res << 1) | bit;
+    }
+    return res;
 }
 
 bool expect_bits(const uint8_t bits, const uint64_t bit_pattern) {
@@ -48,7 +68,7 @@ bool expect_bits(const uint8_t bits, const uint64_t bit_pattern) {
     return true;
 }
 
-int evaluate_string(char* string, ...) {
+char* evaluate_string(char* string, ...) {
     va_list args;
     va_start(args, string);
 
@@ -80,10 +100,20 @@ int evaluate_string(char* string, ...) {
 
     va_end(args);
 
-    return SUCCESS;
+    char* res= buffer_steal(&buffer, 0);
+    buffer_destroy(&buffer);
+
+    return res;
 }
 
 void set_aval(AVAL* dst, char* data) {
-    dst->chosen_val= data;
-    dst->chosen_idx= AVAL_STATUS_SELECTED;
+    *dst= to_aval(data);
+}
+
+AVAL to_aval(char* data) {
+    return (AVAL) {
+        .chosen_idx= AVAL_STATUS_SELECTED,
+        .chosen_val= data,
+        .parsed_successfully= true
+    };
 }

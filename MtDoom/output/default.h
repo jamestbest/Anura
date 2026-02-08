@@ -16,6 +16,7 @@ typedef void(*generator_function)(Buffer* buffer);
 typedef struct ByteStream {
     uint8_t* raw_stream;
     uint64_t pointer;
+    uint64_t max_pointer;
 } ByteStream;
 
 extern ByteStream stream;
@@ -23,11 +24,27 @@ extern ByteStream stream;
 ByteStream init_stream(uint8_t* raw_stream);
 bool read_bit(ByteStream* stream);
 
+typedef enum AVAL_STATUS {
+    AVAL_STATUS_SELECTED=254,
+    AVAL_STATUS_NONE=255,
+} AVAL_STATUS;
+
+typedef struct AVAL {
+    Vector choices;
+    char* chosen_val;
+    AVAL_STATUS chosen_idx;
+    bool parsed_successfully;
+} AVAL;
+
+const AVAL AVAL_EMPTY= (AVAL) {
+    .chosen_val= "",
+    .chosen_idx= AVAL_STATUS_SELECTED,
+    .parsed_successfully= true
+};
+
 typedef struct ParseRet {
-    union {
-        const char* output_string;
-        const char* error_string;
-    };
+    AVAL aval;
+    const char* error_string;
     uint32_t bits_read;
     bool success;
 } ParseRet;
@@ -52,19 +69,14 @@ typedef struct StrSlice {
 bool expect_bits(uint8_t bits, uint64_t bit_pattern);
 int init();
 
-typedef enum AVAL_STATUS {
-    AVAL_STATUS_SELECTED=254,
-    AVAL_STATUS_NONE=255,
-} AVAL_STATUS;
+uint64_t read_bits(ByteStream* stream, uint32_t bits);
 
-typedef struct AVAL {
-    Vector choices;
-    char* chosen_val;
-    AVAL_STATUS chosen_idx;
-    bool parsed_successfully;
-} AVAL;
-
-int evaluate_string(char* string, ...);
+char* evaluate_string(char* string, ...);
 void set_aval(AVAL* dst, char* data);
+AVAL to_aval(char* data);
+
+#define PARSE_SUCC(aval_) (ParseRet){.aval=aval_, .success= true}
+#define PARSE_SUCC_HIDDEN (ParseRet){.aval=AVAL_EMPTY, .success= true}
+#define PARSE_FAIL (ParseRet){.success=false}
 
 #endif //ANURA_DEFAULT_H
