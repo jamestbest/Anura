@@ -10,10 +10,12 @@
 
 typedef enum NodeType {
     NT_ROOT,
+    NT_META,
     NT_ALIAS,
     NT_DATA,
     NT_DATA_FIELD,
     NT_STRUCTURE,
+    NT_RULE_RIGHT_STMT, // BAD NAME WHY NAME IT RULE WHEN RULES EXIST?!
     NT_STATEMENTS,
     NT_FLAG,
     NT_FLAG_VALUE,
@@ -21,6 +23,8 @@ typedef enum NodeType {
 
     NT_BRACED_RULES,
     NT_IF_BRACED_RULES,
+
+    NT_MULTI,
 
     NT_RULE_IF,
     NT_RULE_WHEN,
@@ -30,7 +34,6 @@ typedef enum NodeType {
     NT_IDENT,
     NT_FIELD,
 
-    NT_EXPR,
     NT_BIN_EXPR,
     NT_UNARY_EXPR,
 
@@ -62,10 +65,19 @@ typedef struct MetaData {
     const char* name;
 } MetaData;
 
+struct StructureNode;
+
+typedef struct MetaNode {
+    COMMON_NODE
+    MetaData meta;
+} MetaNode;
+
 typedef struct RootNode {
     COMMON_NODE
     Vector child_nodes;
-    MetaData meta;
+    MetaNode* meta;
+    struct StructureNode* structure;
+    Vector strings;
 } RootNode;
 
 typedef struct IdentNode {
@@ -74,7 +86,7 @@ typedef struct IdentNode {
     // an alias
     // or data
     Node* link;
-    Token* token;
+    const char* name;
 } IdentNode;
 
 VECTOR_PROTO(IdentNode, IdentNode)
@@ -95,7 +107,6 @@ typedef struct LitNode {
         LitStringData lit_string;
         SimpleNumData lit_number;
     } data;
-    Token* token;
 } LitNode;
 
 struct BinNode;
@@ -141,6 +152,12 @@ typedef struct FieldNode {
     bool named;
 } FieldNode;
 
+typedef struct DataFieldNode {
+    COMMON_NODE
+    struct DataNode* data;
+    size_t pos;
+} DataFieldNode;
+
 VECTOR_PROTO(FieldNode, FieldNode)
 ARRAY_PROTO(FieldNodeVector, FieldNodeVector)
 
@@ -151,6 +168,7 @@ typedef struct DataNode {
     FieldNodeVector all_fields;
     FieldNodeVectorArray rows;
     size_t bits;
+    bool non_fielded;
 } DataNode;
 
 typedef struct FlagNode {
@@ -161,10 +179,16 @@ typedef struct FlagNode {
     size_t default_value;
 } FlagNode;
 
-typedef struct FlagValueNode {
-    COMMON_NODE
+typedef struct FlagLinkPos {
     FlagNode* flag;
     size_t enum_pos;
+} FlagLinkPos;
+
+ARRAY_PROTO(FlagLinkPos, FlagLinkPos)
+
+typedef struct FlagValueNode {
+    COMMON_NODE
+    FlagLinkPosArray links;
 } FlagValueNode;
 
 typedef union LeftRule {
@@ -198,24 +222,30 @@ typedef LeftRuleArray LeftRules;
 struct BracedRules;
 struct IfBracedRules;
 
+typedef struct MultiNode {
+    COMMON_NODE
+    NodeVector multis;
+} MultiNode;
+
 typedef union RightRule {
     Node* base;
     struct BracedRules* brace;
-    IdentNode* ident;
-    LitNode* lit;
+    MultiNode* multi_out;
+    Node* single_out;
 } RightRule;
-
-typedef union IfFlagRule {
-    Node* base;
-    struct FlagValueNode* flag;
-    struct IfBracedRules* brace;
-} IfFlagRule;
 
 typedef struct RuleNodeIf {
     COMMON_NODE
     Node* condition;
     RightRule output;
 } RuleNodeIf;
+
+typedef union IfFlagRule {
+    Node* base;
+    FlagValueNode* flag;
+    RuleNodeIf* if_rule;
+    struct IfBracedRules* brace;
+} IfFlagRule;
 
 typedef struct RuleNodeWhen {
     COMMON_NODE
@@ -264,12 +294,20 @@ typedef struct IfBracedRules {
     IfFlagRuleArray rules;
 } IfBracedRules;
 
+typedef struct RuleRightNode {
+    COMMON_NODE
+    uint16_t id;
+    NodeVector expressions;
+} RuleRightNode;
+
 typedef struct AliasNode {
     COMMON_NODE
     const char* identifier;
     const char* capitalised;
     uint32_t bits;
-    BracedRules rules;
+    BracedRules rules; // if when parsing the braced rules it sets something in the alias for the number of outputs and the rightRule should become RightRules where the comma adds more
+    size_t right_output_count;
+    RuleRightNode* linked_rule;
 } AliasNode;
 
 typedef struct CalcNode {
@@ -290,15 +328,13 @@ typedef struct Parsed {
     uint8_t* node_buffer;
 } Parsed;
 
-Token* current();
-Token* consume();
-
 LitNode* add_lit_node(NodeType lit_type);
 LitNode* add_lit_string_node(char* string);
-LitNode* add_lit_number_node(struct LitNumData num, Token* tok);
-IdentNode* add_ident_node(Token* tok, Node* link);
+LitNode* add_lit_number_node(LitNumData num);
+IdentNode* add_ident_node(const char* name, Node* link);
 UnaryNode* add_unary_node(UnaryOperator op, OperandNode operand);
 BinNode* add_binary_node(const BinaryOperator op, OperandNode left, OperandNode right);
+DataFieldNode* add_data_field_node(DataNode* data, size_t pos);
 
 Node* check_link(const char* identifier);
 
@@ -306,9 +342,14 @@ ParseRet add_to_symbol_table(const char* name, Node* link);
 
 SimpleNumData complex_to_simple_num(struct LitNumData num, bool context_binary);
 
+void print_simple_num(const SimpleNumData* num);
 void fprint_simple_num(FILE* file, const SimpleNumData* num);
 
+const char* types_to_string(NodeType type);
+const char* link_name(Node* link);
+
 Parsed parse(TokenArray* tokens);
+void print_root(RootNode* root);
 
 extern const ParseRet PARSE_RET_FAIL;
 extern const ParseRet PARSE_RET_SUCC;

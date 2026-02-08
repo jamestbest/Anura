@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "Colours.h"
 #include "ShuntingYard.h"
 
 const ParseRet PARSE_RET_FAIL= (ParseRet) {.succ= false, .node= NULL};
@@ -18,10 +19,13 @@ const ParseRet PARSE_RET_SUCC= (ParseRet) {.succ= true, .node= NULL};
 static RootNode create_root();
 static Vector create_children();
 
+static Token* consume();
+static Token* current();
 static Token* expect(TokenType type);
 static Token* expect_keyword(keyword kw);
 static Token* expect_binary_op(BinaryOperator op);
 static Token* expect_unary_op(UnaryOperator op);
+static Token* check(TokenType type) ;
 static void skip(TokenType type);
 static Token* peek();
 static Token* peer(uint distance);
@@ -40,9 +44,12 @@ static ParseRet parse_data();
 static ParseRet parse_flag();
 static ParseRet parse_structure();
 static ParseRet parse_meta();
-static ParseRet parse_braced_rules(BracedRules* results);
+static ParseRet parse_expr();
+static ParseRet parse_rule_right_stmt();
+static ParseRet parse_braced_rules(BracedRules* results, AliasNode* alias);
 static ParseRet parse_braced_if_flags(IfBracedRules* rules, FlagNode* flag);
-static ParseRet parse_l_or_lr_rule(RuleArray* rules);
+static ParseRet parse_l_or_lr_rule(RuleArray* rules, AliasNode* alias);
+static ParseRet parse_size(uint32_t* res);
 
 static AliasNode* add_alias_node(const char* name);
 static FlagNode* add_flag_node(const char* name);
@@ -55,16 +62,29 @@ static BracedRules* add_braced_rules();
 static RuleNodeLR* add_rule_lr(LeftRules left, RightRule right);
 static RuleNodeL* add_rule_l(LeftRules left);
 static IfBracedRules* add_if_braced_rules();
+static FlagValueNode* add_flag_value_node();
+static MultiNode* add_multi_node();
+static RuleRightNode* add_rule_right_node();
+static MetaNode* add_meta_node();
 
 static CalcNode create_calc_node(const char* identifier);
 static CalcNode* add_calc_node(const char* identifier);
 static Rule create_rule(NodeType type);
 static RuleNodeIf create_rule_node_if(Node* expr, RightRule output);
-static IdentNode create_ident_node(Token* tok, Node* link);
+static IdentNode create_ident_node(const char* name, Node* link);
 static BracedRules create_braced_rules();
 static RuleNodeLR create_rule_lr(LeftRules left, RightRule right);
 static RuleNodeL create_rule_l(LeftRules left);
 static IfBracedRules create_if_braced_rules();
+static FlagValueNode create_flag_value_node();
+static MultiNode create_multi_node();
+static RuleRightNode create_rule_right_node();
+static DataFieldNode create_data_field_node(DataNode* data, size_t pos);
+static MetaNode create_meta_node();
+
+static void print_symbol_table();
+
+static ParseRet error(const char* message, ...);
 
 uint64_t convert_lit_num_to_base10(struct LitNumData lit_num, bool expecting_base10);
 
@@ -75,6 +95,8 @@ ARRAY_ADD(MarkedIdent, MarkedIdent)
 VECTOR_ADD(Node, Node)
 ARRAY_ADD(Rule, Rule)
 ARRAY_ADD(IfFlagRule, IfFlagRule)
+ARRAY_ADD(FieldNodeVector, FieldNodeVector)
+ARRAY_ADD(FlagLinkPos, FlagLinkPos)
 
 TokenArray* tokens;
 size_t t_i;
@@ -82,7 +104,10 @@ size_t t_i;
 size_t string_id= 0;
 Vector string_data;
 
+size_t rule_right_stmt_id= 0;
+
 uint8_t* node_buffer;
+Vector node_buffers;
 size_t node_buffer_capacity;
 size_t node_buffer_size;
 
@@ -98,11 +123,15 @@ ARRAY_ADD_CMP(Symbol, Symbol, strcmp, name)
 
 SymbolArray symbol_table;
 
-MetaData meta_data;
+RootNode root;
+
+bool should_add_to_root(NodeType type) {
+    return type != NT_STRUCTURE && type != NT_META;
+}
 
 Parsed parse(TokenArray* ts) {
-    RootNode root= create_root();
-    int ret_code= SUCCESS;
+    root= create_root();
+    int ret_code= true;
 
     tokens= ts;
     t_i= 0;
@@ -110,21 +139,31 @@ Parsed parse(TokenArray* ts) {
     string_id= 0;
     string_data= vector_create();
 
+    rule_right_stmt_id= 0;
+
     symbol_table= Symbol_arr_create();
-    meta_data= (MetaData){.name= NULL};
 
-    Symbol_arr_search_ie(&symbol_table, "symbol_a");
+    node_buffer= malloc(1000 * sizeof(uint8_t));
+    node_buffer_capacity= 1000;
+    node_buffer_size= 0;
 
-    while (t_i < tokens->pos) {
+    while (t_i < tokens->pos - 1) {
         ParseRet res;
-        if (res= parse_toplevel(), res.succ != SUCCESS) {
+        if (res= parse_toplevel(), res.succ) {
+            if (res.node && should_add_to_root(res.node->type))
+                vector_add(&root.child_nodes, res.node);
+        } else {
             ret_code= res.succ;
-            vector_add(&root.child_nodes, res.node);
             break;
         }
     }
 
-    if (ret_code != SUCCESS) {
+    if (!root.meta->meta.parsed || !root.structure) {
+        error("Meta data and structure statements are required");
+        ret_code= false;
+    }
+
+    if (!ret_code) {
         free(node_buffer);
         return (Parsed){.succ=false, .root= {0}, .node_buffer= NULL};
     }
@@ -136,8 +175,16 @@ Parsed parse(TokenArray* ts) {
     };
 }
 
+void eat_all_whitespace() {
+    while (current() && current()->type == DELIMITER) consume();
+}
+
 ParseRet parse_toplevel() {
+    eat_all_whitespace();
+
     Token* t= current();
+
+    if (!t) return PARSE_RET_SUCC;
 
     if (t->type != KEYWORD) {
         return error_with_token("Expected keyword at toplevel", t);
@@ -149,6 +196,7 @@ ParseRet parse_toplevel() {
         case DATA: return parse_data();
         case FLAG: return parse_flag();
         case STRUCTURE: return parse_structure();
+        case RULE: return parse_rule_right_stmt();
         case META: return parse_meta();
         default:
             return error_with_token("Expected keyword token to be in (ALIAS, CALCULATE, DATA, FLAG, STRUCTURE)",t);
@@ -162,25 +210,40 @@ ParseRet parse_meta_row(MetaData* md) {
     if (!ident) return unexpected("Meta statement row after `.`, expected identifier for meta data field", current());
 
     if (strcmp(ident->data.identifier, "name") == 0) {
-        if (!expect_binary_op(EQUALITY)) return unexpected("Name field of meta data statement, expected `=`", current());
+        if (!expect(ASSIGN)) return unexpected("Name field of meta data statement, expected `=`", current());
 
         const Token* name_str= expect(LIT_STRING);
         if (!name_str) return unexpected("Name field of meta data statement after `=`, expected string", current());
 
-        meta_data.name= name_str->data.lit_string;
+        root.meta->meta.name= name_str->data.lit_string;
+
+        return PARSE_RET_SUCC;
     }
+
+    return PARSE_RET_FAIL;
 }
 
 ParseRet parse_meta() {
     consume(); // eat `META`
 
-    if (meta_data.parsed) return error("Meta data statement already exists in file");
-    meta_data.parsed= true;
+    root.meta= add_meta_node();
+    MetaData* meta= &root.meta->meta;
+    if (meta->parsed) return error("Meta data statement already exists in file");
 
+    if (!expect(ASSIGN)) return unexpected("After meta keyword, expected `=`", current());
+    if (!expect(LBRACE)) return unexpected("After `=` in meta statement, expected `{`", current());
+
+    eat_all_whitespace();
     do {
-        parse_meta_row(&meta_data);
-        expect(DELIMITER);
+        if (!parse_meta_row(meta).succ) return PARSE_RET_FAIL;
+        eat_all_whitespace();
     } while (!expect(RBRACE));
+
+    meta->parsed= true;
+    return (ParseRet) {
+        .succ= true,
+        .node= NULL
+    };
 }
 
 ParseRet parse_marked_ident(MarkedIdentArray* idents) {
@@ -209,15 +272,77 @@ ParseRet parse_marked_ident(MarkedIdentArray* idents) {
 ParseRet parse_structure() {
     consume(); // eat `STRUCTURE`
 
-    StructureNode* structure= add_structure();
+    if (root.structure) return error("Structure of ISA is already defined in file");
+
+    root.structure= add_structure();
     do {
-        const ParseRet res= parse_marked_ident(&structure->rules);
+        const ParseRet res= parse_marked_ident(&root.structure->rules);
         if (!res.succ) return res;
     } while (!expect(DELIMITER));
 
     return (ParseRet){
         .succ= true,
-        .node= (Node*)structure
+        .node= (Node*)root.structure
+    };
+}
+
+ParseRet parse_rule_right_row(uint64_t expected_idx) {
+    if (!expect_keyword(CHOOSE)) return unexpected("Right rule row, expects `CHOOSE` at start", current());
+
+    const Token* num= expect(LIT_NUM);
+    if (!num) return unexpected("Right rule row after `CHOOSE`, expects literal number", current());
+
+    const uint64_t val= convert_lit_num_to_base10(num->data.lit_num, true);
+    if (val != expected_idx) {
+        return error("Indexes in RULE RIGHT statements must be in order, from 0..n. Expected %lu got %lu",
+            expected_idx,
+            val
+        );
+    }
+
+    if (!expect_keyword(IF)) return unexpected("Right rule row after index, expects `IF`", current());
+    return parse_expr();
+}
+
+ParseRet parse_rule_right_stmt() {
+    consume(); // eat `RULE`
+    if (!expect_keyword(RIGHT)) return unexpected("Rule statement after rule keyword, expected `RIGHT` keyword", current());
+    if (!expect_keyword(ON)) return unexpected("Rule statement after `RULE RIGHT`, expected ON", current());
+
+    Vector alias_links= vector_create();
+
+    do {
+        const Token* ident= expect(IDENTIFIER);
+        if (!ident) return unexpected("Rule statement alias list, expects identifier after `ON` or `,`", current());
+
+        Symbol* sym= Symbol_arr_search_ie(&symbol_table, ident->data.identifier);
+        if (!sym) return error("Unable to find alias `%s` in scope in rule statement", ident->data.identifier);
+        if (sym->node->type != NT_ALIAS) return error("Identifier `%s` in rule statement is not an alias", ident->data.identifier);
+
+        vector_add(&alias_links, sym->node);
+    } while (expect(COMMA));
+
+    if (!expect(LBRACE)) return unexpected("Rule statement after alias list, expects `{`", current());
+    eat_all_whitespace();
+
+    RuleRightNode* rule_right= add_rule_right_node();
+
+    uint i= 0;
+    do {
+        const ParseRet res= parse_rule_right_row(i++);
+        if (!res.succ) return res;
+        Node_vec_add(&rule_right->expressions, res.node);
+        eat_all_whitespace();
+    } while (!expect(RBRACE));
+
+    for (i = 0; i < alias_links.pos; ++i) {
+        AliasNode* alias= vector_get_unsafe(&alias_links, i);
+        alias->linked_rule= rule_right;
+    }
+
+    return (ParseRet) {
+        .succ= true,
+        .node= (Node*)rule_right
     };
 }
 
@@ -285,12 +410,13 @@ ParseRet parse_data_field(FieldNodeVector* all_fields, FieldNodeVector* fields, 
         if (!expect(RPAREN)) return unexpected("DATA field bit size, expected closing paren `)`", current());
     }
 
+    field->named= true;
     field->named_info= (struct NamedFieldInfo){
         .name= ident->data.identifier,
         .bits= bits,
     };
 
-    if (expect_binary_op(EQUALITY)) {
+    if (expect(ASSIGN)) {
         const Token* dvalue= expect(LIT_NUM);
 
         if (!dvalue) return funexpected("DATA field `%s` default value expects literal number after `=`", current(), ident->data.identifier);
@@ -303,7 +429,7 @@ ParseRet parse_data_field(FieldNodeVector* all_fields, FieldNodeVector* fields, 
     if (pos != -1) {
         if (pos < first_row_pos) {
             // this is allowed, but must be the same number of bits and have the same default value
-            FieldNode* efield= FieldNode_vec_get_unsafe(fields, pos);
+            FieldNode* efield= FieldNode_vec_get_unsafe(all_fields, pos);
 
             if (!fields_are_same(efield, field)) return error(
                 "Fields `%s` in DATA statement `%s` are not equal across rows, this is a requirement for multirow data, consider using seperate DATA statements for ones where the fields should be of different dimensions or default values",
@@ -316,7 +442,8 @@ ParseRet parse_data_field(FieldNodeVector* all_fields, FieldNodeVector* fields, 
     }
 
     FieldNode_vec_add(fields, field);
-    FieldNode_vec_add(all_fields, field);
+    if (pos == -1)
+        FieldNode_vec_add(all_fields, field);
 
     return PARSE_RET_SUCC;
 }
@@ -325,13 +452,14 @@ ParseRet parse_data_row(FieldNodeVector* all_fields, FieldNodeVectorArray* rows,
     //   1100 0100 .R .X .B .m(5) .W .v(4) .L .pp(2)
     const size_t first_row_pos= all_fields->pos;
     FieldNodeVector row= FieldNode_vec_create();
-    FieldNodeVector_arr_add(rows, row);
 
     while (!expect(DELIMITER)) {
-        ParseRet res= parse_data_field(all_fields, &row, data_name, first_row_pos);
+        const ParseRet res= parse_data_field(all_fields, &row, data_name, first_row_pos);
 
         if (!res.succ) return res;
     }
+
+    FieldNodeVector_arr_add(rows, row);
 
     return PARSE_RET_SUCC;
 }
@@ -341,10 +469,23 @@ ParseRet parse_data() {
 
     Token* ident= expect(IDENTIFIER);
     if (!ident) return unexpected("Expected identifier after DATA keyword", current());
-    if (!expect_binary_op(EQUALITY)) return unexpected("Expected `=` after identifier in DATA statement", current());
-    if (!expect(LBRACE)) return unexpected("Expected `{` after `=` in DATA statement", current());
+
+    uint32_t size_in_bits= 0;
+    ParseRet size_res= parse_size(&size_in_bits);
+    if (!size_res.succ) return size_res;
 
     DataNode* data= add_data_node(ident->data.identifier);
+    data->bits= size_in_bits;
+
+    if (!expect(ASSIGN)) {
+        data->non_fielded= true;
+
+        if (size_in_bits == 0) return error("Cannot create non-fielded data without explicit size");
+        goto parse_data_res;
+    }
+
+    if (!expect(LBRACE)) return unexpected("Expected `{` after `=` in DATA statement", current());
+
     expect(DELIMITER);
 
     while (!expect(RBRACE)) {
@@ -354,7 +495,12 @@ ParseRet parse_data() {
         expect(DELIMITER);
     }
 
-    return PARSE_RET_SUCC;
+parse_data_res:
+    add_to_symbol_table(data->name, (Node*)data);
+    return (ParseRet) {
+        .succ= true,
+        .node= (Node*)data
+    };
 }
 
 size_t find_enum_value(Vector* enum_values, const char* enum_name) {
@@ -365,13 +511,32 @@ size_t find_enum_value(Vector* enum_values, const char* enum_name) {
     return -1;
 }
 
+ParseRet get_or_add_enum(const char* ident, FlagLinkPos link) {
+    Symbol* sym= Symbol_arr_search_ie(&symbol_table, ident);
+    if (!sym) {
+        FlagValueNode* fv= add_flag_value_node();
+        FlagLinkPos_arr_add(&fv->links, link);
+        Symbol_arr_add(&symbol_table, (Symbol) {
+            .name= ident,
+            .node= (Node*)fv
+        });
+
+        return PARSE_RET_SUCC;
+    }
+
+    if (sym->node->type != NT_FLAG_VALUE) return error("Unable to add enum value `%s` when non enum identifier with same name exists");
+    FlagValueNode* fv= (FlagValueNode*)sym->node;
+    FlagLinkPos_arr_add(&fv->links, link);
+    return PARSE_RET_SUCC;
+}
+
 ParseRet parse_flag() {
     consume(); // eat `FLAG`
 
     const Token* ident= expect(IDENTIFIER);
     if (!ident) return unexpected("Flag statement, expected identifier after keyword", current());
 
-    if (!expect_binary_op(EQUALITY)) return unexpected("Flag statement after identifier, expected `=`", current());
+    if (!expect(ASSIGN)) return unexpected("Flag statement after identifier, expected `=`", current());
 
     FlagNode* flag= add_flag_node(ident->data.identifier);
 
@@ -380,6 +545,13 @@ ParseRet parse_flag() {
         if (!enum_ident) return unexpected("Flag enum list, expected identifier at start or after `|`", current());
 
         vector_add(&flag->enum_values, (void*)enum_ident->data.identifier);
+
+        const FlagLinkPos link= (FlagLinkPos){
+            .flag= flag,
+            .enum_pos= flag->enum_values.pos - 1
+        };
+
+        get_or_add_enum(enum_ident->data.identifier, link);
     } while (expect_binary_op(PIPE));
 
     if (!expect_keyword(DEFAULT)) return unexpected("Flag enum list after enum values, expected `default` keyword with default value", current());
@@ -391,6 +563,7 @@ ParseRet parse_flag() {
 
     flag->default_value= default_pos;
 
+    add_to_symbol_table(flag->name, (Node*)flag);
     return (ParseRet) {
         .succ= true,
         .node= (Node*)flag
@@ -402,7 +575,14 @@ ParseRet parse_expr() {
     // constants: Enums, int literals
     // keyword: default which is just True
     // identifiers: flags, aliases
-    return shunt();
+    const ShuntRet res= shunt(tokens, t_i);
+    if (!res.succ) return PARSE_RET_FAIL;
+
+    t_i= res.idx;
+    return (ParseRet) {
+        .succ= true,
+        .node= res.node
+    };
 }
 
 ParseRet parse_calc() {
@@ -418,7 +598,7 @@ ParseRet parse_calc() {
     if (sym->node->type != NT_FLAG) return error("Symbol `%s` is not a flag in calculate statement", ident->data.identifier);
     FlagNode* flag= (FlagNode*)sym->node;
 
-    if (!expect_binary_op(EQUALITY)) {
+    if (!expect(ASSIGN)) {
         return unexpected("Expected `=` after calculate identifier", current());
     }
 
@@ -440,38 +620,103 @@ ParseRet parse_ident() {
     Symbol* sym= Symbol_arr_search_ie(&symbol_table, ident->data.identifier);
     if (!sym) return error("Unable to find symbol `%s` in the current symbol table");
 
-    IdentNode* ident_node= add_ident_node(ident, sym->node);
+    IdentNode* ident_node= add_ident_node(ident->data.identifier, sym->node);
     return (ParseRet) {
         .succ= true,
         .node= (Node*)ident_node
     };
 }
 
-ParseRet parse_right_rule() {
+ParseRet parse_lit_string() {
+    const Token* str= expect(LIT_STRING);
+    if (!str) return unexpected("Literal string, expected literal string token", current());
+
+    LitNode* lit= add_lit_string_node(str->data.lit_string);
+
+    size_t idx= 0, start= 0;
+    char* string= str->data.lit_string;
+    char c;
+    while (c= string[idx], c != '\0') {
+        idx++;
+
+        if (c != '{') {
+            continue;
+        }
+
+        set_lex_pos(&string[idx]);
+        TokenArray expr_tokens= Token_arr_create();
+        TokenRet res;
+        do {
+            res= lex_token();
+
+            if (res.succ && res.addable) Token_arr_add(&expr_tokens, res.token);
+        } while (res.succ && res.token.type != RBRACE);
+
+        const ShuntRet shunt_res= shunt(&expr_tokens, 0);
+
+        if (!shunt_res.succ) return PARSE_RET_FAIL;
+        if (shunt_res.idx != expr_tokens.pos - 1) return error("Did not consume all tokens in expression");
+
+        Node_vec_add(&lit->data.lit_string.expressions, shunt_res.node);
+    }
+
+    vector_add(&root.strings, lit);
+
+    return (ParseRet) {
+        .succ= true,
+        .node= (Node*)lit
+    };
+}
+
+ParseRet parse_right_rule(AliasNode* alias) {
     // can be
     // struct BracedRules* brace;
-    // struct IdentNode* ident;
-    // struct LitNode* lit;
-    Token* next= peek();
+    // MultiNode* multi_out;
+
+    Token* next= current();
     if (!next) return PARSE_RET_FAIL;
 
-    switch (next->type) {
-        case IDENTIFIER: return parse_ident();
-        case LBRACE: {
-            BracedRules* br= add_braced_rules();
-            const ParseRet res= parse_braced_rules(br);
-            return (ParseRet) {.succ= res.succ, .node= (Node*)br};
-        }
-        case LIT_STRING: {
-            LitNode* lit= add_lit_string_node(next->data.lit_string);
-            return (ParseRet) {
-                .succ= true,
-                .node= (Node*)lit
-            };
-        }
-            break;
-        default: return PARSE_RET_FAIL;
+    if (next->type == LBRACE) {
+        BracedRules* br= add_braced_rules();
+        const ParseRet res= parse_braced_rules(br, alias);
+        return (ParseRet) {.succ= res.succ, .node= (Node*)br};
     }
+
+    MultiNode* multi= add_multi_node();
+    do {
+        switch (next->type) {
+            case IDENTIFIER: {
+                const ParseRet res= parse_ident();
+                if (!res.succ) return res;
+                Node_vec_add(&multi->multis, res.node);
+                break;
+            }
+            case LIT_STRING: {
+                const ParseRet res= parse_lit_string();
+                if (!res.succ) return res;
+                Node_vec_add(&multi->multis, res.node);
+                break;
+            }
+            default: return PARSE_RET_FAIL;
+        }
+    } while (expect(COMMA));
+
+    if (alias->right_output_count == -1) {
+        alias->right_output_count= multi->multis.pos;
+    }
+
+    if (alias->right_output_count != multi->multis.pos) {
+        return error("Alias statements must have the same number of outputs on the right side from previous rule alias `%s` expects %zu outputs but read %zu",
+            alias->identifier,
+            alias->right_output_count,
+            multi->multis.pos
+        );
+    }
+
+    return (ParseRet) {
+        .succ= true,
+        .node= (Node*)multi
+    };
 }
 
 RightRule node_to_right_rule(Node* node) {
@@ -480,7 +725,7 @@ RightRule node_to_right_rule(Node* node) {
     return rule;
 }
 
-ParseRet parse_if_rule(RuleArray* rules) {
+ParseRet parse_if_rule(RuleArray* rules, AliasNode* alias) {
     consume(); // eat the 'if'
 
     const ParseRet expr= parse_expr();
@@ -488,10 +733,10 @@ ParseRet parse_if_rule(RuleArray* rules) {
     if (!expr.succ) return expr;
 
     if (!expect_keyword(THEN)) {
-        return unexpected_keyword("If rule after expression", current()->data.keyword);
+        return unexpected("If rule after expression", current());
     }
 
-    const ParseRet right= parse_right_rule();
+    const ParseRet right= parse_right_rule(alias);
 
     if (!right.succ) return PARSE_RET_FAIL;
 
@@ -505,10 +750,10 @@ ParseRet parse_if_rule(RuleArray* rules) {
     return PARSE_RET_SUCC;
 }
 
-ParseRet parse_if_flag_rule(IfFlagRuleArray* rules, FlagNode* flag) {
+ParseRet parse_if_flag_rule(IfFlagRuleArray* rules, FlagNode* flag, Node* expr) {
     IfFlagRule rule;
 
-    Token* ident= expect(IDENTIFIER);
+    const Token* ident= expect(IDENTIFIER);
     if (ident) {
         Symbol* sym= Symbol_arr_search_ie(&symbol_table, ident->data.identifier);
 
@@ -516,13 +761,18 @@ ParseRet parse_if_flag_rule(IfFlagRuleArray* rules, FlagNode* flag) {
         if (sym->node->type != NT_FLAG_VALUE) return error("Symbol %s is not a flag value in the result of a calculate statement", ident->data.identifier);
 
         FlagValueNode* fv= (FlagValueNode*)sym->node;
-        if (fv->flag != flag) return error("FLAG value `%s` in CALCULATE `%s` is not from the same FLAG but rather from `%s`",
+        bool found= false;
+        for (int i = 0; i < fv->links.pos; ++i) {
+            const FlagLinkPos* link= FlagLinkPos_arr_ptr(&fv->links, i);
+            if (link->flag == flag) found= true;
+        }
+
+        if (!found) return error("FLAG value `%s` in CALCULATE `%s` is not from the same FLAG",
             ident->data.identifier,
-            flag->name,
-            fv->flag->name
+            flag->name
         );
 
-        rule.flag= fv;
+        rule.if_rule= add_rule_node_if(expr, (RightRule){.single_out= (Node*)fv});
         IfFlagRule_arr_add(rules, rule);
         return PARSE_RET_SUCC;
     }
@@ -539,22 +789,39 @@ ParseRet parse_if_flag_rule(IfFlagRuleArray* rules, FlagNode* flag) {
 
 ParseRet parse_braced_if_flag(IfFlagRuleArray* rules, FlagNode* flag) {
     // this can only be an if statement and the output a braced_if_flags or just a flag identifier
-    Token* c= expect_keyword(IF);
-    if (!c) {
-        return unexpected("If/When rule in calculate statement, expected IF/WHEN keyword", current());
+    Token* c= expect(IDENTIFIER);
+    if (c) {
+        Symbol* sym= Symbol_arr_search_ie(&symbol_table, c->data.identifier);
+        if (!sym) return error("Unable to find symbol `%s` in flag calculate rule `%s`",
+            c->data.identifier,
+            flag->name
+        );
+        if (sym->node->type != NT_FLAG_VALUE) return error("Output of `%s`'s calculate statement must be an enum value of the same type got identifier `%s` of non matching type",
+            flag->name,
+            c->data.identifier
+        );
+
+        IfFlagRule_arr_add(rules, (IfFlagRule) {
+            .flag= (FlagValueNode*)sym->node,
+        });
+
+        return PARSE_RET_SUCC;
     }
 
-    consume(); // eat the 'if'
+    c= expect_keyword(IF);
+    if (!c) {
+        return unexpected("If/When rule in calculate statement, expected IF/WHEN keyword or enum value", current());
+    }
 
     const ParseRet expr= parse_expr();
 
     if (!expr.succ) return PARSE_RET_FAIL;
 
     if (!expect_keyword(THEN)) {
-        return unexpected_keyword("If rule after expression expects THEN keyword", current()->data.keyword);
+        return unexpected("If rule after expression expects THEN keyword", current());
     }
 
-    const ParseRet right_res= parse_if_flag_rule(rules, flag);
+    const ParseRet right_res= parse_if_flag_rule(rules, flag, expr.node);
     if (!right_res.succ) return PARSE_RET_FAIL;
 
     skip(DELIMITER);
@@ -589,7 +856,7 @@ ParseRet parse_braced_if_flags(IfBracedRules* rules, FlagNode* flag) {
     return PARSE_RET_SUCC;
 }
 
-ParseRet parse_braced_rule(RuleArray* rules) {
+ParseRet parse_braced_rule(RuleArray* rules, AliasNode* alias) {
     // Either an
     // L rule
     // or an LR rule
@@ -598,22 +865,24 @@ ParseRet parse_braced_rule(RuleArray* rules) {
 
     Token* c= current();
     if (c->type == KEYWORD) {
-        if (c->data.keyword == IF) return parse_if_rule(rules);
+        if (c->data.keyword == IF) return parse_if_rule(rules, alias);
 
         return unexpected_keyword("Braced rule, expected either IF, WHEN, or L/LR rule", current()->data.keyword);
     }
 
-    return parse_l_or_lr_rule(rules);
+    return parse_l_or_lr_rule(rules, alias);
 }
 
 ParseRet parse_left_rules(LeftRules* lr) {
-    const Token* next= peek();
+    eat_all_whitespace();
+    const Token* next= current();
 
-    while (true) {
+    bool running= true;
+    while (running) {
         switch (next->type) {
             case LIT_NUM: {
                 Token* num= consume();
-                const LeftRule rule= (LeftRule){.lit= add_lit_number_node(num->data.lit_num, num)};
+                const LeftRule rule= (LeftRule){.lit= add_lit_number_node(num->data.lit_num)};
                 LeftRule_arr_add(lr, rule);
                 break;
             }
@@ -633,28 +902,30 @@ ParseRet parse_left_rules(LeftRules* lr) {
                     default:
                         assert(false);
                 }
-                const LeftRule rule= (LeftRule){.ident= add_ident_node(ident, sym->node)};
+                const LeftRule rule= (LeftRule){.ident= add_ident_node(ident->data.identifier, sym->node)};
                 LeftRule_arr_add(lr, rule);
                 break;
             }
             default:
+                running= false;
                 break;
         }
-        next= peek();
+        next= current();
     }
 
     return PARSE_RET_SUCC;
 }
 
-ParseRet parse_l_or_lr_rule(RuleArray* rules) {
+ParseRet parse_l_or_lr_rule(RuleArray* rules, AliasNode* alias) {
     LeftRules lr= LeftRule_arr_create();
     const ParseRet l_rule= parse_left_rules(&lr);
 
     if (!l_rule.succ) return PARSE_RET_FAIL;
 
-    if (expect_binary_op(EQUALITY)) {
+    if (expect(ASSIGN)) {
         Rule rule= create_rule(NT_RULE_LR);
-        ParseRet r_rule= parse_right_rule();
+        ParseRet r_rule= parse_right_rule(alias);
+        if (!r_rule.succ) return r_rule;
 
         rule.data.rule_lr= create_rule_lr(lr, (RightRule){.base= r_rule.node});
 
@@ -670,7 +941,7 @@ ParseRet parse_l_or_lr_rule(RuleArray* rules) {
     return PARSE_RET_SUCC;
 }
 
-ParseRet parse_braced_rules(BracedRules* results) {
+ParseRet parse_braced_rules(BracedRules* results, AliasNode* alias) {
     if (!expect(LBRACE)) {
         return unexpected("Braced rules statement after equality sign", current());
     }
@@ -679,7 +950,7 @@ ParseRet parse_braced_rules(BracedRules* results) {
 
     while (!expect(RBRACE)) {
         ParseRet res;
-        if (res= parse_braced_rule(&results->rules), !res.succ) {
+        if (res= parse_braced_rule(&results->rules, alias), !res.succ) {
             return res;
         }
         expect(DELIMITER);
@@ -690,6 +961,25 @@ ParseRet parse_braced_rules(BracedRules* results) {
     if (results->rules.pos == 0) {
         return error("Cannot have an empty braced rules list");
     }
+
+    return PARSE_RET_SUCC;
+}
+
+ParseRet parse_size(uint32_t* res) {
+    // This could be the size of the alias
+    const Token* size= expect(LIT_NUM);
+    uint32_t size_in_bits= 0;
+    if (size) {
+        Token* byte= expect_keyword(BYTES);
+        Token* bits= expect_keyword(BITS);
+
+        if (byte && bits) return unexpected("How did we get here, bytes followed by bits?! Don't do that", current());
+        if (!byte && !bits) return unexpected("Expected size quantifier `BIT(S)` or `BYTE(S)` following size in statement", current());
+
+        size_in_bits= convert_lit_num_to_base10(size->data.lit_num, true);
+        if (byte) size_in_bits *= 8;
+    }
+    *res= size_in_bits;
 
     return PARSE_RET_SUCC;
 }
@@ -715,29 +1005,19 @@ ParseRet parse_alias() {
         return unexpected("Expected identifier after alias keyword for alias name", current());
     }
 
-    // This could be the size of the alias
-    const Token* size= expect(LIT_NUM);
     uint32_t size_in_bits= 0;
-    if (size) {
-        Token* byte= expect_keyword(BYTES);
-        Token* bits= expect_keyword(BITS);
+    const ParseRet size_res= parse_size(&size_in_bits);
+    if (!size_res.succ) return size_res;
 
-        if (byte && bits) return unexpected("How did we get here, bytes followed by bits?! Don't do that", current());
-        if (!byte && !bits) return unexpected("Expected size quantifier `BIT(S)` or `BYTE(S)` following size in alias statement", current());
-
-        size_in_bits= convert_lit_num_to_base10(size->data.lit_num, true);
-        if (byte) size_in_bits *= 8;
-    }
-
-    if (!expect_binary_op(EQUALITY)) {
+    if (!expect(ASSIGN)) {
         return unexpected("Expected `=` after alias identifier / alias size", current());
     }
 
     AliasNode* alias= add_alias_node(ident->data.identifier);
     alias->bits= size_in_bits;
 
-    if (expect(LBRACE)) {
-        const ParseRet res= parse_braced_rules(&alias->rules);
+    if (check(LBRACE)) {
+        const ParseRet res= parse_braced_rules(&alias->rules, alias);
         if (!res.succ) return PARSE_RET_FAIL;
 
         goto parse_alias_end;
@@ -758,8 +1038,9 @@ ParseRet parse_alias() {
         return error("When using alias with only one symbol on the right the symbol must be another alias node");
     }
 
+    // todo check why this isn't us
     AliasNode* r_alias= (AliasNode*)symbol->node;
-    IdentNode* i= add_ident_node(ident, symbol->node);
+    IdentNode* i= add_ident_node(ident->data.identifier, symbol->node);
 
     Rule r= {
         .base.type= NT_RULE_LR,
@@ -767,10 +1048,11 @@ ParseRet parse_alias() {
             .base.type= NT_RULE_LR,
             .left= LeftRule_arr_construct(1),
             .right= (RightRule) {
-                .ident= i
+                .multi_out= add_multi_node()
             }
         }
     };
+    Node_vec_add(&r.data.rule_lr.right.multi_out->multis, (Node*)i);
 
     LeftRule_arr_add(&r.data.rule_lr.left, (LeftRule) {
         .ident= i
@@ -795,7 +1077,7 @@ ParseRet add_to_symbol_table(const char* name, Node* link) {
         return error("Symbol with name %s already exists", name);
     }
 
-    Symbol_arr_add_sorted(&symbol_table, (Symbol) {
+    Symbol_arr_add_sorted_i(&symbol_table, (Symbol) {
         .name= name,
         .node= link
     });
@@ -847,8 +1129,14 @@ void skip(TokenType type) {
     expect(type);
 }
 
+Token* check(const TokenType type) {
+    if (!current() || current()->type != type) return NULL;
+
+    return current();
+}
+
 Token* expect(TokenType type) {
-    if (current()->type != type) {
+    if (!current() || current()->type != type) {
         return NULL;
     }
 
@@ -905,6 +1193,8 @@ ParseRet error(const char* message, ...) {
     vprintf(message, args);
     va_end(args);
 
+    newline();
+
     return PARSE_RET_FAIL;
 }
 
@@ -912,10 +1202,13 @@ void create_node_buffer() {
     node_buffer= calloc(1, MIN_NODE_BUFFER_SIZE);
     node_buffer_size= 0;
     node_buffer_capacity= MIN_NODE_BUFFER_SIZE;
+
+    node_buffers= vector_create();
+    vector_add(&node_buffers, node_buffer);
 }
 
 void resize_node_buffer() {
-    void* new_ptr= realloc(node_buffer, node_buffer_capacity << 1);
+    void* new_ptr= calloc(node_buffer_capacity << 1, sizeof(uint8_t));
 
     if (!new_ptr) {
         error("Unable to realloc node buffer, this may be because of my `<< 1` on full buffer :)");
@@ -924,8 +1217,11 @@ void resize_node_buffer() {
         return;
     }
 
+    vector_add(&node_buffers, new_ptr);
+
     node_buffer= new_ptr;
     node_buffer_capacity <<= 1;
+    node_buffer_size= 0;
 }
 
 void* add_node(void* node_ptr, size_t node_bytes) {
@@ -965,7 +1261,8 @@ DataNode create_data_node(const char* name) {
         .capitalised= capitalised(name),
         .bits= 0,
         .all_fields= FieldNode_vec_create(),
-        .rows= FieldNodeVector_arr_create()
+        .rows= FieldNodeVector_arr_create(),
+        .non_fielded= false,
     };
 }
 
@@ -986,6 +1283,18 @@ FieldNode create_field_node() {
 FieldNode* add_field_node() {
     FieldNode field= create_field_node();
     return add_node(&field, sizeof(field));
+}
+
+MultiNode create_multi_node() {
+    return (MultiNode) {
+        .base= {.type= NT_MULTI},
+        .multis= Node_vec_create(),
+    };
+}
+
+MultiNode* add_multi_node() {
+    MultiNode multi= create_multi_node();
+    return add_node(&multi, sizeof(multi));
 }
 
 StructureNode create_structure_node() {
@@ -1030,7 +1339,8 @@ RootNode create_root() {
         .base= {
             .type= NT_ROOT
         },
-        .child_nodes= create_children()
+        .child_nodes= create_children(),
+        .strings= vector_create()
     };
 }
 
@@ -1084,16 +1394,33 @@ RuleNodeIf* add_rule_node_if(Node* expr, RightRule output) {
     return add_node(&rule_node_if, sizeof(rule_node_if));
 }
 
-IdentNode create_ident_node(Token* tok, Node* link) {
-    return (IdentNode) {
-        .base= {.type= NT_IDENT},
-        .link= link,
-        .token= tok
+size_t get_rule_right_stmt_id() {
+    return rule_right_stmt_id++;
+}
+
+RuleRightNode create_rule_right_node() {
+    return (RuleRightNode) {
+        .base= {.type= NT_RULE_RIGHT_STMT},
+        .expressions= Node_vec_create(),
+        .id= get_rule_right_stmt_id()
     };
 }
 
-IdentNode* add_ident_node(Token* tok, Node* link) {
-    IdentNode ident_node= create_ident_node(tok, link);
+RuleRightNode* add_rule_right_node() {
+    RuleRightNode rule_right_node= create_rule_right_node();
+    return add_node(&rule_right_node, sizeof(rule_right_node));
+}
+
+IdentNode create_ident_node(const char* name, Node* link) {
+    return (IdentNode) {
+        .base= {.type= NT_IDENT},
+        .link= link,
+        .name= name
+    };
+}
+
+IdentNode* add_ident_node(const char* name, Node* link) {
+    IdentNode ident_node= create_ident_node(name, link);
     return add_node(&ident_node, sizeof(ident_node));
 }
 
@@ -1119,13 +1446,27 @@ AliasNode create_alias_node(const char* identifier) {
         .rules= create_braced_rules(),
         .identifier= identifier,
         .capitalised= capitalised(identifier),
-        .bits= -1
+        .bits= -1,
+        .linked_rule= NULL,
+        .right_output_count= -1
     };
 }
 
 AliasNode* add_alias_node(const char* name) {
     AliasNode alias= create_alias_node(name);
     return add_node(&alias, sizeof(alias));
+}
+
+FlagValueNode create_flag_value_node() {
+    return (FlagValueNode) {
+        .base= {.type= NT_FLAG_VALUE},
+        .links= FlagLinkPos_arr_create(),
+    };
+}
+
+FlagValueNode* add_flag_value_node() {
+    FlagValueNode flag_value_node= create_flag_value_node();
+    return add_node(&flag_value_node, sizeof(flag_value_node));
 }
 
 LitNode* add_lit_string_node(char* string) {
@@ -1170,7 +1511,7 @@ SimpleNumData complex_to_simple_num(struct LitNumData num, bool context_binary) 
     return result;
 }
 
-LitNode* add_lit_number_node(struct LitNumData num, Token* tok) {
+LitNode* add_lit_number_node(LitNumData num) {
     SimpleNumData simple= complex_to_simple_num(num, true);
 
     LitNode lit= (LitNode) {
@@ -1178,7 +1519,6 @@ LitNode* add_lit_number_node(struct LitNumData num, Token* tok) {
             .type= NT_LIT_NUM
         },
         .data.lit_number= simple,
-        .token= tok
     };
 
     LitNode* node= add_node(&lit, sizeof(lit));
@@ -1213,8 +1553,40 @@ BinNode* add_binary_node(const BinaryOperator op, OperandNode left, OperandNode 
     return add_node(&node, sizeof(node));
 }
 
+DataFieldNode create_data_field_node(DataNode* data, size_t pos) {
+    return (DataFieldNode) {
+        .base= {.type= NT_DATA_FIELD},
+        .pos= pos,
+        .data= data
+    };
+}
+
+DataFieldNode* add_data_field_node(DataNode* data, size_t pos) {
+    DataFieldNode node= create_data_field_node(data, pos);
+    return add_node(&node, sizeof(node));
+}
+
+MetaNode create_meta_node() {
+    return (MetaNode) {
+        .base= {.type= NT_META},
+        .meta= {
+            .name= NULL,
+            .parsed= false
+        }
+    };
+}
+
+MetaNode* add_meta_node() {
+    MetaNode meta= create_meta_node();
+    return add_node(&meta, sizeof(meta));
+}
+
 Vector create_children() {
     return vector_create();
+}
+
+void print_simple_num(const SimpleNumData* num) {
+    fprint_simple_num(stdout, num);
 }
 
 void fprint_simple_num(FILE* file, const SimpleNumData* num) {
@@ -1235,3 +1607,495 @@ Node* check_link(const char* identifier) {
     return sym->node;
 }
 
+typedef enum NodePrintPrefix {
+    NODE_PRINT_EMPTY, // "    "
+    NODE_PRINT_LINK,  // "|---"
+    NODE_PRINT_LAST,  // "`---"
+    NODE_PRINT_SKIP,  // "|   "
+} NodePrintPrefix;
+
+ARRAY_PROTO(NodePrintPrefix, Prefix)
+ARRAY_ADD(NodePrintPrefix, Prefix)
+
+const char* prefix_string(const NodePrintPrefix prefix) {
+    switch (prefix) {
+        case NODE_PRINT_EMPTY: return "   ";
+        case NODE_PRINT_LINK: return "|--";
+        case NODE_PRINT_LAST: return "`--";
+        case NODE_PRINT_SKIP: return "|  ";
+        default: return "<<ERROR>> Node level prefix unknown";
+    }
+}
+
+void print_prefix(const NodePrintPrefix prefix) {
+    putz(prefix_string(prefix));
+}
+
+void print_prefixes(const PrefixArray* prefixes) {
+    for (int i = 0; i < prefixes->pos; ++i) {
+        const NodePrintPrefix prefix= Prefix_arr_get(prefixes, i);
+
+        print_prefix(prefix);
+    }
+}
+
+void print_node(Node* node, PrefixArray* prefixes);
+
+void print_root(RootNode* root) {
+    PrefixArray prefixes= Prefix_arr_create();
+
+    print_node((Node*)root, &prefixes);
+
+    Prefix_arr_destroy(&prefixes);
+}
+
+const char* types_to_colour(const NodeType type) {
+    switch (type) {
+        case NT_ROOT:
+            return C_RED;
+        case NT_ALIAS:
+        case NT_DATA:
+        case NT_STRUCTURE:
+        case NT_FLAG:
+        case NT_CALCULATE:
+            return C_BLU;
+
+        case NT_DATA_FIELD:
+            break;
+            break;
+        case NT_RULE_RIGHT_STMT:
+            break;
+        case NT_STATEMENTS:
+            break;
+            break;
+        case NT_FLAG_VALUE:
+            break;
+            break;
+        case NT_BRACED_RULES:
+            break;
+        case NT_IF_BRACED_RULES:
+            break;
+        case NT_MULTI:
+            break;
+        case NT_RULE_IF:
+            break;
+        case NT_RULE_WHEN:
+            break;
+        case NT_RULE_L:
+            break;
+        case NT_RULE_LR:
+            break;
+            break;
+        case NT_FIELD:
+            break;
+        case NT_BIN_EXPR:
+        case NT_UNARY_EXPR:
+            return C_RED;
+        case NT_LIT_STRING:
+        case NT_LIT_NUM:
+        case NT_IDENT:
+            return C_CYN;
+    }
+
+    return C_RST;
+}
+
+const char* types_to_string(const NodeType type) {
+    switch (type) {
+        case NT_ROOT: return "NT_ROOT";
+        case NT_ALIAS: return "NT_ALIAS";
+        case NT_META: return "NT_META";
+        case NT_DATA: return "NT_DATA";
+        case NT_STRUCTURE: return "NT_STRUCTURE_STMT";
+        case NT_STATEMENTS: return "NT_STATEMENTS";
+        case NT_FLAG: return "NT_FLAG_STATEMENT";
+        case NT_BRACED_RULES: return "NT_BRACED_RULES";
+        case NT_RULE_IF: return "NT_RULE_IF";
+        case NT_RULE_WHEN: return "NT_RULE_WHEN";
+        case NT_RULE_L: return "NT_RULE_L";
+        case NT_RULE_LR: return "NT_RULE_LR";
+        case NT_IDENT: return "NT_IDENT";
+        case NT_FIELD: return "NT_FIELD";
+        case NT_LIT_STRING: return "NT_LIT_STRING";
+        case NT_LIT_NUM: return "NT_LIT_NUM";
+        case NT_DATA_FIELD: return "NT_DATA_FIELD";
+        case NT_RULE_RIGHT_STMT: return "NT_RULE_RIGHT_STMT";
+        case NT_FLAG_VALUE: return "NT_FLAG_VALUE";
+        case NT_CALCULATE: return "NT_CALCULATE";
+        case NT_IF_BRACED_RULES: return "NT_IF_BRACED_RULES";
+        case NT_MULTI: return "NT_MULTI";
+        case NT_BIN_EXPR: return  "NT_BIN_EXPR";
+        case NT_UNARY_EXPR: return "NT_UNARY_EXPR";
+
+        default: return "<<ERROR>> unknown node type <<ERROR>>";
+    }
+}
+
+void print_titled_child(Node* node, PrefixArray* prefixes, const bool last, const char* title) {
+    print_prefixes(prefixes);
+
+    print_prefix(last ? NODE_PRINT_LAST : NODE_PRINT_LINK);
+    Prefix_arr_add(prefixes, last ? NODE_PRINT_EMPTY : NODE_PRINT_SKIP);
+    if (title)
+        printf("%s: ", title);
+    print_node(node, prefixes);
+    Prefix_arr_pop(prefixes);
+}
+
+void print_child(Node* node, PrefixArray* prefixes, const bool last) {
+    print_titled_child(node, prefixes, last, NULL);
+}
+
+void print_child_(void* node, PrefixArray* prefixes, const bool last) {
+    return print_child(node, prefixes, last);
+}
+
+void print_child_ptr_(void* node, PrefixArray* prefixes, const bool last) {
+    return print_child(*(void**)node, prefixes, last);
+}
+
+typedef void (*print_child_func)(void* item, PrefixArray* prefixes, bool last);
+
+void print_children_arr(const Array* children, PrefixArray* prefixes, print_child_func func) {
+    if (children->pos == 0) return;
+
+    for (int i = 0; i < children->pos; ++i) {
+        const bool last= children->pos - 1 == i;
+
+        void* child= arr_ptr(children, i);
+
+        func(child, prefixes, last);
+    }
+}
+
+void print_children(const Vector* children, PrefixArray* prefixes, print_child_func func) {
+    if (children->pos == 0) return;
+
+    for (int i = 0; i < children->pos; ++i) {
+        const bool last= children->pos - 1 == i;
+
+        void* child= vector_get_unsafe(children, i);
+
+        func(child, prefixes, last);
+    }
+}
+
+void print_meta(const MetaData* meta) {
+    printf("Meta (%sparsed): ISA Name=%s\n", // technically not correct for children == 0 of root
+        meta->parsed ? "" : "Not ",
+        meta->name
+    );
+}
+
+#define CHILD_STRING "|--"
+#define LAST_CHILD_STRING "`--"
+
+void print_prefix_as_if_child() {
+    putz(CHILD_STRING);
+}
+
+void print_prefix_as_if_last_child() {
+    putz(LAST_CHILD_STRING);
+}
+
+const char* link_name(Node* link) {
+    switch (link->type) {
+        case NT_FLAG: return ((FlagNode*)link)->name;
+        case NT_ALIAS: return ((AliasNode*)link)->identifier;
+        case NT_DATA: return ((DataNode*)link)->name;
+        default: assert(false);
+    }
+}
+
+void print_string_child(void* child, PrefixArray* prefixes, const bool last) {
+    const char* str= child;
+
+    print_prefixes(prefixes);
+
+    print_prefix(last ? NODE_PRINT_LAST : NODE_PRINT_LINK);
+    Prefix_arr_add(prefixes, last ? NODE_PRINT_EMPTY : NODE_PRINT_SKIP);
+    printf("%s\n", str);
+    Prefix_arr_pop(prefixes);
+}
+
+void print_flag_link_pos(void* child, PrefixArray* prefixes, const bool last) {
+    const FlagLinkPos* flp= (FlagLinkPos*)child;
+
+    print_prefixes(prefixes);
+
+    print_prefix(last ? NODE_PRINT_LAST : NODE_PRINT_LINK);
+    Prefix_arr_add(prefixes, last ? NODE_PRINT_EMPTY : NODE_PRINT_SKIP);
+    printf("Flag link: %s\n", flp->flag->name);
+    Prefix_arr_pop(prefixes);
+}
+
+void print_field_node(const FieldNode* field) {
+    if (field->named) {
+        printf(".%s(%u)", field->named_info.name, field->named_info.bits);
+        if (field->named_info.has_default) {
+            printf("=%#lx", field->named_info.default_value.value);
+        }
+    } else {
+        print_simple_num(&field->num);
+    }
+}
+
+void print_data_row(void* row, PrefixArray* prefixes, const bool last) {
+    const FieldNodeVector* fnv= (FieldNodeVector*)row;
+
+    print_prefixes(prefixes);
+
+    print_prefix(last ? NODE_PRINT_LAST : NODE_PRINT_LINK);
+    Prefix_arr_add(prefixes, last ? NODE_PRINT_EMPTY : NODE_PRINT_SKIP);
+
+    for (int i = 0; i < fnv->pos; ++i) {
+        const FieldNode* field= FieldNode_vec_get_unsafe(fnv, i);
+        print_field_node(field);
+        printf(" ");
+    }
+    newline();
+
+    Prefix_arr_pop(prefixes);
+}
+
+void print_rule(void* rule, PrefixArray* prefixes, const bool last) {
+    const Rule* r= (Rule*)rule;
+
+    print_prefixes(prefixes);
+
+    print_prefix(last ? NODE_PRINT_LAST : NODE_PRINT_LINK);
+    Prefix_arr_add(prefixes, last ? NODE_PRINT_EMPTY : NODE_PRINT_SKIP);
+    print_node((Node*)&r->data, prefixes);
+    Prefix_arr_pop(prefixes);
+}
+
+#define PP print_prefixes(prefixes);
+#define PPC PP print_prefix_as_if_child();
+#define PPX(last) print_prefixes(prefixes), (last ? print_prefix_as_if_last_child() : print_prefix_as_if_child());
+
+#define PrintAsChild_(stmts, last) \
+    print_prefixes(prefixes);\
+    print_prefix(last ? NODE_PRINT_LAST : NODE_PRINT_LINK);\
+    Prefix_arr_add(prefixes, last ? NODE_PRINT_EMPTY : NODE_PRINT_SKIP);\
+    {\
+        stmts\
+    }\
+    Prefix_arr_pop(prefixes);
+
+#define PrintAsChild(stmts) PrintAsChild_(stmts, false)
+#define PrintAsLastChild(stmts) PrintAsChild_(stmts, true)
+
+void print_node(Node* node, PrefixArray* prefixes) {
+    if (!node) {
+        printf("<<NULL>>\n");
+        return;
+    }
+
+    printf("%s%s"C_RST"\n", types_to_colour(node->type), types_to_string(node->type));
+
+    switch (node->type) {
+        case NT_ROOT: {
+            const RootNode* root= (RootNode*)node;
+            PrintAsChild(print_meta(&root->meta->meta);)
+            print_children(&root->child_nodes, prefixes, print_child_);
+            break;
+        }
+        case NT_ALIAS: {
+            const AliasNode* alias= (AliasNode*)node;
+            PPC printf("Name: %s (%s)\n", alias->identifier, alias->capitalised);
+            PPC printf("Bits: %u\n", alias->bits);
+            PPC printf("Output count: %lu\n", alias->right_output_count);
+            if (alias->linked_rule) {
+                PPC printf("Calculate link: %u\n", alias->linked_rule->id);
+            }
+
+            print_child((Node*)&alias->rules, prefixes, true);
+            break;
+        }
+        case NT_DATA: {
+            const DataNode* data= (DataNode*)node;
+            PPC printf("Name: %s (%s)\n", data->name, data->capitalised);
+            if (!data->non_fielded) {
+                PPC printf("Bits: %lu\n", data->bits);
+                PPC printf("Row count: %zu\n", data->rows.pos);
+                PrintAsChild(
+                    printf("Rows:\n");
+                    print_children_arr((Array*)&data->rows, prefixes, print_data_row);
+                )
+                PrintAsLastChild(
+                    printf("All Fields:\n");
+                    print_data_row((void*)&data->all_fields, prefixes, true);
+                )
+            } else {
+                PrintAsLastChild(printf("Bits: %lu\n", data->bits);)
+            }
+            break;
+        }
+        case NT_DATA_FIELD:
+            break;
+        case NT_STRUCTURE: {
+            const StructureNode* structure= (StructureNode*)node;
+            PrintAsLastChild(printf("Rules: ");)
+            for (int i = 0; i < structure->rules.pos; ++i) {
+                const MarkedIdent* ident= MarkedIdent_arr_ptr(&structure->rules, i);
+                printf("%s", link_name(ident->ident));
+                switch (ident->type) {
+                    case MARKED_QUESTION: putchar('?'); break;
+                    case MARKED_STAR: putchar('*'); break;
+                    case MARKER_NONE:
+                    default:
+                        break;
+                }
+                putchar(' ');
+            }
+            newline();
+            break;
+        }
+        case NT_RULE_RIGHT_STMT: {
+            const RuleRightNode* rr= (RuleRightNode*)node;
+            PPC printf("id: %u\n", rr->id);
+            PPC printf("Rules (%zu):\n", rr->expressions.pos);
+            print_children((Vector*)&rr->expressions, prefixes, print_child_);
+            break;
+        }
+        case NT_STATEMENTS: assert(false);
+        case NT_FLAG: {
+            const FlagNode* flag = (FlagNode*)node;
+            PPC printf("Name: %s (%s)\n", flag->name, flag->capitalised);
+            PPC printf("Default: %s\n", (char*)vector_get_unsafe(&flag->enum_values, flag->default_value));
+            PrintAsLastChild(
+                printf("Enums:\n");
+                print_children(&flag->enum_values, prefixes, print_string_child);
+            )
+            break;
+        }
+        case NT_FLAG_VALUE: {
+            const FlagValueNode* fv= (FlagValueNode*)node;
+            if (fv->links.pos == 0) assert(false);
+
+            const FlagLinkPos* first= FlagLinkPos_arr_ptr(&fv->links, 0);
+            PPC printf("Name: %s\n", (char*)vector_get_unsafe(&first->flag->enum_values, first->enum_pos));
+            PrintAsLastChild(
+                printf("Flag links:\n");
+                print_children_arr((Array*)&fv->links, prefixes, print_flag_link_pos);
+            )
+
+            break;
+        }
+        case NT_CALCULATE: {
+            const CalcNode* calc= (CalcNode*)node;
+            PPC printf("Name: %s (%s)", calc->identifier, calc->capitalised);
+
+            print_child((Node*)&calc->rules, prefixes, true);
+            break;
+        }
+        case NT_BRACED_RULES: {
+            const BracedRules* br= (BracedRules*)node;
+            print_children_arr((Array*)&br->rules, prefixes, print_rule);
+            break;
+        }
+        case NT_IF_BRACED_RULES: {
+            const IfBracedRules* br= (IfBracedRules*)node;
+            print_children_arr((Array*)&br->rules, prefixes, print_child_ptr_);
+            break;
+        }
+        case NT_MULTI: {
+            const MultiNode* multi= (MultiNode*)node;
+            print_children((Vector*)&multi->multis, prefixes, print_child_);
+            break;
+        }
+        case NT_RULE_IF:
+        case NT_RULE_WHEN: {
+            const RuleNodeIf* rule= (RuleNodeIf*)node;
+            print_titled_child(rule->condition, prefixes, false, "Condition");
+            print_titled_child(rule->output.base, prefixes, true, "Output");
+            break;
+        }
+        case NT_RULE_L: {
+            const RuleNodeL* rule= (RuleNodeL*)node;
+            print_children_arr((Array*)&rule->rules, prefixes, print_child_ptr_);
+            break;
+        }
+        case NT_RULE_LR: {
+            const RuleNodeLR* rule= (RuleNodeLR*)node;
+            PrintAsChild(
+                printf("Left:\n");
+                print_children_arr((Array*)&rule->left, prefixes, print_child_ptr_);
+            )
+
+            PrintAsLastChild(
+                printf("Right:\n");
+                print_child(rule->right.base, prefixes, true);
+            )
+            break;
+        }
+        case NT_IDENT: {
+            const IdentNode* ident= (IdentNode*)node;
+            PPC printf("Name: `%s`\n", ident->name);
+            PrintAsLastChild(
+                printf("Link: ");
+                switch (ident->link->type) {
+                    case NT_ALIAS: printf("alias"); break;
+                    case NT_DATA: printf("data"); break;
+                    case NT_FLAG: printf("flag"); break;
+                    case NT_FLAG_VALUE: printf("flag value"); break;
+                    case NT_DATA_FIELD: printf("data field"); break;
+                    default: assert(false);
+                }
+            )
+            newline();
+            break;
+        }
+        case NT_FIELD: {
+            const FieldNode* field= (FieldNode*)node;
+            print_field_node(field);
+            newline();
+
+            break;
+        }
+        case NT_BIN_EXPR: {
+            const BinNode* bin= (BinNode*)node;
+            PPC printf("Op: %s\n", BINARY_OP_STRINGS[bin->op]);
+            print_child(bin->left.node, prefixes, false);
+            print_child(bin->right.node, prefixes, true);
+            break;
+        }
+        case NT_UNARY_EXPR: {
+            const UnaryNode* unary= (UnaryNode*)node;
+            PPC printf("Op: %s\n", UNARY_OP_STRINGS[unary->op]);
+            print_child(unary->operand.node, prefixes, true);
+            break;
+        }
+        case NT_LIT_STRING: {
+            const LitNode* lit= (LitNode*)node;
+            const LitStringData* str= &lit->data.lit_string;
+
+            PPC printf("Raw string: `%s`\n", str->string);
+            if (str->expressions.pos == 0) {
+                PrintAsLastChild(printf("Id: %u\n", str->id);)
+            } else {
+                PrintAsChild(printf("Id: %u\n", str->id);)
+                print_children((Vector*)&str->expressions, prefixes, print_child_);
+            }
+
+            break;
+        }
+        case NT_LIT_NUM: {
+            const LitNode* lit= (LitNode*)node;
+            const SimpleNumData* num= &lit->data.lit_number;
+            PrintAsLastChild(print_simple_num(num);)
+            newline();
+            break;
+        }
+        default: assert(false);
+    }
+}
+
+void print_symbol_table() {
+    printf("SYM TABLE (%zu entries):\n", symbol_table.pos);
+    for (size_t i = 0; i < symbol_table.pos; i++) {
+        const Symbol* sym= Symbol_arr_ptr(&symbol_table, i);
+        printf("\t- %s LINK: %p (%s)\n", sym->name, sym->node, types_to_string(sym->node->type));
+    }
+    printf("--SYM END--\n\n");
+}
