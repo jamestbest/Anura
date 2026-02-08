@@ -28,20 +28,21 @@ FILE* c_file;
 static bool load_line();
 static int  lex_line();
 
-static void lex_comment();
-static int  lex_string();
-static void lex_identifier();
-static int  lex_number();
+static TokenRet lex_comment();
+static TokenRet lex_string();
+static TokenRet lex_identifier();
+static TokenRet lex_number();
 
 static char peek();
 static char current();
 static char consume();
+static void unconsume();
 static char prev();
 static void inc_line_and_reset_col();
 
 static int error(const char* message, ...);
 
-uint32_t line=0, col= 0;
+uint32_t line=0, col= 1;
 
 const LexRet LEX_RET_FAIL= (LexRet) {
     .succ= false,
@@ -63,11 +64,12 @@ LexRet lex(const char* filepath) {
 
     tokens= Token_arr_create();
 
-    int retcode= SUCCESS;
+    int retsucc= true;
     while (load_line()) {
         const int errcode= lex_line();
 
-        if (errcode != SUCCESS) retcode= errcode;
+        if (!errcode)
+            retsucc= errcode;
     }
 
     buffer_destroy(&line_buff);
@@ -77,13 +79,14 @@ LexRet lex(const char* filepath) {
         print_token(t);
     }
 
-    if (retcode == SUCCESS) {
+    if (retsucc) {
         return (LexRet) {
-            .succ= retcode,
+            .succ= retsucc,
             .tokens= tokens
         };
     }
-    else return LEX_RET_FAIL;
+
+    return LEX_RET_FAIL;
 }
 
 bool load_line() {
@@ -94,7 +97,7 @@ bool load_line() {
     if (succ) {
         c_char= line_buff.data;
         line_start_char= c_char;
-        vector_add(&lines, buffer_steal(&line_buff, BUFF_MIN));
+        vector_add(&lines, buffer_copy(&line_buff));
     }
 
     return succ;
@@ -136,90 +139,153 @@ void add_simple_token(TokenType type) {
     Token_arr_add(&tokens, t);
 }
 
-int lex_line() {
-    int retcode= SUCCESS;
+Token create_simple_token(TokenType type) {
+    return (Token) {
+        .type= type,
+        .meta= token_meta()
+    };
+}
 
-    while (c_char < line_buff.data + line_buff.pos && *c_char != '\0') {
-        char c= *c_char;
+Token create_binary_op(BinaryOperator type) {
+    return (Token){
+        .type= BINARY_OP,
+        .meta= token_meta(),
+        .data.bin_op= type
+    };
+}
 
-        switch (c) {
-            case '\n': add_simple_token(DELIMITER); break;
-            case ' ':
-            case '\t':
-                break;
-            case '=': {
-                if (peek() == '=') {
-                    add_binary_op(EQUALITY);
-                    consume();
-                    break;
-                }
-                add_simple_token(ASSIGN);
-                break;
-            }
-            case '(': add_simple_token(LPAREN); break;
-            case ')': add_simple_token(RPAREN); break;
-            case '{': add_simple_token(LBRACE); break;
-            case '}': add_simple_token(RBRACE); break;
-            case '.': add_binary_op(DOT); break;
-            case ',': add_simple_token(COMMA); break;
-            case '*': add_binary_op(STAR); break;
-            case '?': add_unary_op(EXISTS); break;
-            case '^': add_binary_op(POW); break;
-            case '!': {
-                if (peek() != '=') {
-                    add_unary_op(NOT);
-                    break;
-                }
+Token create_unary_op(UnaryOperator op) {
+    return (Token) {
+        .type= UNARY_OP,
+        .meta= token_meta(),
+        .data.unary_op= op
+    };
+}
 
-                add_binary_op(NEQUALITY);
-                break;
-            }
-            default: goto lex_line_no_simple;
-        }
+void set_lex_pos(char* str) {
+    c_char= str;
+    col= 0;
+}
 
-        consume();
-        continue;
+TokenRet lex_token() {
+    char c= consume();
 
-    lex_line_no_simple:
-        if (c == '/' && peek() == '/') lex_comment();
-        else if (c == '"') lex_string();
-        else {
-            if (is_alph(c)) lex_identifier();
-            else if (is_digit(c)) lex_number();
-            else {
-                error("Unknown symbol found when lexing `%c`", c);
-                retcode= FAIL;
+    switch (c) {
+        case '\n': return TOK_SUCC(create_simple_token(DELIMITER));
+        case ' ':
+        case '\t':
+            return TOK_SUCC_HIDDEN();
+        case '=': {
+            if (current() == '=') {
                 consume();
+                return TOK_SUCC(create_binary_op(EQUALITY));
+            }
+            return TOK_SUCC(create_simple_token(ASSIGN));
+        }
+        case '(': return TOK_SUCC(create_simple_token(LPAREN));
+        case ')': return TOK_SUCC(create_simple_token(RPAREN));
+        case '{': return TOK_SUCC(create_simple_token(LBRACE));
+        case '}': return TOK_SUCC(create_simple_token(RBRACE));
+        case '.': return TOK_SUCC(create_binary_op(DOT));
+        case ',': return TOK_SUCC(create_simple_token(COMMA));
+        case '*': return TOK_SUCC(create_binary_op(STAR));
+        case '?': return TOK_SUCC(create_unary_op(EXISTS));
+        case '^': return TOK_SUCC(create_binary_op(POW));
+        case '|': return TOK_SUCC(create_binary_op(PIPE));
+        case '&': {
+            if (current() == '&') {
+                consume();
+                return TOK_SUCC(create_binary_op(AND));
             }
         }
+        case '!': {
+            if (current() != '=') {
+                return TOK_SUCC(create_unary_op(NOT));
+            }
+
+            consume();
+            return TOK_SUCC(create_binary_op(NEQUALITY));
+        }
+        default: break;
     }
 
-    return retcode;
+    unconsume();
+
+    if (c == '/' && current() == '/') return lex_comment();
+    if (c == '"') return lex_string();
+    if (is_alph(c)) return lex_identifier();
+    if (is_digit(c)) return lex_number();
+
+    error("Unknown symbol found when lexing `%c` at <%u:%u>", c, line, col);
+    consume();
+    return TOK_FAIL;
 }
 
-void lex_comment() {
+int lex_line() {
+    int succ= true;
+
+    while (c_char < line_buff.data + line_buff.pos && *c_char != '\0') {
+        const TokenRet res= lex_token();
+        succ= succ && res.succ;
+
+        if (res.addable)
+            Token_arr_add(&tokens, res.token);
+    }
+
+    return succ;
+}
+
+TokenRet lex_comment() {
     c_char= line_buff.data + line_buff.pos;
+    return TOK_SUCC_HIDDEN();
 }
 
-int lex_string() {
+TokenRet lex_string() {
     TokenMeta meta= token_meta();
+
+    // the stream will have
+    // RAW_STRING
+    // EXPR 1's tokens
+    // DELIMITER
+    // EXPR 2's tokens
+    // DELIMITER
+    // ...
 
     consume(); // '"'
 
     const char* start= c_char;
     const char* end= NULL;
 
+    bool open_brace= false;
+    char c= current();
     while (
-        current() != '\0' &&
+        c != '\0' &&
         !(
-            current() == '"' &&
+            c == '"' &&
             prev() != '\\'
         )){
+        if (c == '{') {
+            if (open_brace) {
+                error("Brace in string opened before previous was closed");
+                return TOK_FAIL;
+            }
+            open_brace= true;
+        }
+        if (c == '}') {
+            if (!open_brace) {
+                error("Brace in string closed before opened");
+                return TOK_FAIL;
+            }
+            open_brace= false;
+        }
         consume();
+        c=current();
     }
 
-    if (current() != '"')
-        return error("String literal does not have end before newline");
+    if (current() != '"') {
+        error("String literal does not have end before newline");
+        return TOK_FAIL;
+    }
 
     end= c_char - 1;
     size_t size= (end - start + 1);
@@ -236,11 +302,11 @@ int lex_string() {
         }
     };
 
-    Token_arr_add(&tokens, t);
-
     consume(); // eat the last '"'
 
-    return SUCCESS;
+
+
+    return TOK_SUCC(t);
 }
 
 const char* KEYWORD_STRINGS[KEYWORD_COUNT]= {
@@ -254,10 +320,13 @@ const char* KEYWORD_STRINGS[KEYWORD_COUNT]= {
     [BITS]= "BITS",
     [LEFT]= "LEFT",
     [META]= "META",
+    [ON]= "ON",
     [RIGHT]= "RIGHT",
+    [RULE]= "RULE",
     [IF]= "IF",
     [THEN]= "THEN",
     [WHEN]= "WHEN",
+    [CHOOSE]= "CHOOSE",
     [CALCULATE]= "CALCULATE",
     [DATA]= "DATA"
 };
@@ -289,7 +358,8 @@ const char* BINARY_OP_STRINGS[BINARY_OP_COUNT]= {
     [DOT]= "DOT (.)",
     [STAR]= "STAR (*)",
     [POW]= "POW (**)",
-    [PIPE]="PIPE (|)"
+    [PIPE]="PIPE (|)",
+    [AND]="AND (&&)"
 };
 
 const char* UNARY_OP_STRINGS[UNARY_OP_COUNT]= {
@@ -320,7 +390,7 @@ keyword map_keyword(keyword kw) {
     }
 }
 
-void lex_identifier_from(char* start) {
+TokenRet lex_identifier_from(char* start) {
     size_t col_diff= start - line_start_char;
     col= col_diff;
     TokenMeta meta= token_meta();
@@ -328,48 +398,52 @@ void lex_identifier_from(char* start) {
     c_char= start;
     const char* end;
 
-    while (is_alph_numeric(current())) {
+    while (is_alph_numeric(current()) || current() == '_') {
         consume();
     }
     end= c_char;
 
-    size_t size= end - start;
-    size_t bytes= size + 1;
+    if (*end == '_') {
+        error("Identifiers cannot end with `_`");
+        return TOK_FAIL;
+    }
+
+    const size_t size= end - start;
+    const size_t bytes= size + 1;
     char* identifier= malloc(bytes);
     memcpy(identifier, start, size);
     identifier[bytes - 1]= '\0';
 
     void* res= bsearch(&identifier, KEYWORD_STRINGS, KEYWORD_COUNT, sizeof(KEYWORD_STRINGS[0]), identifier_comp);
 
+    Token t;
     if (res) {
         uint pos= (const char**)res - KEYWORD_STRINGS;
         keyword k= pos;
 
-        Token t= (Token) {
+        t= (Token) {
             .type= KEYWORD,
             .meta= meta,
             .data.keyword= map_keyword(k)
         };
 
         free(identifier);
-
-        Token_arr_add(&tokens, t);
     } else {
-        Token t= (Token) {
+        t= (Token) {
             .type= IDENTIFIER,
             .meta= meta,
             .data.identifier= identifier
         };
-
-        Token_arr_add(&tokens, t);
     }
+
+    return TOK_SUCC(t);
 }
 
-void lex_identifier() {
-    lex_identifier_from(c_char);
+TokenRet lex_identifier() {
+    return lex_identifier_from(c_char);
 }
 
-int lex_number() {
+TokenRet lex_number() {
     // we parse as both a base 2 and base 10 and base 16 if needed
     // this is because the default changes
     TokenMeta meta= token_meta();
@@ -390,8 +464,7 @@ int lex_number() {
 
     if (is_alph(current())) {
         // this is actually an identifier
-        lex_identifier_from(start);
-        return SUCCESS;
+        return lex_identifier_from(start);
     }
 
     end= c_char;
@@ -420,7 +493,8 @@ int lex_number() {
         errno == ERANGE ||
         strtoll_end10 != end
     ) {
-        return error("Failed to parse string `%s` into a number via strtoll", start);
+        error("Failed to parse string `%s` into a number via strtoll", start);
+        return TOK_FAIL;
     }
 
     *(c_char + 1)= save;
@@ -441,15 +515,13 @@ int lex_number() {
         }
     };
 
-    Token t= (Token) {
+    const Token t= (Token) {
         .type= LIT_NUM,
         .meta= meta,
         .data= data
     };
 
-    Token_arr_add(&tokens, t);
-
-    return SUCCESS;
+    return TOK_SUCC(t);
 }
 
 char peek() {
@@ -471,9 +543,14 @@ char consume() {
     return *(c_char++);
 }
 
+void unconsume() {
+    col--;
+    c_char--;
+}
+
 void inc_line_and_reset_col() {
     line++;
-    col= 0;
+    col= 1;
 }
 
 int error(const char* message, ...) {

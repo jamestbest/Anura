@@ -35,6 +35,7 @@ typedef enum BinaryOperator {
     STAR,
     POW,
     PIPE,
+    AND,
     BINARY_OP_COUNT
 } BinaryOperator;
 
@@ -51,13 +52,16 @@ typedef enum keyword {
     BYTE, // DOES NOT EXIST PAST LEXER
     BYTES,
     CALCULATE,
+    CHOOSE,
     DATA,
     DEFAULT,
     FLAG,
     IF,
     LEFT,
     META,
+    ON,
     RIGHT,
+    RULE,
     STRUCTURE,
     THEN,
     WHEN, // CURRENTLY SEMANTICALLY THE SAME AS IF
@@ -69,12 +73,14 @@ typedef struct BaseNumInfo {
     uint64_t value;
 } BaseNumInfo;
 
+typedef struct LitNumData {
+    bool explicit_base10;
+    BaseNumInfo base2;
+    BaseNumInfo base10;
+} LitNumData;
+
 typedef union TokenData {
-    struct LitNumData {
-        bool explicit_base10;
-        BaseNumInfo base2;
-        BaseNumInfo base10;
-    } lit_num;
+    LitNumData lit_num;
     keyword keyword;
     BinaryOperator bin_op;
     UnaryOperator unary_op;
@@ -100,12 +106,26 @@ typedef struct LexRet {
     TokenArray tokens;
 } LexRet;
 
+typedef struct TokenRet {
+    bool succ;
+    bool addable;
+    Token token;
+} TokenRet;
+
+#define TOK_SUCC(tok) (TokenRet){.succ=true, .addable=true, .token=tok}
+#define TOK_SUCC_HIDDEN() (TokenRet){.succ=true, .addable=false, .token={0}}
+#define TOK_FAIL (TokenRet){.succ=false, .token={0}}
+
 LexRet lex(const char* filepath);
+TokenRet lex_token();
+void set_lex_pos(char* str);
 void print_token(Token* token);
 const char* keyword_string(keyword kw);
 
 void fprint_lit_num(FILE* file, const struct LitNumData* num);
 
 extern const LexRet LEX_RET_FAIL;
+extern const char* BINARY_OP_STRINGS[BINARY_OP_COUNT];
+extern const char* UNARY_OP_STRINGS[UNARY_OP_COUNT];
 
 #endif //LEXER_H
