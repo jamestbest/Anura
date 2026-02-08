@@ -1,0 +1,27 @@
+// example of ARM64 adc
+FLAG sf
+ALIAS S 1 BIT= {
+  0=""
+  1="S"
+}
+ALIAS regA 5 BITS= {
+  00000= W0, X0
+  00001= W1, X1
+  11110= W30, X30
+}
+RULE RIGHT ON regA {
+  CHOOSE 0 if sf == 0
+  CHOOSE 1 if sf == 1
+}
+ALIAS rd= regA
+ALIAS rm= regA
+ALIAS rn= regA
+ALIAS AADC= {
+  sf S 01 1010 000 rm 0000 00 rn rd= ADC|S rd, rn, rm
+}
+
+ALIAS op= {
+    AADC
+}
+
+STRUCTURE op
