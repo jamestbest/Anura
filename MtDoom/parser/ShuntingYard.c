@@ -14,11 +14,6 @@ VECTOR_ADD(Token, Token)
 NodeVector output_queue;
 TokenVector operator_stack;
 
-extern size_t t_i;
-extern TokenArray* tokens;
-
-ParseRet error(const char* message, ...);
-
 typedef enum TYPE {
     TYPE_NUMBER,
     TYPE_STRING,
@@ -78,13 +73,23 @@ bool check_operand(OperandNode operand) {
     if (operand.node->type == NT_BIN_EXPR) return check_binary_expression(operand.bin);
     if (operand.node->type == NT_UNARY_EXPR) return check_unary_expression(operand.unary);
 
+    if (operand.node->type == NT_IDENT) {
+        IdentNode* ident= operand.ident;
+        Node* link= check_link(ident->name);
+        if (!link) {
+            printf("<<ERROR>> Unable to find identifier `%s` in scope at expression\n", ident->name);
+            return false;
+        }
+        ident->link= link;
+    }
+
     return true;
 }
 
 bool check_unary_expression(const UnaryNode* unary) {
-    const TYPE_INFO op_type= type_of(unary->operand);
-
     if (!check_operand(unary->operand)) return false;
+
+    const TYPE_INFO op_type= type_of(unary->operand);
 
     switch (unary->op) {
         case NOT:
@@ -100,11 +105,30 @@ bool check_unary_expression(const UnaryNode* unary) {
 }
 
 bool check_binary_expression(const BinNode* binary) {
+    if (!check_operand(binary->left)) return false;
+
+    if (binary->op == DOT) {
+        if (binary->left.node->type != NT_IDENT || binary->left.ident->link->type != NT_DATA) return false;
+        if (binary->right.node->type != NT_IDENT) return false;
+
+        DataNode* data= (DataNode*)binary->left.ident->link;
+        IdentNode* ident= binary->right.ident;
+
+        for (int i = 0; i < data->all_fields.pos; ++i) {
+            const FieldNode* field= FieldNode_vec_get_unsafe(&data->all_fields, i);
+
+            if (strcmp(field->named_info.name, ident->name) == 0) {
+                ident->link= (Node*)add_data_field_node(data, i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (!check_operand(binary->right)) return false;
+
     const TYPE_INFO op1= type_of(binary->left);
     const TYPE_INFO op2= type_of(binary->right);
-
-    if (!check_operand(binary->left)) return false;
-    if (!check_operand(binary->right)) return false;
 
     switch (binary->op) {
         case EQUALITY:
@@ -122,21 +146,8 @@ bool check_binary_expression(const BinNode* binary) {
                 default: assert(false);
             }
         }
-        case DOT: {
-            if (binary->left.node->type != NT_IDENT || binary->left.ident->link->type != NT_DATA) return false;
-            if (binary->right.node->type != NT_IDENT || binary->right.ident->link->type != NT_DATA_FIELD) return false;
-
-            const DataNode* data= (DataNode*)binary->left.ident->link;
-            const IdentNode* ident= binary->right.ident;
-
-            for (int i = 0; i < data->all_fields.pos; ++i) {
-                const FieldNode* field= FieldNode_vec_get_unsafe(&data->all_fields, i);
-
-                if (strcmp(field->named_info.name, ident->token->data.identifier) == 0) return true;
-            }
-            return false;
-        }
         case STAR:
+        case AND:
         case POW: {
             if (op1.type != op2.type) return false;
 
@@ -144,6 +155,7 @@ bool check_binary_expression(const BinNode* binary) {
         }
         case PIPE:
             return false;
+
         default: assert(false);
     }
 }
@@ -166,8 +178,8 @@ ParseRet make_unary_op(const Token* tok) {
 ParseRet make_binary_op(const Token* tok) {
     OperandNode operand1, operand2;
 
-    Node* op1= Node_vec_pop(&output_queue);
     Node* op2= Node_vec_pop(&output_queue);
+    Node* op1= Node_vec_pop(&output_queue);
 
     operand1.node= op1;
     operand2.node= op2;
@@ -183,7 +195,7 @@ ParseRet make_binary_op(const Token* tok) {
 }
 
 ParseRet make_operator() {
-    const Token* op= Token_vec_peek(&operator_stack);
+    const Token* op= Token_vec_pop(&operator_stack);
 
     if (op->type == UNARY_OP) return make_unary_op(op);
     if (op->type == BINARY_OP) return make_binary_op(op);
@@ -201,40 +213,63 @@ uint8_t assoc(const Token* token) {
     return PRECEDENCE[token->data.bin_op];
 }
 
-ParseRet shunt() {
+static TokenArray* tokens;
+static size_t idx;
+
+Token* current() {
+    if (idx == tokens->pos) return NULL;
+    return Token_arr_ptr(tokens, idx);
+}
+
+Token* consume() {
+    if (idx == tokens->pos) return NULL;
+    return Token_arr_ptr(tokens, idx++);
+}
+
+ShuntRet shunt(TokenArray* toks, size_t idx_) {
     output_queue= Node_vec_create();
     operator_stack= Token_vec_create();
 
+    tokens= toks;
+    idx= idx_;
+
     bool in_expr= true;
     while (in_expr) {
-        Token* t= consume();
+        // [[todo]]: change to peek
+        Token* t= current();
 
         switch (t->type) {
             case LIT_NUM: {
-                LitNode* lit= add_lit_number_node(t->data.lit_num, t);
+                consume();
+
+                LitNode* lit= add_lit_number_node(t->data.lit_num);
 
                 lit->data.lit_number= complex_to_simple_num(t->data.lit_num, true);
-                lit->token= t;
 
                 Node_vec_add(&output_queue, (Node*)lit);
                 break;
             }
 
             case LIT_STRING: {
+                consume();
+
                 LitNode* lit= add_lit_string_node(t->data.lit_string);
                 Node_vec_add(&output_queue, (Node*)lit);
                 break;
             }
 
             case IDENTIFIER: {
-                Node* link= check_link(t->data.identifier);
-                if (!link) return error("Unable to find symbol `%s` in scope in expression", t->data.identifier);
-                IdentNode* ident= add_ident_node(t, link);
+                consume();
+
+                IdentNode* ident= add_ident_node(t->data.identifier, NULL);
                 Node_vec_add(&output_queue, (Node*)ident);
                 break;
             }
 
-            case BINARY_OP: {
+            case BINARY_OP:
+            case UNARY_OP: {
+                consume();
+
                 Token* t2;
                 while (t2= Token_vec_peek(&operator_stack), t2 != NULL) {
                     if (t2->type == LPAREN) break;
@@ -247,7 +282,7 @@ ParseRet shunt() {
                     )) break;
 
                     const ParseRet res= make_operator();
-                    if (!res.succ) return res;
+                    if (!res.succ) return SHUNT_RET_FAIL;
                     Node_vec_add(&output_queue, res.node);
                 }
                 Token_vec_add(&operator_stack, t);
@@ -256,17 +291,21 @@ ParseRet shunt() {
             }
 
             case LPAREN: {
+                consume();
+
                 Token_vec_add(&operator_stack, t);
                 break;
             }
 
             case RPAREN: {
+                consume();
+
                 Token* t2;
                 while (t2= Token_vec_peek(&operator_stack), t2 != NULL && t2->type != LPAREN) {
                     assert(operator_stack.pos != 0);
 
                     const ParseRet res= make_operator();
-                    if (!res.succ) return res;
+                    if (!res.succ) return SHUNT_RET_FAIL;
                     Node_vec_add(&output_queue, res.node);
                 }
 
@@ -281,18 +320,23 @@ ParseRet shunt() {
     }
 
     while (operator_stack.pos) {
-        const Token* op= Token_vec_pop(&operator_stack);
+        const Token* op= Token_vec_peek(&operator_stack);
 
         assert(op && op->type != LPAREN);
 
         const ParseRet res= make_operator();
-        if (!res.succ) return res;
+        if (!res.succ) SHUNT_RET_FAIL;
         Node_vec_add(&output_queue, res.node);
     }
 
     Node* res= Node_vec_pop(&output_queue);
-    return (ParseRet) {
+    if (res && res->type == NT_IDENT) {
+        if (!check_operand((OperandNode){.ident= (IdentNode*)res})) return SHUNT_RET_FAIL;
+    }
+
+    return (ShuntRet) {
         .succ= res != NULL,
-        .node= res
+        .node= res,
+        .idx= idx
     };
 }

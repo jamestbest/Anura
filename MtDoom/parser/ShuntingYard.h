@@ -7,6 +7,12 @@
 
 #include "Parser.h"
 
-ParseRet shunt();
+typedef struct ShuntRet {
+    bool succ;
+    Node* node;
+    size_t idx;
+} ShuntRet;
+
+ShuntRet shunt(TokenArray* tokens, size_t idx);
 
 #endif //SHUNTINGYARD_H
