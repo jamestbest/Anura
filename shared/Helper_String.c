@@ -367,5 +367,7 @@ char* capitalised(const char* str) {
         res[pos]= toupper(str[pos]);
     }
 
+    res[len]='\0';
+
     return res;
 }
