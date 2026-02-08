@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.30.5)
 project(Anura C)
 
 set(CMAKE_C_STANDARD 99)
+set(CMAKE_BUILD_TYPE Debug)
 
 #add_compile_options(-fsanitize=address)
 #add_link_options(-fsanitize=address)
@@ -63,10 +64,21 @@ add_executable(MtDoom
         shared/Helper_File.c
         shared/Helper_String.c
         shared/Helper_Math.c
-        shared/Errors.h
         shared/Buffer.c
         shared/Array.c
 )
+
+target_link_libraries(MtDoom PRIVATE m)
+target_link_options(MtDoom PRIVATE -fsanitize=address)
+target_compile_options(MtDoom PUBLIC -fsanitize=address)
+target_include_directories(MtDoom PRIVATE MtDoom/output/)
+
+add_executable(x64Diss
+    x64/x64.c
+    MtDoom/output/default.c
+)
+
+target_include_directories(x64Diss PRIVATE MtDoom/output/)
 
 include_directories(.)
 include_directories(./shared ./MtDoom)
