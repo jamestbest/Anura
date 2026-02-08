@@ -17,17 +17,9 @@
 //  numbers are written from high bit - low bit and will go until 8 bits are found
 //  e.g. 1010 101 ow -- this is one BYTE as any non-alias identifier is 1 bit in size
 //  e.g. 10 reg 001  -- this is one BYTE (assuming reg is a 3 bit ALIAS)
-META {
+META= {
     .name= "x64"
 }
-
-ALIAS prefix= {
-    REX
-    VEX
-    EVEX
-}
-
-STRUCTURE lprefix* prefix? op
 
 // assume we're in long mode
 //  so assume REX exists -- I don't want to do include protected mode
@@ -37,6 +29,19 @@ FLAG mode= 64bit | 32bit | 16bit default 64bit
 FLAG opmode= 64bit | 32bit | 16bit | 8bit default 32bit
 
 DATA ow 1 bit
+DATA regx 3 BITS
+DATA sibs 2 BITS
+
+// all data pieces should have an _value that is a
+// byte array with all of the bits that are parsed
+DATA imm8 1 BYTE
+DATA imm16 2 BYTES
+DATA imm32 4 BYTES
+DATA imm64 8 BYTES
+
+DATA disp8 1 BYTE
+DATA disp16 2 BYTES
+DATA disp32 4 BYTES
 
 // REX.W is for OPERAND size
 // REX.W = 64 Bit Operand Size
@@ -61,11 +66,10 @@ DATA VEX= {
   1100 0101 .R .v(4) .L .pp(2)
 }
 
-ALIAS lprefix 1 BYTE= {
-  lp1
-  lp2
-  lp3
-  lp4
+ALIAS prefix= {
+    REX
+    VEX
+    // EVEX
 }
 
 ALIAS lp1 1 BYTE= {
@@ -91,13 +95,20 @@ ALIAS lp4 1 BYTE= {
   0x67= "AO"
 }
 
+ALIAS lprefix 1 BYTE= {
+  lp1
+  lp2
+  lp3
+  lp4
+}
+
 ALIAS reg 4 BITS = {
   0000= "AX", "AL", "AL", "EAX", "RAX"
   0001= "CX", "CL", "AL", "ECX", "RCX"
 
   0100= "SP", "AH", "AL", "ESP", "RSP"
 
-  1000= R8B, R8
+  // 1000= "R8B", "R8"
 }
 
 // some instructions access SPL etc. instead of AH etc.
@@ -110,7 +121,7 @@ ALIAS regT 3 BITS= {
 
 RULE RIGHT ON reg, regT {
   CHOOSE 0 if opmode == 16bit
-  CHOOSE 1 if opmode == 8bit and REX.w != 1
+  CHOOSE 1 if opmode == 8bit && REX.w != 1
   CHOOSE 2 if opmode == 8bit
   CHOOSE 3 if opmode == 32bit
   CHOOSE 4 if opmode == 64bit
@@ -135,20 +146,23 @@ ALIAS cc 4 BITS= {
   1111= "NLE"
 }
 
-DATA regx 3 BITS
-DATA sibs 2 BITS
-
-ALIAS regi 3 BITS = {
-    regx = MAP reg REX.x regx
-}
-ALIAS regb 3 bits = MAP reg REX.b regb
-ALIAS regr 3 bits = MAP reg REX.r regr
+//ALIAS regi 3 BITS = {
+//    regx = MAP reg REX.x regx
+//}
+//ALIAS regb 3 bits = MAP reg REX.b regb
+//ALIAS regr 3 bits = MAP reg REX.r regr
 
 // ALIAS rega = reg
 // is turned into
 // ALIAS rega = {
 //     reg = reg
 // }
+DATA regi 3 BITS
+DATA regb 3 BITS
+DATA regr 3 BITS
+
+DATA Mod 2 BITS
+DATA RM 3 BITS
 
 ALIAS sibsi 5 BITS= {
    sibs 100 = ""
@@ -164,13 +178,11 @@ ALIAS SIB 1 BYTE= {
   sibsi regb = "{regi} + {regb}"
 }
 
-DATA Mod 2 BITS
-DATA RM 3 BITS
 ALIAS ModRM= {
   11 reg 100 SIB= SIB
   00 reg 101 disp32= {
     when mode == 64bit then "rip + {disp32}"
-    when default then disp32
+    disp32
   }
   00 reg RM= "[{reg}]"
   01 reg RM disp8 = "[{reg} + {disp8}]"
@@ -178,41 +190,22 @@ ALIAS ModRM= {
   11 reg RM= reg
 }
 
-ALIAS op= {
-  0x0f op2
-  MOV
-  ADC
-}
-
-ALIAS op2= {
-  0xE6 ModRM= CVTDQ2PD xyzreg, xyzrm=  // change on E/VEX //  REQUIRE REP
-  0x1E 0xFA = ENDBR64
-  CMOV
-}
-
 CALCULATE opmode= {
   if ow then 8bit
   when mode == 64bit then {
     if REX.w then 64bit
     if lp3? then 16bit
-    if default then 32bit
+    32bit
   }
   when mode == 32bit then {
     if lp3? then 16bit
-    if default then 32bit
+    32bit
   }
   when mode == 16bit then {
     if lp3? then 32bit
-    if default then 16bit
+    16bit
   }
 }
-
-// all data pieces should have an _value that is a
-// byte array with all of the bits that are parsed
-DATA imm8 1 BYTE
-DATA imm16 2 BYTES
-DATA imm32 4 BYTES
-DATA imm64 8 BYTES
 
 ALIAS imm= {
   if opmode == 8bit then {imm8=imm8}
@@ -228,75 +221,54 @@ ALIAS immM32= {
   if opmode == 64bit then {imm32=imm32}
 }
 
-DATA disp8 1 BYTE
-DATA disp16 2 BYTES
-DATA disp32 4 BYTES
-
 // opcodes are matched up to the next non-0|1
 //  i.e. each level is expanded to it's level of 1|0s
 //  and each is an opcode
 
 ALIAS MOV= {
-  1000 100 ow ModRM= MOV RM, regT
-  1000 101 ow ModRM= MOV regT, RM
-  1100 011 ow Mod 000 RM imm = MOV RM, imm
+  1000 100 ow ModRM= "MOV {RM}, {regT}"
+  1000 101 ow ModRM= "MOV {regT}, {RM}"
+  1100 011 ow Mod 000 RM imm = "MOV {RM}, {imm}"
 
-  1011 ow reg imm= MOV regT, imm
+  1011 ow reg imm= "MOV {regT}, {imm}"
 }
 
-ALIAS regA= reg AS 000
+// ALIAS regA= "RAX"
 
 ALIAS ADC= {
-  0000 111 ow immM32= ADC regA, immM32 # Add with carry to regA immM32 ## regA= regA + immM32 + carrybit
-  1000 000 ow immM32= ADC reg, immM32
-  1000 0011 mod 010 reg imm8= ADC reg, imm8
-  0001 000 ow ModRM = ADC rm, reg
-  0001 001 ow ModRM = ADC reg, rm
+  0000 111 ow immM32= "ADC RAX, {immM32}" // Add with carry to regA immM32 ## regA= regA + immM32 + carrybit
+  1000 000 ow immM32= "ADC {reg}, {immM32}"
+  1000 0011 Mod 010 reg imm8= "ADC {reg}, {imm8}"
+  0001 000 ow ModRM = "ADC {RM}, {reg}"
+  0001 001 ow ModRM = "ADC {reg}, {RM}"
 }
 
 ALIAS CMOV= {
-  0100 cc ModRM = "CMOV{cc} {reg}, {rm}"
+  0100 cc ModRM = "CMOV{cc} {reg}, {RM}"
+}
+
+ALIAS op2= {
+  // 0xE6 ModRM= "CVTDQ2PD {xyzreg}, {xyzrm}"  // change on E/VEX //  REQUIRE REP
+  0x1E 0xFA = "ENDBR64"
+  CMOV
+}
+
+ALIAS op= {
+  0x0f op2
+  MOV
+  ADC
+}
+
+ALIAS reg_a= reg
+ALIAS reg_b= reg
+
+ALIAS name= {
+    0xFF 1011 001 ow reg_a reg_b = "Hello world {reg_a}*{ow} {reg_b}"
 }
 
 // if vs when semantic for something that can back when assemble
 // vs something that is based on a mode set at the start
 
+STRUCTURE lprefix* prefix? op
 
 
-
-ALIAS Test= {
-    TEST2
-    if test3 == TEST3_ then TEST4
-    Test5 01101 = "[Output]"
-}
-
-
-
-
-// example of ARM64 adc
-FLAG sf
-ALIAS S 1 BIT= {
-  0=""
-  1="S"
-}
-ALIAS regA 5 BITS= {
-  00000= W0, X0
-  00001= W1, X1
-  11110= W30, X30
-}
-RULE RIGHT ON regA {
-  CHOOSE 0 if sf == 0
-  CHOOSE 1 if sf == 1
-}
-ALIAS rd= regA
-ALIAS rm= regA
-ALIAS rn= regA
-ALIAS AADC= {
-  sf S 01 1010 000 rm 0000 00 rn rd= ADC|S rd, rn, rm
-}
-
-ALIAS op= {
-    AADC
-}
-
-STRUCTURE op
