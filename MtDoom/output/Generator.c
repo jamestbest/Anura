@@ -37,10 +37,10 @@ static int generate_unary(UnaryNode* unary);
 
 static void generate_prefix(uint8_t depth);
 
-static int error(const char* message, ...);
-static const char* types_to_string(NodeType type);
+static int error(const char* string, ...);
+static int info(const char* message, ...);
 
-int generate(RootNode* root, FILE* output_file, FILE* header_file) {
+int generate(RootNode* root, FILE* output_file, FILE* header_file, const char* ISA_name) {
     if (!root || !output_file || !header_file) return FAIL;
 
     ofile= output_file;
@@ -49,6 +49,12 @@ int generate(RootNode* root, FILE* output_file, FILE* header_file) {
     alias_defer= vector_create();
 
     generate_header_data();
+
+    fprintf(ofile,
+        "#include \"%s.h\"\n\n"
+        "int disassemble(){\n}\n\n",
+        ISA_name
+    );
 
     for (int i = 0; i < root->child_nodes.pos; ++i) {
         Node* child= vector_get_unsafe(&root->child_nodes, i);
@@ -63,54 +69,113 @@ int generate(RootNode* root, FILE* output_file, FILE* header_file) {
 }
 
 int generate_header_data() {
-
+    fprintf(hfile, "#include \"default.h\"\n\n");
 }
 
 int generate_statement(Node* statement) {
+    if (!statement) {
+        return info("Skipping NULL statement");
+    }
+
     switch (statement->type) {
         case NT_DATA: generate_data_statement((DataNode*)statement); break;
         case NT_ALIAS: generate_alias_statement((AliasNode*)statement); break;
+        case NT_FLAG:
+        case NT_RULE_RIGHT_STMT:
+        case NT_CALCULATE:
+            return SUCCESS;
+        case NT_STRUCTURE:
+            return SUCCESS;
         default: return error("Unexpected statement start node got %s", types_to_string(statement->type));
     }
 
     return SUCCESS;
 }
 
+const char* size_type(uint64_t size) {
+    if (size > 32) return "uint64_t";
+    if (size > 16) return "uint32_t";
+    if (size > 8) return "uint16_t";
+    return "uint8_t";
+}
+
 int generate_data_statement(DataNode* data) {
-    const char* cname= capitalised(data->name);
+    const char* cname= data->capitalised;
     fprintf(hfile,
-        "typedef struct DATA_%s {\n",
+        "typedef struct DATA_%s {\n"
+        "\tuint8_t parsed: 1;\n",
         cname
     );
 
-    for (int i = 0; i < data->all_fields.pos; ++i) {
-        FieldNode* field= FieldNode_vec_get_unsafe(&data->all_fields, i);
+    if (data->non_fielded) {
+        fprintf(hfile, "\t%s _value: %lu;\n", size_type(data->bits), data->bits);
+    } else {
+        for (int i = 0; i < data->all_fields.pos; ++i) {
+            const FieldNode* field= FieldNode_vec_get_unsafe(&data->all_fields, i);
 
-        if (!field->named) {
-            fprintf(hfile,"\t// IMM: ");
-            fprint_simple_num(hfile, &field->num);
-            fnewline(hfile);
-        } else {
-            const char* type= "uint8_t";
-            if (field->named_info.bits > 32) type= "uint64_t";
-            else if (field->named_info.bits > 16) type= "uint32_t";
-            else if (field->named_info.bits > 8) type= "uint16_t";
-
-            fprintf(hfile,
-                "\t%s %s: %u;\n",
-                type,
-                field->named_info.name,
-                field->named_info.bits
-            );
+            if (!field->named) {
+                fprintf(hfile,"\t// IMM: ");
+                fprint_simple_num(hfile, &field->num);
+                fnewline(hfile);
+            } else {
+                const char* type= size_type(field->named_info.bits);
+                fprintf(hfile,
+                    "\t%s %s: %u;\n",
+                    type,
+                    field->named_info.name,
+                    field->named_info.bits
+                );
+            }
         }
     }
 
     fprintf(hfile,
-        "} DATA_%s;\n\n",
+        "} DATA_%s;\n",
         cname
     );
 
-    free((void*)cname);
+    fprintf(hfile,
+        "DATA_%s data_%s;\n",
+        cname,
+        data->name
+    );
+
+    fprintf(hfile,
+        "bool parse_%s();\n\n",
+        data->name
+    );
+
+    fprintf(ofile,
+        "DATA_%s parse_%s_() {\n",
+        data->capitalised,
+        data->name
+    );
+
+    if (data->non_fielded) {
+        fprintf(ofile,
+            "\tuint64_t res= read_bits(&stream, %lu);\n"
+            "\treturn (DATA_%s){._value= res, .parsed= true};\n",
+            data->bits,
+            data->capitalised
+        );
+    } else {
+
+    }
+
+    fprintf(ofile, "}\n\n");
+
+    fprintf(ofile,
+        "bool parse_%s() {\n"
+        "\tconst DATA_%s res= parse_%s_();\n"
+        "\tif (!res.parsed) return false;\n"
+        "\tdata_%s= res;\n"
+        "\treturn true;\n"
+        "}\n\n",
+        data->name,
+        data->capitalised,
+        data->name,
+        data->name
+    );
 
     return SUCCESS;
 }
@@ -121,11 +186,12 @@ int generate_init_function() {
     );
     for (int i = 0; i < alias_defer.pos; ++i) {
         fprintf(ofile,
-            "   vector_create(&AVAL_%s.choices);\n"
+            "\taval_%s.choices= vector_create();\n",
+            (char*)vector_get_unsafe(&alias_defer, i)
         );
     }
     fprintf(ofile,
-        "return 0;\n"
+        "\treturn 0;\n"
         "}\n\n"
     );
 
@@ -133,15 +199,25 @@ int generate_init_function() {
 }
 
 int generate_alias_statement(AliasNode* alias) {
-    const char* cname= capitalised(alias->identifier);
     fprintf(hfile,
-        "AVAL AVAL_%s= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1};\n\n",
-        cname
+        "AVAL aval_%s= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1};\n\n",
+        alias->identifier
     );
 
-    vector_add(&alias_defer, (void*)cname);
+    vector_add(&alias_defer, (void*)alias->identifier);
 
+    fprintf(ofile, "ParseRet parse_%s_() {\n", alias->identifier);
     generate_rules(&alias->rules.rules, 1, alias);
+    fprintf(ofile,"\treturn PARSE_FAIL; \n}\n\n");
+
+    fprintf(ofile, "bool parse_%s() {\n", alias->identifier);
+    fprintf(ofile, "\tParseRet res= parse_%s_();\n", alias->identifier);
+    fprintf(ofile, "\tif (!res.success) return res.success;\n"
+                   "\taval_%s= res.aval;\n"
+                   "\treturn res.success;\n"
+                   "}\n\n",
+                   alias->identifier
+    );
 
     return SUCCESS;
 }
@@ -151,12 +227,13 @@ int generate_rules(RuleArray* rules, uint8_t depth, AliasNode* alias) {
         Rule* rule= Rule_arr_ptr(rules, i);
 
         switch (rule->base.type) {
-            case NT_RULE_IF: generate_if_rule((RuleNodeIf*)rule, depth, alias); break;
-            case NT_RULE_WHEN: generate_when_rule((RuleNodeWhen*)rule, depth, alias); break;
-            case NT_RULE_L: generate_l_rule((RuleNodeL*)rule, depth); break;
-            case NT_RULE_LR: generate_lr_rule((RuleNodeLR*)rule, depth, alias); break;
+            case NT_RULE_IF: generate_if_rule(&rule->data.rule_if, depth, alias); break;
+            case NT_RULE_WHEN: generate_when_rule(&rule->data.rule_when, depth, alias); break;
+            case NT_RULE_L: generate_l_rule(&rule->data.rule_l, depth); break;
+            case NT_RULE_LR: generate_lr_rule(&rule->data.rule_lr, depth, alias); break;
             default: assert(false);
         }
+        fnewline(ofile);
     }
 
     return SUCCESS;
@@ -167,6 +244,8 @@ int generate_if_rule(RuleNodeIf* node, uint8_t depth, AliasNode* alias) {
     generate_expression(node->condition);
     fprintf(ofile, ") {\n");
     generate_right_rules(&node->output, depth + 1, alias);
+    fnewline(ofile);
+    generate_prefix(depth);
     fprintf(ofile, "}\n");
 
     return SUCCESS;
@@ -207,15 +286,6 @@ int generate_expression(Node* expr) {
     return SUCCESS;
 }
 
-const char* link_name(Node* link) {
-    switch (link->type) {
-        case NT_FLAG: return ((FlagNode*)link)->name;
-        case NT_ALIAS: return ((AliasNode*)link)->identifier;
-        case NT_DATA: return ((DataNode*)link)->name;
-        default: assert(false);
-    }
-}
-
 int generate_unary(UnaryNode* unary) {
     switch (unary->op) {
         case NOT:
@@ -248,6 +318,80 @@ const char* bin_op_to_symbol(BinaryOperator op) {
     }
 }
 
+int generate_flag_equality(IdentNode* left, IdentNode* right, bool is_neq) {
+    const bool left_is_enum_lit= left->link->type == NT_FLAG_VALUE;
+    const bool right_is_enum_lit= right->link->type == NT_FLAG_VALUE;
+
+    if (left_is_enum_lit && right_is_enum_lit) {
+        return error("Cannot compare enum literals together");
+    }
+
+    if (!left_is_enum_lit && !right_is_enum_lit) {
+        // these are both different flags or exactly the same
+        const FlagNode* left_flag= (FlagNode*)left->link;
+        const FlagNode* right_flag= (FlagNode*)right->link;
+        return error("Cannot compare different flags together (`%s` and `%s`), must be flag and enum literal",
+            left_flag->name,
+            right_flag->name
+        );
+    }
+
+    FlagNode* canonical_flag= NULL;
+    if (!left_is_enum_lit) {
+        canonical_flag = (FlagNode*)left->link;
+    }
+    if (!right_is_enum_lit) {
+        canonical_flag = (FlagNode*)right->link;
+    }
+
+    bool valid= false;
+    const FlagLinkPosArray* links= NULL;
+    if (left_is_enum_lit) {
+        const FlagValueNode* flag_value= (FlagValueNode*)left->link;
+        links= &flag_value->links;
+    }
+    if (right_is_enum_lit) {
+        const FlagValueNode* flag_value= (FlagValueNode*)right->link;
+        links= &flag_value->links;
+    }
+
+    size_t enum_pos= 0;
+    for (int i = 0; i < links->pos; ++i) {
+        const FlagLinkPos* link= FlagLinkPos_arr_ptr(links, i);
+        if (link->flag == canonical_flag) {
+            valid= true;
+            enum_pos= link->enum_pos;
+        }
+    }
+
+    if (!valid) {
+        return error("Canonical flag is `%s` used in expression with enum literal that does not share a enum value",
+            canonical_flag->name
+        );
+    }
+
+    const char* enum_name= vector_get_unsafe(&canonical_flag->enum_values, enum_pos);
+    fprintf(ofile,
+        "flag_%s %c= FLAG_%s_VALUE_%s",
+        canonical_flag->name,
+        is_neq ? '!' : '=',
+        canonical_flag->name,
+        enum_name
+    );
+
+    return SUCCESS;
+}
+
+bool check_is_flag_ish(Node* node) {
+    if (node->type == NT_IDENT) {
+        const IdentNode* ident= (IdentNode*)node;
+        if (ident->link->type == NT_FLAG_VALUE || ident->link->type == NT_FLAG) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int generate_binary(BinNode* node) {
     switch (node->op) {
         // FLAG == FLAG_ENUM e.g. mode == 64bit => flag_mode == FLAG_MODE_64bit
@@ -256,7 +400,11 @@ int generate_binary(BinNode* node) {
         //           the lower aliases and data and literals, but not needed for now
         // DATA == LIT e.g. Mod == 01 => data_Mod._value == 0b01
         case EQUALITY:
-        case NEQUALITY:
+        case NEQUALITY: {
+            const bool special_case= check_is_flag_ish(node->left.node) && check_is_flag_ish(node->right.node);
+            if (special_case) return generate_flag_equality(node->left.ident, node->right.ident, node->op == NEQUALITY);
+            // FALL THROUGH ON PURPOSE
+        }
         case STAR:
             generate_operand(&node->left);
             fprintf(ofile, " %s ", bin_op_to_symbol(node->op));
@@ -266,7 +414,7 @@ int generate_binary(BinNode* node) {
             const DataNode* data= (DataNode*)node->left.ident->link;
             const IdentNode* ident= node->right.ident;
 
-            fprintf(ofile, "data_%s.%s", data->name, ident->token->data.identifier);
+            fprintf(ofile, "data_%s.%s", data->name, ident->name);
             break;
         }
         case POW:
@@ -285,7 +433,7 @@ int generate_binary(BinNode* node) {
 }
 
 int generate_operand(OperandNode* node) {
-    switch (((Node*)node)->type) {
+    switch (node->node->type) {
         case NT_IDENT: {
             generate_ident_as_value(node->ident);
             break;
@@ -328,6 +476,7 @@ int generate_ident(const IdentNode* ident) {
             const FlagNode* flag= (FlagNode*)ident->link;
             fprintf(ofile, "flag_%s", flag->name);
         }
+        case NT_FLAG_VALUE: assert(false);
         default: assert(false);
     }
 
@@ -338,36 +487,37 @@ int generate_lr_rule(RuleNodeLR* rule, uint8_t depth, AliasNode* alias) {
     generate_prefix(depth);
     generate_left_rules(&rule->left, depth, false);
 
-    fprintf(ofile, "{");
+    fprintf(ofile, "{\n");
     generate_right_rules(&rule->right, depth + 1, alias);
-    fprintf(ofile, "%*s}", depth, "");
+    fnewline(ofile);
+    generate_prefix(depth);
+    fprintf(ofile, "}");
 
     return SUCCESS;
 }
 
-int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias) {
-    generate_prefix(depth);
-    switch (rule->base->type) {
+int generate_multi(Node* node, AliasNode* alias) {
+    switch (node->type) {
         case NT_IDENT: {
             fprintf(ofile,
-                "set_aval(&aval_%s, ",
-                alias->capitalised
+                "return PARSE_SUCC("
             );
 
-            switch (rule->ident->link->type) {
+            IdentNode* ident= (IdentNode*)node;
+            switch (ident->link->type) {
                 case NT_ALIAS: {
-                    const AliasNode* r_alias= (AliasNode*)rule->ident->link;
+                    const AliasNode* r_alias= (AliasNode*)ident->link;
                     fprintf(ofile,
                         "aval_%s",
-                        r_alias->capitalised
+                        r_alias->identifier
                     );
                     break;
                 }
                 case NT_DATA: {
-                    const DataNode* data= (DataNode*)rule->ident->link;
+                    const DataNode* data= (DataNode*)ident->link;
                     fprintf(ofile,
                         "data_to_aval(data_%s)",
-                        data->capitalised
+                        data->name
                     );
                     break;
                 }
@@ -379,15 +529,41 @@ int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias) {
         }
 
         case NT_LIT_STRING: {
-            const LitNode* lit= rule->lit;
+            const LitNode* lit= (LitNode*)node;
             fprintf(ofile,
-                "set_aval(&aval_%s, ",
-                alias->capitalised
+                "return PARSE_SUCC(to_aval("
             );
             generate_string_eval(&lit->data.lit_string);
-            fprintf(ofile, "); // ");
+            fprintf(ofile, ")); /* ");
             fputz_sanitize(ofile, lit->data.lit_string.string);
-            fnewline(ofile);
+            fputz(ofile, " */");
+            break;
+        }
+        default:
+            assert(false);
+    }
+}
+
+int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias) {
+    generate_prefix(depth);
+    switch (rule->base->type) {
+        case NT_MULTI: {
+            MultiNode* multi= (MultiNode*)rule->base;
+            if (multi->multis.pos == 1) return generate_multi(Node_vec_get_unsafe(&multi->multis, 0), alias);
+
+            if (!alias->linked_rule) return error("Unable to find linked rule for alias with multiple outputs");
+            fprintf(ofile,
+                "switch(calculate_rule_right_%u()) {\n", alias->linked_rule->id);
+
+            for (uint i = 0; i < multi->multis.pos; ++i) {
+                Node* node= Node_vec_get_unsafe(&multi->multis, i);
+                generate_prefix(depth + 1);
+                fprintf(ofile, "case %u: ", i);
+                generate_multi(node, alias);
+                fprintf(ofile, "; break;\n");
+            }
+            generate_prefix(depth);
+            fprintf(ofile, "}\n");
             break;
         }
         case NT_BRACED_RULES: {
@@ -396,10 +572,11 @@ int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias) {
 
             break;
         }
+        default: assert(false);
     }
 
     // [[todo]] check this
-    fprintf(ofile, "return (ParseRet){.success=true};");
+    // fprintf(ofile, "return (ParseRet){.success=true};");
 
     return SUCCESS;
 }
@@ -417,8 +594,8 @@ int generate_string_eval_function(LitStringData* string) {
             case NT_ALIAS: {
                 const AliasNode* alias= (AliasNode*)node;
                 fprintf(ofile,
-                    "buffer_fconcat(buffer, \"AVAL_%s.chosen_val\");",
-                    alias->capitalised
+                    "buffer_fconcat(buffer, \"aval_%s.chosen_val\");",
+                    alias->identifier
                 );
                 break;
             }
@@ -427,14 +604,15 @@ int generate_string_eval_function(LitStringData* string) {
                 fprintf(ofile,
                     "buffer_concat(buffer, \"0x\");"
                     "for (int i= 0; i < %lu; i++;) {\n"
-                    "   buffer_fconcat(buffer, \"%%x\", DATA_%s._value[i]);\n"
+                    "   buffer_fconcat(buffer, \"%%x\", data_%s._value[i]);\n"
                     "}\n",
                     (data->bits >> 3) + 1,
-                    data->capitalised
+                    data->name
                 );
                 break;
             }
-            case NT_EXPR: {
+            case NT_BIN_EXPR:
+            case NT_UNARY_EXPR: {
                 //todo impl
                 fprintf(ofile, "assert(false;)");
             }
@@ -469,7 +647,7 @@ int generate_string_eval(const LitStringData* string) {
     for (int i = 0; i < string->expressions.pos; ++i) {
         fprintf(ofile, ", eval_string_%u_field_%u", string->id, i);
     }
-    fprintf(ofile, ");\n");
+    fprintf(ofile, ")");
 
     return SUCCESS;
 }
@@ -510,7 +688,7 @@ int generate_left_rules(LeftRules* left_rules, uint8_t depth, bool include_retur
                 }
 
                 fprintf(ofile,
-                    "parse_%s().success",
+                    "parse_%s()",
                     name
                 );
                 break;
@@ -532,7 +710,7 @@ int generate_left_rules(LeftRules* left_rules, uint8_t depth, bool include_retur
     }
     if (include_return)
         fprintf(ofile,
-            ") return (ParseRet) {.output_string="", .success=true};"
+            ") return PARSE_SUCC_HIDDEN;"
         );
     else fprintf(ofile, ")");
 
@@ -554,23 +732,14 @@ int error(const char* message, ...) {
     return FAIL;
 }
 
-const char* types_to_string(NodeType type) {
-    switch (type) {
-        case NT_ROOT: return "NT_ROOT";
-        case NT_ALIAS: return "NT_ALIAS";
-        case NT_DATA: return "NT_DATA";
-        case NT_STRUCTURE: return "NT_STRUCTURE_STMT";
-        case NT_STATEMENTS: return "NT_STATEMENTS";
-        case NT_FLAG: return "NT_FLAG_STATEMENT";
-        case NT_BRACED_RULES: return "NT_BRACED_RULES";
-        case NT_RULE_IF: return "NT_RULE_IF";
-        case NT_RULE_WHEN: return "NT_RULE_WHEN";
-        case NT_RULE_L: return "NT_RULE_L";
-        case NT_RULE_LR: return "NT_RULE_LR";
-        case NT_IDENT: return "NT_IDENT";
-        case NT_FIELD: return "NT_FIELD";
-        case NT_LIT_STRING: return "NT_LIT_STRING";
-        case NT_LIT_NUM: return "NT_LIT_NUM";
-        default: return "<<ERROR>> unknown node type <<ERROR>>";
-    }
+int info(const char* message, ...) {
+    va_list args;
+    va_start(args, message);
+    printf("|INFO| ");
+    vprintf(message, args);
+    newline();
+    va_end(args);
+
+    return SUCCESS;
 }
+
