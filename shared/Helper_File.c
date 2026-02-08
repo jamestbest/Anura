@@ -131,7 +131,7 @@ char* make_path(const char* dir, const char* file, const char* extension) {
     }
 
     buffer_fconcat(&buff,
-        "%*.*s/*.*s%s%s",
+        "%*.*s/%*.*s%s%s",
         p_len, p_len, dir,
         s_len, s_len, file,
         extension == NULL ? "" : ".",
