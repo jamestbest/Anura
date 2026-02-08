@@ -66,15 +66,16 @@ int buffer_concat(Buffer *buffer, char *to_add) {
 
 int buffer_fconcat(Buffer* buffer, const char* format, ...) {
     va_list args;
-    va_list args_copy;
     va_start(args, format);
-    va_copy(args_copy, args);
 
     if (buffer->pos > 0 && buffer->data[buffer->pos - 1] == '\0') {
         buffer->pos--;
     }
 
     const size_t nchars = vsnprintf(NULL, 0, format, args) + 1;
+
+    va_end(args);
+    va_start(args, format);
 
     if (nchars > buffer->size - buffer->pos) {
         const int res = buffer_resize_aligned(buffer, buffer->size + nchars, BUFF_ALIGN);
@@ -83,10 +84,11 @@ int buffer_fconcat(Buffer* buffer, const char* format, ...) {
     }
     char* to_write_to = &buffer->data[buffer->pos];
 
-    vsnprintf(to_write_to, nchars, format, args_copy);
+    vsnprintf(to_write_to, nchars, format, args);
     buffer->pos += nchars;
 
     va_end(args);
+
 
     return EXIT_SUCCESS;
 }
