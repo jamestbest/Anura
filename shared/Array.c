@@ -102,12 +102,19 @@ void arr_insert(Array* array, size_t idx, const void* element) {
     if (arr_is_at_capacity(array))
         arr_resize(array);
 
+    if (idx == array->pos) {
+        arr_add(array, element);
+        return;
+    }
+
     // copy all at the idx and to the right one across
-    memcpy(
+    memmove(
         &array->arr[(idx + 1) * array->element_size],
         &array->arr[idx * array->element_size],
         (array->pos - idx) * array->element_size
     );
+
+    array->pos++;
 
     arr_set(array, idx, element);
 }
@@ -156,6 +163,9 @@ void* arr_peek(const Array* array) {
 }
 
 void* arr_ptr(const Array* array, const uint index) {
+    if (!array) {
+        return NULL;
+    }
     if (index >= array->pos) return NULL;
 
     return &array->arr[index * array->element_size];
