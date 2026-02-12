@@ -76,8 +76,14 @@ target_include_directories(MtDoom PRIVATE MtDoom/output/)
 add_executable(x64Diss
     x64/x64.c
     MtDoom/output/default.c
+    shared/Buffer.c
+    shared/Array.c
+    shared/Vector.c
+    shared/Helper_Math.c
+    MtDoom/output/Testing.c
 )
 
+target_link_libraries(x64Diss PRIVATE m)
 target_include_directories(x64Diss PRIVATE MtDoom/output/)
 
 include_directories(.)
