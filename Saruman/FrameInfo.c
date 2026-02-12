@@ -249,30 +249,30 @@ typedef struct MRow {
     uint64_t address;
     CFARule cfa_rule;
     RegisterDataArray register_rules;
-} MRow;
+} FrameRow;
 
-ARRAY_PROTO(MRow, MRow)
-ARRAY_ADD(MRow, MRow)
+ARRAY_PROTO(FrameRow, FrameRow)
+ARRAY_ADD(FrameRow, FrameRow)
 
-MRowArray matrix;
-MRowArray row_stack;
+static FrameRowArray matrix;
+static FrameRowArray row_stack;
 
 void create_matrix() {
-    matrix= MRow_arr_create();
-    row_stack= MRow_arr_create();
+    matrix= FrameRow_arr_create();
+    row_stack= FrameRow_arr_create();
 }
 
 void add_row(uint64_t address) {
-    MRow row= (MRow) {
+    FrameRow row= (FrameRow) {
         .address= address,
         .register_rules= RegisterData_arr_create()
     };
 
-    MRow_arr_add(&matrix, row);
+    FrameRow_arr_add(&matrix, row);
 }
 
 RegisterData* get_register_data(uint8_t register_id) {
-    MRow* c_row= MRow_arr_peek(&matrix);
+    FrameRow* c_row= FrameRow_arr_peek(&matrix);
 
     for (int i= 0; i < c_row->register_rules.pos; ++i) {
         RegisterData* data= RegisterData_arr_ptr(&c_row->register_rules, i);
@@ -301,7 +301,7 @@ void set_register(uint8_t register_id, FI_OPCODE op, RRData data) {
 }
 
 void add_register(uint8_t register_id, FI_OPCODE op, RRData data) {
-    MRow* c_row= MRow_arr_peek(&matrix);
+    FrameRow* c_row= FrameRow_arr_peek(&matrix);
 
     RegisterData rd= (RegisterData) {
         .register_id= register_id,
@@ -545,7 +545,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
         case DW_CFA_advance_loc1:
         case DW_CFA_advance_loc2:
         case DW_CFA_advance_loc4: {
-            MRow* c_row= MRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(&matrix);
             uint64_t n_addr= instr.data.d_delta + c_row->address;
             add_row(n_addr);
 
@@ -554,7 +554,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
 
         case DW_CFA_def_cfa:
         case DW_CFA_def_cfa_sf: {
-            MRow* c_row= MRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(&matrix);
 
             c_row->cfa_rule= (CFARule) {
                 .type= CFA_DT_REG_OFF,
@@ -568,7 +568,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
         }
 
         case DW_CFA_def_cfa_register: {
-            MRow* c_row= MRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(&matrix);
 
             if (c_row->cfa_rule.type != CFA_DT_REG_OFF) {
                 log("Decoding DWARF frame info provided invalid decoded instructions. DW_CFA_def_cfa_register expects cfa data type `reg-off` got `expression`\n");
@@ -580,7 +580,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
 
         case DW_CFA_def_cfa_offset:
         case DW_CFA_def_cfa_offset_sf: {
-            MRow* c_row= MRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(&matrix);
 
             if (c_row->cfa_rule.type != CFA_DT_REG_OFF) {
                 log("Decoding DWARF frame info provided invalid decoded instructions. DW_CFA_def_cfa_offset.* expects cfa data type `reg-off` got `expression`\n");
@@ -591,7 +591,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
         }
 
         case DW_CFA_def_cfa_expression: {
-            MRow* c_row= MRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(&matrix);
 
             c_row->cfa_rule= (CFARule) {
                 .type= CFA_DT_EXPRESSION,
@@ -675,16 +675,16 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
         }
 
         case DW_CFA_remember_state: {
-            MRow_arr_add(&row_stack, *MRow_arr_peek(&matrix));
+            FrameRow_arr_add(&row_stack, *FrameRow_arr_peek(&matrix));
 
             break;
         }
         case DW_CFA_restore_state: {
-            MRow popped= MRow_arr_pop(&row_stack);
-            MRow* c_row= MRow_arr_peek(&matrix);
+            FrameRow popped= FrameRow_arr_pop(&row_stack);
+            FrameRow* c_row= FrameRow_arr_peek(&matrix);
             uint64_t c_addr= c_row->address;
 
-            *c_row= (MRow) {
+            *c_row= (FrameRow) {
                 .address= c_addr,
                 .register_rules= popped.register_rules,
                 .cfa_rule= popped.cfa_rule
