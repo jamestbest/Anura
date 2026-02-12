@@ -1,5 +1,5 @@
 //
-// Created by jamestbest on 11/24/25.
+// Created by James Coward on 11/24/25.
 //
 
 #include "Parser.h"
@@ -41,6 +41,7 @@ static ParseRet unexpected_keyword(const char* context, keyword kw);
 static ParseRet parse_alias();
 static ParseRet parse_calc();
 static ParseRet parse_data();
+static ParseRet parse_var();
 static ParseRet parse_flag();
 static ParseRet parse_structure();
 static ParseRet parse_meta();
@@ -50,6 +51,7 @@ static ParseRet parse_braced_rules(BracedRules* results, AliasNode* alias);
 static ParseRet parse_braced_if_flags(IfBracedRules* rules, FlagNode* flag);
 static ParseRet parse_l_or_lr_rule(RuleArray* rules, AliasNode* alias);
 static ParseRet parse_size(uint32_t* res);
+static ParseRet parse_with(RuleArray* rules, AliasNode* alias);
 
 static AliasNode* add_alias_node(const char* name);
 static FlagNode* add_flag_node(const char* name);
@@ -66,6 +68,10 @@ static FlagValueNode* add_flag_value_node();
 static MultiNode* add_multi_node();
 static RuleRightNode* add_rule_right_node();
 static MetaNode* add_meta_node();
+static MapNode* add_map_node();
+static VarNode* add_var_node(const char* identifier, Node* link);
+static AssignNode* add_assign_node();
+static RuleNodeWith* add_with_node(AliasNode* alias);
 
 static CalcNode create_calc_node(const char* identifier);
 static CalcNode* add_calc_node(const char* identifier);
@@ -81,6 +87,11 @@ static MultiNode create_multi_node();
 static RuleRightNode create_rule_right_node();
 static DataFieldNode create_data_field_node(DataNode* data, size_t pos);
 static MetaNode create_meta_node();
+static ExprNode create_expr_node();
+static MapNode create_map_node();
+static VarNode create_var_node(const char* identifier, Node* link);
+static AssignNode create_assign_node();
+static RuleNodeWith create_with_node(AliasNode* alias);
 
 static void print_symbol_table();
 
@@ -102,7 +113,9 @@ TokenArray* tokens;
 size_t t_i;
 
 size_t string_id= 0;
-Vector string_data;
+
+size_t with_id= 0;
+size_t next_with_id() {return with_id++;}
 
 size_t rule_right_stmt_id= 0;
 
@@ -137,8 +150,7 @@ Parsed parse(TokenArray* ts) {
     t_i= 0;
 
     string_id= 0;
-    string_data= vector_create();
-
+    with_id= 0;
     rule_right_stmt_id= 0;
 
     symbol_table= Symbol_arr_create();
@@ -168,6 +180,8 @@ Parsed parse(TokenArray* ts) {
         return (Parsed){.succ=false, .root= {0}, .node_buffer= NULL};
     }
 
+    print_symbol_table();
+
     return (Parsed) {
         .succ= true,
         .root= root,
@@ -191,6 +205,7 @@ ParseRet parse_toplevel() {
     }
 
     switch (t->data.keyword) {
+        case FLAT:
         case ALIAS: return parse_alias();
         case CALCULATE: return parse_calc();
         case DATA: return parse_data();
@@ -198,8 +213,120 @@ ParseRet parse_toplevel() {
         case STRUCTURE: return parse_structure();
         case RULE: return parse_rule_right_stmt();
         case META: return parse_meta();
+        case VAR: return parse_var();
         default:
             return error_with_token("Expected keyword token to be in (ALIAS, CALCULATE, DATA, FLAG, STRUCTURE)",t);
+    }
+}
+
+bool flag_links_has_flag(const FlagValueNode* fv, const FlagNode* flag) {
+    bool found= false;
+    for (int i = 0; i < fv->links.pos; ++i) {
+        const FlagLinkPos* link= FlagLinkPos_arr_ptr(&fv->links, i);
+        if (link->flag == flag) found= true;
+    }
+    return found;
+}
+
+Node* base_link(const IdentNode* node) {
+    if (node->link->type == NT_VAR) {
+        const VarNode* var= (VarNode*)node->link;
+        return var->link;
+    }
+    return node->link;
+}
+
+// the left link is the base type that it points to
+//  e.g. NT_ALIAS, NT_DATA, NT_DATA_FIELD
+bool check_assignment(Node* left_link, Node* right_expr) {
+    switch (left_link->type) {
+        case NT_ALIAS: {
+            // if it's an alias then it can only be = STRING or ALIAS IDENT or ALIAS VAR
+            if (right_expr->type == NT_LIT_STRING) return true;
+            if (right_expr->type == NT_IDENT) {
+                const IdentNode* ident= (IdentNode*)right_expr;
+                Node* base= base_link(ident);
+                return base->type == NT_ALIAS;
+            }
+            return false;
+        }
+        case NT_DATA: {
+            // when data it can only be assigned to a BIN or UN expr or LIT_NUM or DATA IDENT or DATA VAR
+            if (right_expr->type == NT_BIN_EXPR || right_expr->type == NT_UNARY_EXPR) return true;
+            if (right_expr->type == NT_LIT_NUM) return true;
+            if (right_expr->type == NT_IDENT) {
+                const IdentNode* ident= (IdentNode*)right_expr;
+                Node* base= base_link(ident);
+                return base->type == NT_DATA;
+            }
+            return false;
+        }
+        case NT_FLAG: {
+            // this can only be a flag literal, or flag var of the same
+            const FlagNode* flag= (FlagNode*)left_link;
+            if (right_expr->type == NT_IDENT) {
+                const IdentNode* ident= (IdentNode*)right_expr;
+                const Node* base= base_link(ident);
+
+                if (base->type == NT_FLAG_VALUE) {
+                    const FlagValueNode* fv= (FlagValueNode*)base;
+                    return flag_links_has_flag(fv, flag);
+                }
+                if (base->type == NT_FLAG) {
+                    const FlagNode* r_flag= (FlagNode*)base;
+                    return flag == r_flag;
+                }
+            }
+            return false;
+        }
+        default: assert(false);
+    }
+}
+
+ParseRet parse_var() {
+    consume(); // eat `VAR`
+    const Token* ident= expect(IDENTIFIER);
+    if (!ident) return unexpected("Var statement, expected identifier after `VAR`", current());
+    const Symbol* sym= Symbol_arr_search_ie(&symbol_table, ident->data.identifier);
+    if (sym) return error("Symbol with name `%s` already exits");
+
+    if (!expect_keyword(OF)) return unexpected("Var statement after identifier, expected `OF`", current());
+
+    const Token* link= expect(IDENTIFIER);
+    if (!link) return unexpected("Var statement after `OF`, expected link name", current());
+    sym= Symbol_arr_search_ie(&symbol_table, link->data.identifier);
+    if (!sym) return error("Symbol with name `%s` does not exist in VAR statement", link->data.identifier);
+
+    VarNode* var_node= add_var_node(ident->data.identifier, sym->node);
+
+    add_to_symbol_table(ident->data.identifier, (Node*)var_node);
+
+    if (expect(ASSIGN)) {
+        const ParseRet default_value= parse_expr();
+        if (!default_value.succ) return default_value;
+
+        var_node->value= (ExprNode*)default_value.node;
+    }
+
+    Node* expr= ((ExprNode*)var_node->value)->expr;
+    if (!check_assignment(sym->node, expr)) {
+        return error("Cannot verify the assignment types match in VAR statement `%s`", var_node->identifier);
+    }
+
+    return (ParseRet) {
+        .succ= true,
+        .node= (Node*)var_node
+    };
+}
+
+const char* type_to_str(const TYPE type) {
+    switch (type) {
+        case TYPE_NUMBER: return "NUMBER";
+        case TYPE_STRING: return "STRING";
+        case TYPE_ENUM: return "ENUM";
+        case TYPE_ALIAS: return "ALIAS";
+        case TYPE_ERROR: return "ERROR";
+        default: return "<<ERROR>> Unknown TYPE <<ERROR>>";
     }
 }
 
@@ -278,7 +405,26 @@ ParseRet parse_structure() {
     do {
         const ParseRet res= parse_marked_ident(&root.structure->rules);
         if (!res.succ) return res;
-    } while (!expect(DELIMITER));
+    } while (!expect(ASSIGN));
+
+    const Token* output= consume();
+    switch (output->type) {
+        case IDENTIFIER: {
+            Symbol* sym= Symbol_arr_search_ie(&symbol_table, output->data.identifier);
+            if (!sym) return error("Cannot find symbol `%s` in output of structure", output->data.identifier);
+            if (sym->node->type != NT_ALIAS) return error("Output of structure statement can only be an alias or string");
+            const IdentNode* ident_out= add_ident_node(output->data.identifier, sym->node);
+
+            root.structure->output.single_out= (Node*)ident_out;
+            break;
+        }
+        case LIT_STRING: {
+            const LitNode* lit_out= add_lit_string_node(output->data.lit_string);
+            root.structure->output.single_out= (Node*)lit_out;
+            break;
+        }
+        default: return error("Output of structure can only be lit string or identifier");
+    }
 
     return (ParseRet){
         .succ= true,
@@ -516,6 +662,7 @@ ParseRet get_or_add_enum(const char* ident, FlagLinkPos link) {
     if (!sym) {
         FlagValueNode* fv= add_flag_value_node();
         FlagLinkPos_arr_add(&fv->links, link);
+        fv->name= ident;
         Symbol_arr_add(&symbol_table, (Symbol) {
             .name= ident,
             .node= (Node*)fv
@@ -607,6 +754,8 @@ ParseRet parse_calc() {
 
     if (!res.succ) return PARSE_RET_FAIL;
 
+    flag->linked_calc= calc_node;
+
     return (ParseRet) {
         .succ= true,
         .node= (Node*)calc_node
@@ -649,13 +798,23 @@ ParseRet parse_lit_string() {
         do {
             res= lex_token();
 
-            if (res.succ && res.addable) Token_arr_add(&expr_tokens, res.token);
+            if (res.succ && res.addable) {
+                if (res.token.type == LIT_NUM)
+                    res.token.data.lit_num.explicit_base10= true;
+
+                Token_arr_add(&expr_tokens, res.token);
+            }
         } while (res.succ && res.token.type != RBRACE);
 
         const ShuntRet shunt_res= shunt(&expr_tokens, 0);
 
         if (!shunt_res.succ) return PARSE_RET_FAIL;
         if (shunt_res.idx != expr_tokens.pos - 1) return error("Did not consume all tokens in expression");
+
+        printf("String %u expression tokens:\n", lit->data.lit_string.id);
+        for (int i = 0; i < expr_tokens.pos; ++i) {
+            print_token(Token_arr_ptr(&expr_tokens, i));
+        }
 
         Node_vec_add(&lit->data.lit_string.expressions, shunt_res.node);
     }
@@ -668,10 +827,66 @@ ParseRet parse_lit_string() {
     };
 }
 
+ParseRet parse_map() {
+    const Token* dst= expect(IDENTIFIER);
+    if (!dst) return unexpected("Map statement, expected destination identifier", current());
+    Symbol* sym= Symbol_arr_search_ie(&symbol_table, dst->data.identifier);
+    if (!sym) return error("Cannot find symbol `%s` in map statement", dst->data.identifier);
+    if (sym->node->type != NT_ALIAS) return error("Identifier `%s` in map statement's destination is not an alias", dst->data.identifier);
+
+    MapNode* map= add_map_node();
+    map->destination= (AliasNode*)sym->node;
+    do {
+        ShuntRet res= shunt(tokens, t_i);
+        if (!res.succ) return error("Failed to parse expression in MAP stream");
+        t_i= res.idx;
+
+        res.node= ((ExprNode*)res.node)->expr;
+        switch (res.node->type) {
+            case NT_LIT_NUM:
+                Node_vec_add(&map->stream, res.node);
+                break;
+            case NT_IDENT: {
+                const IdentNode* ident= (IdentNode*)res.node;
+                switch (ident->link->type) {
+                    case NT_ALIAS: return error("Cannot stream an alias into MAP statement, got alias `%s`", link_name(res.node));
+                    case NT_DATA: {
+                        DataNode* data= (DataNode*)ident->link;
+                        if (!data->non_fielded) return error("Cannot stream data that contains fields, got data `%s`",
+                                                             link_name(res.node));
+                        break;
+                    }
+                    default:
+                        return error("Cannot stream identifier that is not a non-fielded data");
+                }
+
+                Node_vec_add(&map->stream, res.node);
+                break;
+            }
+            case NT_BIN_EXPR: {
+                BinNode* expr= (BinNode*)res.node;
+                if (expr->op != DOT) return error("Only struct access `.` expressions are allowed in MAP stream");
+
+                Node_vec_add(&map->stream, res.node);
+                break;
+            }
+            default:
+                return error("Map stream must contain literal numbers, identifiers, or data field access");
+        }
+    } while (!expect(DELIMITER));
+
+    return (ParseRet) {
+        .succ= true,
+        .node= (Node*)map
+    };
+}
+
 ParseRet parse_right_rule(AliasNode* alias) {
     // can be
     // struct BracedRules* brace;
     // MultiNode* multi_out;
+    // Node* single_out;
+    // MapNode* map;
 
     Token* next= current();
     if (!next) return PARSE_RET_FAIL;
@@ -680,6 +895,11 @@ ParseRet parse_right_rule(AliasNode* alias) {
         BracedRules* br= add_braced_rules();
         const ParseRet res= parse_braced_rules(br, alias);
         return (ParseRet) {.succ= res.succ, .node= (Node*)br};
+    }
+
+    if (expect_keyword(MAP)) {
+        const ParseRet map_res= parse_map();
+        return map_res;
     }
 
     MultiNode* multi= add_multi_node();
@@ -761,11 +981,7 @@ ParseRet parse_if_flag_rule(IfFlagRuleArray* rules, FlagNode* flag, Node* expr) 
         if (sym->node->type != NT_FLAG_VALUE) return error("Symbol %s is not a flag value in the result of a calculate statement", ident->data.identifier);
 
         FlagValueNode* fv= (FlagValueNode*)sym->node;
-        bool found= false;
-        for (int i = 0; i < fv->links.pos; ++i) {
-            const FlagLinkPos* link= FlagLinkPos_arr_ptr(&fv->links, i);
-            if (link->flag == flag) found= true;
-        }
+        bool found= flag_links_has_flag(fv, flag);
 
         if (!found) return error("FLAG value `%s` in CALCULATE `%s` is not from the same FLAG",
             ident->data.identifier,
@@ -777,8 +993,9 @@ ParseRet parse_if_flag_rule(IfFlagRuleArray* rules, FlagNode* flag, Node* expr) 
         return PARSE_RET_SUCC;
     }
 
-    rule.brace= add_if_braced_rules();
-    const ParseRet res= parse_braced_if_flags(rule.brace, flag);
+    IfBracedRules* braced= add_if_braced_rules();
+    rule.if_rule= add_rule_node_if(expr, (RightRule){.ifbrace= braced});
+    const ParseRet res= parse_braced_if_flags(braced, flag);
 
     if (!res.succ) return PARSE_RET_FAIL;
 
@@ -796,7 +1013,10 @@ ParseRet parse_braced_if_flag(IfFlagRuleArray* rules, FlagNode* flag) {
             c->data.identifier,
             flag->name
         );
-        if (sym->node->type != NT_FLAG_VALUE) return error("Output of `%s`'s calculate statement must be an enum value of the same type got identifier `%s` of non matching type",
+        if (sym->node->type == NT_VAR) {
+            const VarNode* var= (VarNode*)sym->node;
+            if (var->link != (Node*)flag) return error("Output of `%s`'s calculate statement cannot be a variable of a different type than the flag");
+        } else if (sym->node->type != NT_FLAG_VALUE) return error("Output of `%s`'s calculate statement must be an enum value of the same type got identifier `%s` of non matching type",
             flag->name,
             c->data.identifier
         );
@@ -861,11 +1081,13 @@ ParseRet parse_braced_rule(RuleArray* rules, AliasNode* alias) {
     // L rule
     // or an LR rule
     // or an if rule
+    // or a with rule
     // or a when rule
-
     Token* c= current();
     if (c->type == KEYWORD) {
         if (c->data.keyword == IF) return parse_if_rule(rules, alias);
+        if (c->data.keyword == WITH) return parse_with(rules, alias);
+        if (c->data.keyword == MAP) return parse_map();
 
         return unexpected_keyword("Braced rule, expected either IF, WHEN, or L/LR rule", current()->data.keyword);
     }
@@ -873,12 +1095,104 @@ ParseRet parse_braced_rule(RuleArray* rules, AliasNode* alias) {
     return parse_l_or_lr_rule(rules, alias);
 }
 
+DataFieldNode* data_has_field(DataNode* data, const char* target_name) {
+    for (int i = 0; i < data->all_fields.pos; ++i) {
+        const FieldNode* field= FieldNode_vec_get_unsafe(&data->all_fields, i);
+
+        if (strcmp(field->named_info.name, target_name) == 0) {
+            return add_data_field_node(data, i);
+        }
+    }
+    return NULL;
+}
+
+Node* link_of_var(VarNode* var) {
+    return var->link;
+}
+
+ParseRet parse_assign() {
+    const Token* c= expect(IDENTIFIER);
+    if (!c) return unexpected("With statement's assign, expected identifier", current());
+    Symbol* sym= Symbol_arr_search_ie(&symbol_table, c->data.identifier);
+    if (!sym) return error("Cannot find symbol `%s` in with statement's assign", c->data.identifier);
+    Node* base= sym->node;
+    if (base->type == NT_VAR) {base= ((VarNode*)base)->link;}
+
+    IdentNode* left;
+    Node* left_link;
+    NodeType left_link_type;
+    if (expect_binary_op(DOT)) {
+        if (base->type != NT_DATA) return error("Cannot field access into a variable that is not a data variable");
+        DataNode* data= (DataNode*)base;
+        const Token* field= expect(IDENTIFIER);
+        if (!field) return unexpected("Assign after `.`, expected field identifier", current());
+        DataFieldNode* res= data_has_field(data, field->data.identifier);
+        if (!res) return error("Data variable `%s` does not have field `%s`", link_name(base), field->data.identifier);
+        left= add_ident_node(c->data.identifier, (Node*)res);
+        left_link= (Node*)res;
+        left_link_type= NT_DATA_FIELD;
+    } else {
+        left= add_ident_node(c->data.identifier, sym->node);
+        left_link= base;
+        left_link_type= base->type;
+    }
+
+    if (!expect(ASSIGN)) return unexpected("Assign of WITH statement, expected `=`", current());
+
+    const ParseRet right= parse_expr();
+    if (!right.succ) return right;
+
+    Node* expr= ((ExprNode*)right.node)->expr;
+    if (!check_assignment(left_link, expr)) return error("Cannot verify assignment types in VAR `%s`", link_name(base));
+
+    AssignNode* assign= add_assign_node();
+    assign->left= left;
+    assign->right= (ExprNode*)right.node;
+
+    return (ParseRet) {
+        .succ= true,
+        .node= (Node*)assign
+    };
+}
+
+ParseRet parse_with(RuleArray* rules, AliasNode* alias) {
+    consume(); // eat `WITH`
+
+    Rule* rule= Rule_arr_add_i(rules);
+    *rule= create_rule(NT_RULE_WITH);
+
+    RuleNodeWith with= create_with_node(alias);
+    rule->data.rule_with= with;
+    do {
+        const ParseRet res= parse_assign();
+        if (!res.succ) return res;
+        vector_add(&rule->data.rule_with.assignNodes, res.node);
+    } while (expect(COMMA));
+
+    BracedRules* br= add_braced_rules();
+    const ParseRet res= parse_braced_rules(br, alias);
+    if (!res.succ) return res;
+    rule->data.rule_with.brace= br;
+
+    vector_add(&root.withs, &rule->data.rule_with);
+
+    return PARSE_RET_SUCC;
+}
+
 ParseRet parse_left_rules(LeftRules* lr) {
     eat_all_whitespace();
     const Token* next= current();
 
+    if (expect(UNDERSCORE)) {
+        return PARSE_RET_SUCC;
+    }
+
     bool running= true;
     while (running) {
+        bool invert= expect(READINVERT);
+        if (invert) {
+            next= current();
+        }
         switch (next->type) {
             case LIT_NUM: {
                 Token* num= consume();
@@ -902,7 +1216,15 @@ ParseRet parse_left_rules(LeftRules* lr) {
                     default:
                         assert(false);
                 }
-                const LeftRule rule= (LeftRule){.ident= add_ident_node(ident->data.identifier, sym->node)};
+
+                IdentNode* ident_node= add_ident_node(ident->data.identifier, sym->node);
+                if (invert) {
+                    const DataNode* data= (DataNode*)base_link(ident_node);
+                    if (data->base.type != NT_DATA || !data->non_fielded) return error("Can only invert non-fielded data");
+                }
+
+                const LeftRule rule= (LeftRule){.ident= ident_node};
+                rule.ident->inverted= invert;
                 LeftRule_arr_add(lr, rule);
                 break;
             }
@@ -913,6 +1235,7 @@ ParseRet parse_left_rules(LeftRules* lr) {
         next= current();
     }
 
+    if (lr->pos == 0) return error("Unable to parse left rules");
     return PARSE_RET_SUCC;
 }
 
@@ -920,9 +1243,16 @@ ParseRet parse_l_or_lr_rule(RuleArray* rules, AliasNode* alias) {
     LeftRules lr= LeftRule_arr_create();
     const ParseRet l_rule= parse_left_rules(&lr);
 
+    if (alias->is_flat) {
+        if (lr.pos != 1 || LeftRule_arr_get(&lr, 0).base->type != NT_LIT_STRING) {
+            return error("Flat aliases can only have literal strings as left rules, alias `%s` got problems", alias->identifier);
+        }
+    }
+
     if (!l_rule.succ) return PARSE_RET_FAIL;
 
     if (expect(ASSIGN)) {
+        if (alias->is_flat) return error("Flat aliases cannot have lr rules, alias `%s` is in violation >:[", alias->identifier);
         Rule rule= create_rule(NT_RULE_LR);
         ParseRet r_rule= parse_right_rule(alias);
         if (!r_rule.succ) return r_rule;
@@ -946,17 +1276,17 @@ ParseRet parse_braced_rules(BracedRules* results, AliasNode* alias) {
         return unexpected("Braced rules statement after equality sign", current());
     }
 
-    expect(DELIMITER);
+    eat_all_whitespace();
 
     while (!expect(RBRACE)) {
         ParseRet res;
         if (res= parse_braced_rule(&results->rules, alias), !res.succ) {
             return res;
         }
-        expect(DELIMITER);
+        eat_all_whitespace();
     }
 
-    expect(DELIMITER);
+    eat_all_whitespace();
 
     if (results->rules.pos == 0) {
         return error("Cannot have an empty braced rules list");
@@ -996,8 +1326,16 @@ uint64_t convert_lit_num_to_base10(const struct LitNumData lit_num, const bool e
     return lit_num.base2.value;
 }
 
+ParseRet parse_flat_alias() {
+
+}
+
 ParseRet parse_alias() {
-    consume(); // eat the ALIAS keyword
+    const Token* first= consume(); // eat the ALIAS or FLAT keyword
+    bool is_flat= first->data.keyword == FLAT;
+    if (is_flat) {
+        if (!expect_keyword(ALIAS)) return unexpected("Flat alias statement expected `ALIAS` after `FLAT`", current());
+    }
 
     Token* ident= expect(IDENTIFIER);
 
@@ -1015,12 +1353,18 @@ ParseRet parse_alias() {
 
     AliasNode* alias= add_alias_node(ident->data.identifier);
     alias->bits= size_in_bits;
+    alias->is_flat= is_flat;
 
     if (check(LBRACE)) {
         const ParseRet res= parse_braced_rules(&alias->rules, alias);
         if (!res.succ) return PARSE_RET_FAIL;
 
         goto parse_alias_end;
+    }
+
+    if (is_flat) {
+        //[[todo]] this isn't true, it could be another flat alias, but that requires changing the logic below as well, as it would just be ={other_alias} not ={x=x}
+        return error("Flat aliases cannot be = another alias, as that requires l rules");
     }
 
     Token* result_alias= expect(IDENTIFIER);
@@ -1340,7 +1684,8 @@ RootNode create_root() {
             .type= NT_ROOT
         },
         .child_nodes= create_children(),
-        .strings= vector_create()
+        .strings= vector_create(),
+        .withs= vector_create()
     };
 }
 
@@ -1415,7 +1760,8 @@ IdentNode create_ident_node(const char* name, Node* link) {
     return (IdentNode) {
         .base= {.type= NT_IDENT},
         .link= link,
-        .name= name
+        .name= name,
+        .inverted= false
     };
 }
 
@@ -1485,8 +1831,6 @@ LitNode* add_lit_string_node(char* string) {
 
     LitNode* node= add_node(&lit, sizeof(lit));
 
-    vector_add(&string_data, &node->data.lit_string);
-
     return node;
 }
 
@@ -1553,6 +1897,33 @@ BinNode* add_binary_node(const BinaryOperator op, OperandNode left, OperandNode 
     return add_node(&node, sizeof(node));
 }
 
+VarNode create_var_node(const char* identifier, Node* link) {
+    return (VarNode) {
+        .base= {.type= NT_VAR},
+        .identifier= identifier,
+        .link= link,
+        .value= NULL
+    };
+}
+
+VarNode* add_var_node(const char* identifier, Node* link) {
+    VarNode node= create_var_node(identifier, link);
+    return add_node(&node, sizeof(node));
+}
+
+MapNode create_map_node() {
+    return (MapNode) {
+        .base= {.type= NT_MAP},
+        .destination= NULL,
+        .stream= Node_vec_create()
+    };
+}
+
+MapNode* add_map_node() {
+    MapNode node= create_map_node();
+    return add_node(&node, sizeof(node));
+}
+
 DataFieldNode create_data_field_node(DataNode* data, size_t pos) {
     return (DataFieldNode) {
         .base= {.type= NT_DATA_FIELD},
@@ -1564,6 +1935,19 @@ DataFieldNode create_data_field_node(DataNode* data, size_t pos) {
 DataFieldNode* add_data_field_node(DataNode* data, size_t pos) {
     DataFieldNode node= create_data_field_node(data, pos);
     return add_node(&node, sizeof(node));
+}
+
+ExprNode create_expr_node() {
+    return (ExprNode) {
+        .base= {.type= NT_EXPR},
+        .type= {0},
+        .expr= NULL
+    };
+}
+
+ExprNode* add_expr_node() {
+    ExprNode expr= create_expr_node();
+    return add_node(&expr, sizeof(expr));
 }
 
 MetaNode create_meta_node() {
@@ -1581,6 +1965,34 @@ MetaNode* add_meta_node() {
     return add_node(&meta, sizeof(meta));
 }
 
+AssignNode create_assign_node() {
+    return (AssignNode) {
+        .base= {.type= NT_ASSIGN},
+        .left= NULL,
+        .right= NULL
+    };
+}
+
+AssignNode* add_assign_node() {
+    AssignNode node= create_assign_node();
+    return add_node(&node, sizeof(node));
+}
+
+RuleNodeWith create_with_node(AliasNode* alias) {
+    return (RuleNodeWith) {
+        .base= {.type= NT_RULE_WITH},
+        .brace= NULL,
+        .assignNodes= vector_create(),
+        .id= next_with_id(),
+        .alias= alias
+    };
+}
+
+RuleNodeWith* add_with_node(AliasNode* alias) {
+    RuleNodeWith node= create_with_node(alias);
+    return add_node(&node, sizeof(node));
+}
+
 Vector create_children() {
     return vector_create();
 }
@@ -1592,7 +2004,8 @@ void print_simple_num(const SimpleNumData* num) {
 void fprint_simple_num(FILE* file, const SimpleNumData* num) {
     if (num->show_as_bin) {
         fprintf(file, "0b");
-        for (int i = 0; i < num->bits; ++i) {
+        assert(num->bits != 0);
+        for (int32_t i = num->bits - 1; i >= 0; i--) {
             fprintf(file, "%c", num->value >> i & 1 ? '1' : '0');
         }
     } else {
@@ -1690,6 +2103,7 @@ const char* types_to_colour(const NodeType type) {
             break;
         case NT_BIN_EXPR:
         case NT_UNARY_EXPR:
+        case NT_EXPR:
             return C_RED;
         case NT_LIT_STRING:
         case NT_LIT_NUM:
@@ -1726,6 +2140,11 @@ const char* types_to_string(const NodeType type) {
         case NT_MULTI: return "NT_MULTI";
         case NT_BIN_EXPR: return  "NT_BIN_EXPR";
         case NT_UNARY_EXPR: return "NT_UNARY_EXPR";
+        case NT_EXPR: return "NT_EXPR";
+        case NT_MAP: return "NT_MAP";
+        case NT_ASSIGN: return "NT_ASSIGN";
+        case NT_VAR: return "NT_VAR";
+        case NT_RULE_WITH: return "NT_WITH";
 
         default: return "<<ERROR>> unknown node type <<ERROR>>";
     }
@@ -1951,6 +2370,16 @@ void print_node(Node* node, PrefixArray* prefixes) {
             newline();
             break;
         }
+        case NT_MAP: {
+            const MapNode* map= (MapNode*)node;
+
+            PPC printf("Destination: %s\n", map->destination->identifier);
+            PrintAsLastChild(
+                printf("Stream:\n");
+                print_children((Vector*)&map->stream, prefixes, print_child_);
+            );
+            break;
+        }
         case NT_RULE_RIGHT_STMT: {
             const RuleRightNode* rr= (RuleRightNode*)node;
             PPC printf("id: %u\n", rr->id);
@@ -2040,6 +2469,7 @@ void print_node(Node* node, PrefixArray* prefixes) {
                     case NT_FLAG: printf("flag"); break;
                     case NT_FLAG_VALUE: printf("flag value"); break;
                     case NT_DATA_FIELD: printf("data field"); break;
+                    case NT_VAR: printf("var"); break;
                     default: assert(false);
                 }
             )
@@ -2051,6 +2481,13 @@ void print_node(Node* node, PrefixArray* prefixes) {
             print_field_node(field);
             newline();
 
+            break;
+        }
+        case NT_EXPR: {
+            const ExprNode* expr= (ExprNode*)node;
+            PPC printf("Type: %s\n", type_to_str(expr->type.base));
+            PPC printf("Size: %hu\n", expr->type.size);
+            print_child(expr->expr, prefixes, true);
             break;
         }
         case NT_BIN_EXPR: {
@@ -2085,6 +2522,40 @@ void print_node(Node* node, PrefixArray* prefixes) {
             const SimpleNumData* num= &lit->data.lit_number;
             PrintAsLastChild(print_simple_num(num);)
             newline();
+            break;
+        }
+        case NT_RULE_WITH: {
+            const RuleNodeWith* with= (RuleNodeWith*)node;
+            PrintAsChild(
+                printf("Assignments:\n");
+                print_children(&with->assignNodes, prefixes, print_child_);
+            )
+            PrintAsLastChild(
+                printf("Brace:\n");
+                print_child((Node*)with->brace, prefixes, true);
+            )
+            break;
+        }
+        case NT_ASSIGN: {
+            const AssignNode* assign= (AssignNode*)node;
+            PrintAsChild(
+                printf("Left: ");
+                print_child((Node*)assign->left, prefixes, false);
+            )
+            PrintAsLastChild(
+                printf("Right: ");
+                print_child((Node*)assign->right, prefixes, true);
+            )
+            break;
+        }
+        case NT_VAR: {
+            const VarNode* var= (VarNode*)node;
+            PPC printf("Name: %s\n", var->identifier);
+            PPC printf("Link: %s (%s)\n", link_name(var->link), types_to_string(var->link->type));
+            PrintAsLastChild(
+                printf("Value:\n");
+                print_child((Node*)var->value, prefixes, true);
+            )
             break;
         }
         default: assert(false);

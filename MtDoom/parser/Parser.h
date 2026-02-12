@@ -1,5 +1,5 @@
 //
-// Created by jamestbest on 11/24/25.
+// Created by James Coward on 11/24/25.
 //
 
 #ifndef ANURA_PARSER_H
@@ -26,6 +26,12 @@ typedef enum NodeType {
 
     NT_MULTI,
 
+    NT_MAP,
+    NT_VAR,
+
+    NT_RULE_WITH,
+    NT_ASSIGN,
+
     NT_RULE_IF,
     NT_RULE_WHEN,
     NT_RULE_L,
@@ -33,6 +39,8 @@ typedef enum NodeType {
 
     NT_IDENT,
     NT_FIELD,
+
+    NT_EXPR,
 
     NT_BIN_EXPR,
     NT_UNARY_EXPR,
@@ -78,6 +86,7 @@ typedef struct RootNode {
     MetaNode* meta;
     struct StructureNode* structure;
     Vector strings;
+    Vector withs;
 } RootNode;
 
 typedef struct IdentNode {
@@ -87,6 +96,7 @@ typedef struct IdentNode {
     // or data
     Node* link;
     const char* name;
+    bool inverted;
 } IdentNode;
 
 VECTOR_PROTO(IdentNode, IdentNode)
@@ -177,6 +187,7 @@ typedef struct FlagNode {
     const char* capitalised;
     Vector enum_values;
     size_t default_value;
+    struct CalcNode* linked_calc;
 } FlagNode;
 
 typedef struct FlagLinkPos {
@@ -184,11 +195,31 @@ typedef struct FlagLinkPos {
     size_t enum_pos;
 } FlagLinkPos;
 
+typedef enum TYPE {
+    TYPE_NUMBER,
+    TYPE_STRING,
+    TYPE_ENUM,
+    TYPE_ALIAS,
+    TYPE_ERROR
+} TYPE;
+
+typedef struct TypeInfo {
+    TYPE base;
+    uint16_t size;
+} TypeInfo;
+
+typedef struct ExprNode {
+    COMMON_NODE
+    Node* expr;
+    TypeInfo type;
+} ExprNode;
+
 ARRAY_PROTO(FlagLinkPos, FlagLinkPos)
 
 typedef struct FlagValueNode {
     COMMON_NODE
     FlagLinkPosArray links;
+    const char* name;
 } FlagValueNode;
 
 typedef union LeftRule {
@@ -210,11 +241,6 @@ typedef struct MarkedIdent {
 
 ARRAY_PROTO(MarkedIdent, MarkedIdent)
 
-typedef struct StructureNode {
-    COMMON_NODE
-    MarkedIdentArray rules;
-} StructureNode;
-
 ARRAY_PROTO(LeftRule, LeftRule)
 
 typedef LeftRuleArray LeftRules;
@@ -227,12 +253,39 @@ typedef struct MultiNode {
     NodeVector multis;
 } MultiNode;
 
+typedef struct MapNode {
+    COMMON_NODE
+    struct AliasNode* destination;
+    NodeVector stream;
+} MapNode;
+
 typedef union RightRule {
     Node* base;
     struct BracedRules* brace;
     MultiNode* multi_out;
     Node* single_out;
+    MapNode* map;
+    struct IfBracedRules* ifbrace;
 } RightRule;
+
+typedef struct StructureNode {
+    COMMON_NODE
+    MarkedIdentArray rules;
+    RightRule output;
+} StructureNode;
+
+typedef struct VarNode {
+    COMMON_NODE
+    const char* identifier;
+    Node* link;
+    ExprNode* value;
+} VarNode;
+
+typedef struct AssignNode {
+    COMMON_NODE
+    IdentNode* left; // either var node or var node . field
+    ExprNode* right; // basic expression
+} AssignNode;
 
 typedef struct RuleNodeIf {
     COMMON_NODE
@@ -264,11 +317,20 @@ typedef struct RuleNodeL {
     LeftRules rules;
 } RuleNodeL;
 
+typedef struct RuleNodeWith {
+    COMMON_NODE
+    Vector assignNodes;
+    struct BracedRules* brace;
+    size_t id;
+    struct AliasNode* alias;
+} RuleNodeWith;
+
 typedef union RuleData {
     RuleNodeIf rule_if;
     RuleNodeWhen rule_when;
     RuleNodeLR rule_lr;
     RuleNodeL rule_l;
+    RuleNodeWith rule_with;
 } RuleData;
 
 typedef struct Rule {
@@ -308,6 +370,7 @@ typedef struct AliasNode {
     BracedRules rules; // if when parsing the braced rules it sets something in the alias for the number of outputs and the rightRule should become RightRules where the comma adds more
     size_t right_output_count;
     RuleRightNode* linked_rule;
+    bool is_flat;
 } AliasNode;
 
 typedef struct CalcNode {
@@ -335,8 +398,10 @@ IdentNode* add_ident_node(const char* name, Node* link);
 UnaryNode* add_unary_node(UnaryOperator op, OperandNode operand);
 BinNode* add_binary_node(const BinaryOperator op, OperandNode left, OperandNode right);
 DataFieldNode* add_data_field_node(DataNode* data, size_t pos);
+ExprNode* add_expr_node();
 
 Node* check_link(const char* identifier);
+DataFieldNode* data_has_field(DataNode* data, const char* target_name);
 
 ParseRet add_to_symbol_table(const char* name, Node* link);
 
@@ -347,6 +412,7 @@ void fprint_simple_num(FILE* file, const SimpleNumData* num);
 
 const char* types_to_string(NodeType type);
 const char* link_name(Node* link);
+Node* base_link(const IdentNode* node);
 
 Parsed parse(TokenArray* tokens);
 void print_root(RootNode* root);
