@@ -144,12 +144,12 @@ typedef struct MRow {
     uint32_t col;
 
     uint64_t pc;
-} MRow;
+} FrameRow;
 
-ARRAY_PROTO(MRow, MRow)
-ARRAY_ADD(MRow, MRow)
+ARRAY_PROTO(FrameRow, MRow)
+ARRAY_ADD(FrameRow, MRow)
 
-MRowArray matrix;
+static MRowArray matrix;
 
 void peek_text_at_addr(uintptr_t addr, uint16_t amount) {
     for (int j = 0; j < amount; ++j) {
@@ -159,8 +159,8 @@ void peek_text_at_addr(uintptr_t addr, uint16_t amount) {
     putchar('\n');
 }
 
-MRow last_row= {0};
-MRow row= {0};
+FrameRow last_row= {0};
+FrameRow row= {0};
 
 void add_new_row_to_matrix() {
     MRow_arr_add(&matrix, row);
@@ -176,15 +176,12 @@ void new_row() {
         line, col, (void*)pc, discrim);
 
     last_row= row;
-    row= (MRow){
+    row= (FrameRow){
         .line= line,
         .col= col,
         .pc= pc
     };
     if (on_new_row) on_new_row();
-
-    // printf("Peek at PC: \n");
-    // peek_text_at_addr(pc, 128);
 
     // 4. Set the basic_block register to “false.”
     // 5. Set the prologue_end register to “false.”
@@ -333,7 +330,7 @@ DecodeRet decode_op(uint8_t* base) {
     };
 }
 
-int read_header(uint8_t* start, char* string_data) {
+static int read_header(uint8_t* start, char* string_data) {
     uint8_t* base= start;
 
     void* bc_start; // byte code start
@@ -480,7 +477,7 @@ int decode_lines(uint8_t* start, void* string_data, void* t_data, uint64_t t_off
 
 ARange line2addr(uint32_t line) {
     for (int i= 0; i < matrix.pos; ++i) {
-        MRow* row= MRow_arr_ptr(&matrix, i);
+        FrameRow* row= MRow_arr_ptr(&matrix, i);
         if (i == matrix.pos - 1) {
             if (line == row->line) return (ARange){
                 .s= row->pc,
@@ -492,8 +489,8 @@ ARange line2addr(uint32_t line) {
 
         if (row->line == line) {
             int j= i;
-            MRow* next;
-            MRow* end;
+            FrameRow* next;
+            FrameRow* end;
 
             // todo this misses dis-joint lines
             //  to link them though would be n^2
@@ -517,7 +514,7 @@ ARange line2addr(uint32_t line) {
 //  once. If this is the start then there is no
 LC addr2line(uintptr_t addr) {
     for (int i= 0; i < matrix.pos; ++i) {
-        MRow* row= MRow_arr_ptr(&matrix, i);
+        FrameRow* row= MRow_arr_ptr(&matrix, i);
 
         if (addr == row->pc) return (LC) {
             .line= row->line,
@@ -526,7 +523,7 @@ LC addr2line(uintptr_t addr) {
 
         if (addr < row->pc) {
             if (i == 0) return LC_ERR;
-            MRow* prev= MRow_arr_ptr(&matrix, i - 1);
+            FrameRow* prev= MRow_arr_ptr(&matrix, i - 1);
             return (LC) {
                 .line= prev->line,
                 .col= prev->col
