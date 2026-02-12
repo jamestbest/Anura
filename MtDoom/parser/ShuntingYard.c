@@ -14,34 +14,12 @@ VECTOR_ADD(Token, Token)
 NodeVector output_queue;
 TokenVector operator_stack;
 
-typedef enum TYPE {
-    TYPE_NUMBER,
-    TYPE_STRING,
-    TYPE_ENUM,
-    TYPE_ALIAS,
-    TYPE_ERROR
-} TYPE;
-
 typedef struct TYPE_INFO {
     TYPE type;
     union {
         FlagNode* flag_link;
     };
 } TYPE_INFO;
-
-const TYPE result_of_op[BINARY_OP_COUNT]= {
-    [EQUALITY]= TYPE_NUMBER,
-    [NEQUALITY]= TYPE_NUMBER,
-    [DOT]= TYPE_NUMBER,
-    [STAR]= TYPE_NUMBER,
-    [POW]= TYPE_NUMBER,
-    [PIPE]= TYPE_NUMBER,
-};
-
-const TYPE result_of_un_op[UNARY_OP_COUNT]= {
-    [NOT]= TYPE_NUMBER,
-    [EXISTS]= TYPE_NUMBER
-};
 
 #define BASE_TYPE(t) ((TYPE_INFO){.type= t})
 
@@ -60,8 +38,8 @@ TYPE_INFO type_of(const OperandNode op) {
                 default: assert(false);
             }
         }
-        case NT_BIN_EXPR: return BASE_TYPE(result_of_op[op.bin->op]);
-        case NT_UNARY_EXPR: return BASE_TYPE(result_of_un_op[op.unary->op]);
+        case NT_BIN_EXPR: return BASE_TYPE(TYPE_NUMBER);
+        case NT_UNARY_EXPR: return BASE_TYPE(TYPE_NUMBER);
         default: assert(false);
     }
 }
@@ -114,15 +92,9 @@ bool check_binary_expression(const BinNode* binary) {
         DataNode* data= (DataNode*)binary->left.ident->link;
         IdentNode* ident= binary->right.ident;
 
-        for (int i = 0; i < data->all_fields.pos; ++i) {
-            const FieldNode* field= FieldNode_vec_get_unsafe(&data->all_fields, i);
-
-            if (strcmp(field->named_info.name, ident->name) == 0) {
-                ident->link= (Node*)add_data_field_node(data, i);
-                return true;
-            }
-        }
-        return false;
+        DataFieldNode* link= data_has_field(data, ident->name);
+        ident->link= (Node*)link;
+        return ident->link != NULL;
     }
 
     if (!check_operand(binary->right)) return false;
@@ -213,6 +185,69 @@ uint8_t assoc(const Token* token) {
     return PRECEDENCE[token->data.bin_op];
 }
 
+/*
+case NT_IDENT: {
+const IdentNode* ident= op.ident;
+switch (ident->link->type) {
+case NT_FLAG:
+case NT_FLAG_VALUE:
+return (TYPE_INFO){.type= TYPE_ENUM, .flag_link= (FlagNode*)ident->link};
+case NT_ALIAS: return (TYPE_INFO){.type= TYPE_ALIAS};
+case NT_DATA: return (TYPE_INFO){.type= TYPE_NUMBER};
+default: assert(false);
+}
+}
+default: assert(false);
+*/
+
+ExprNode* form_expr_node(Node* base_expr) {
+    TypeInfo info;
+    switch (base_expr->type) {
+        case NT_LIT_NUM:
+        case NT_UNARY_EXPR:
+        case NT_BIN_EXPR:{
+            info.base= TYPE_NUMBER;
+            info.size= 64;
+            break;
+        }
+        case NT_LIT_STRING: {
+            info.base= TYPE_STRING;
+            info.size= 64;
+            break;
+        }
+        case NT_IDENT: {
+            const IdentNode* ident= (IdentNode*)base_expr;
+            switch (ident->link->type) {
+                case NT_DATA: {
+                    const DataNode* data= (DataNode*)ident->link;
+                    info.base= TYPE_NUMBER;
+                    info.size= data->bits;
+                    break;
+                }
+                case NT_FLAG:
+                case NT_FLAG_VALUE: {
+                    info.base= TYPE_NUMBER;
+                    info.size= 32;
+                    break;
+                }
+                case NT_ALIAS: {
+                    info.base= TYPE_STRING;
+                    info.size= 64;
+                    break;
+                }
+            }
+            break;
+        }
+        default: assert(false);
+    }
+
+    ExprNode* expr= add_expr_node();
+    expr->type= info;
+    expr->expr= base_expr;
+
+    return expr;
+}
+
 static TokenArray* tokens;
 static size_t idx;
 
@@ -226,6 +261,24 @@ Token* consume() {
     return Token_arr_ptr(tokens, idx++);
 }
 
+bool is_lvalue(TokenType type) {
+    switch (type) {
+        case LIT_NUM:
+        case IDENTIFIER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool last_was_literal= false;
+bool in_expr() {
+    const Token* c= current();
+
+    if (last_was_literal && is_lvalue(c->type)) return false;
+    return true;
+}
+
 ShuntRet shunt(TokenArray* toks, size_t idx_) {
     output_queue= Node_vec_create();
     operator_stack= Token_vec_create();
@@ -233,10 +286,12 @@ ShuntRet shunt(TokenArray* toks, size_t idx_) {
     tokens= toks;
     idx= idx_;
 
-    bool in_expr= true;
-    while (in_expr) {
+    last_was_literal= false;
+    bool escape= false;
+    while (!escape && in_expr()) {
         // [[todo]]: change to peek
         Token* t= current();
+        last_was_literal= is_lvalue(t->type);
 
         switch (t->type) {
             case LIT_NUM: {
@@ -314,7 +369,7 @@ ShuntRet shunt(TokenArray* toks, size_t idx_) {
             }
 
             default:
-                in_expr= false;
+                escape= true;
                 break;
         }
     }
@@ -334,9 +389,13 @@ ShuntRet shunt(TokenArray* toks, size_t idx_) {
         if (!check_operand((OperandNode){.ident= (IdentNode*)res})) return SHUNT_RET_FAIL;
     }
 
+    if (res == NULL) return SHUNT_RET_FAIL;
+
+    ExprNode* expr= form_expr_node(res);
+
     return (ShuntRet) {
-        .succ= res != NULL,
-        .node= res,
+        .succ= true,
+        .node= (Node*)expr,
         .idx= idx
     };
 }
