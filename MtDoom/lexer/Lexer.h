@@ -17,6 +17,8 @@ typedef enum TokenType {
     LBRACE,
     RBRACE,
     DELIMITER,
+    UNDERSCORE,
+    READINVERT,
     COMMENT,
     LPAREN,
     RPAREN,
@@ -56,15 +58,20 @@ typedef enum keyword {
     DATA,
     DEFAULT,
     FLAG,
+    FLAT,
     IF,
     LEFT,
+    MAP,
     META,
+    OF,
     ON,
     RIGHT,
     RULE,
     STRUCTURE,
     THEN,
+    VAR,
     WHEN, // CURRENTLY SEMANTICALLY THE SAME AS IF
+    WITH,
     KEYWORD_COUNT
 } keyword;
 

@@ -192,6 +192,8 @@ TokenRet lex_token() {
         case '?': return TOK_SUCC(create_unary_op(EXISTS));
         case '^': return TOK_SUCC(create_binary_op(POW));
         case '|': return TOK_SUCC(create_binary_op(PIPE));
+        case '_': return TOK_SUCC(create_simple_token(UNDERSCORE));
+        case '~': return TOK_SUCC(create_simple_token(READINVERT));
         case '&': {
             if (current() == '&') {
                 consume();
@@ -313,6 +315,7 @@ const char* KEYWORD_STRINGS[KEYWORD_COUNT]= {
     [ALIAS]= "ALIAS",
     [STRUCTURE]= "STRUCTURE",
     [FLAG]= "FLAG",
+    [FLAT]= "FLAT",
     [DEFAULT]= "DEFAULT",
     [BYTE]= "BYTE",
     [BYTES]= "BYTES",
@@ -320,15 +323,19 @@ const char* KEYWORD_STRINGS[KEYWORD_COUNT]= {
     [BITS]= "BITS",
     [LEFT]= "LEFT",
     [META]= "META",
+    [MAP]= "MAP",
     [ON]= "ON",
+    [OF]= "OF",
     [RIGHT]= "RIGHT",
     [RULE]= "RULE",
     [IF]= "IF",
     [THEN]= "THEN",
     [WHEN]= "WHEN",
+    [WITH]= "WITH",
     [CHOOSE]= "CHOOSE",
     [CALCULATE]= "CALCULATE",
-    [DATA]= "DATA"
+    [DATA]= "DATA",
+    [VAR]= "VAR"
 };
 
 const char* keyword_string(keyword kw) {
@@ -342,6 +349,8 @@ const char* TOKEN_TYPE_STRS[TOKEN_TYPE_COUNT]= {
     [LBRACE]= "LBRACE",
     [RBRACE]= "RBRACE",
     [DELIMITER]= "DELIMITER",
+    [UNDERSCORE]= "UNDERSCORE",
+    [READINVERT]= "READ INVERTED",
     [COMMENT]= "COMMENT",
     [LPAREN]= "LPAREN",
     [RPAREN]= "RPAREN",
@@ -403,7 +412,7 @@ TokenRet lex_identifier_from(char* start) {
     }
     end= c_char;
 
-    if (*end == '_') {
+    if (*(end-1) == '_') {
         error("Identifiers cannot end with `_`");
         return TOK_FAIL;
     }
@@ -576,6 +585,11 @@ void fprint_lit_num(FILE* file, const struct LitNumData* num) {
 }
 
 void print_token(Token* token) {
+    if (!token) {
+        printf("<<NULL TOKEN>>");
+        return;
+    }
+
     printf("Token (%.2u:%.2u) %s {", token->meta.line, token->meta.col, TOKEN_TYPE_STRS[token->type]);
 
     switch (token->type) {
@@ -604,6 +618,14 @@ void print_token(Token* token) {
         }
         case KEYWORD: {
             printf("%s", KEYWORD_STRINGS[token->data.keyword]);
+            break;
+        }
+        case UNDERSCORE: {
+            printf("`_`");
+            break;
+        }
+        case READINVERT: {
+            printf("`~`");
             break;
         }
 
