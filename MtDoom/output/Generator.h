@@ -1,5 +1,5 @@
 //
-// Created by jamestbest on 1/27/26.
+// Created by James Coward on 1/27/26.
 //
 
 #ifndef ANURA_GENERATOR_H
