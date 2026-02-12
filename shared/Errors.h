@@ -1,5 +1,5 @@
 //
-// Created by jamestbest on 11/24/25.
+// Created by James Coward on 11/24/25.
 //
 
 #ifndef ANURA_ERRORS_H

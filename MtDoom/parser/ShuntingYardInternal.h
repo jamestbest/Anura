@@ -1,5 +1,5 @@
 //
-// Created by jamestbest on 1/23/26.
+// Created by James Coward on 1/23/26.
 //
 
 #ifndef ANURA_SHUNTINGYARDINTERNAL_H

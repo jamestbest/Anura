@@ -1,5 +1,5 @@
 //
-// Created by jamestbest on 10/17/25.
+// Created by James Coward on 10/17/25.
 //
 
 #ifndef ANURA_PALANTIR_H

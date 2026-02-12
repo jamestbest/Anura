@@ -1,5 +1,5 @@
 //
-// Created by jamestbest on 1/27/26.
+// Created by James Coward on 1/27/26.
 //
 
 #include <stdint.h>
@@ -23,7 +23,7 @@ ParseRet parse(uint8_t* raw_stream) {
 
 //STRUCTURE lprefix* prefix? op
 ParseRet parse_structure() {
-    while (parse_lprefix().success) {}
+    while (parse_lprefix()) {}
 
     parse_prefix();
 

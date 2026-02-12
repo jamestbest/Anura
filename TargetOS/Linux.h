@@ -1,5 +1,5 @@
 //
-// Created by jamestbest on 10/20/25.
+// Created by James Coward on 10/20/25.
 //
 
 #ifndef ANURA_LINUX_H
