@@ -49,6 +49,8 @@ int tui_setup() {
  * as they'll both be in the generator list.
  */
 
+#define NO_DATA (ACTION_DATA){.NO_DATA= 0}
+
 int tui_loop() {
     while (true) {
         printf("cmd: ");
@@ -85,7 +87,7 @@ int tui_loop() {
                 &action_q,
                 create_action(
                     ACTION_CF_CONTINUE,
-                    (ACTION_DATA){.NO_DATA= 0}
+                    NO_DATA
                 )
             );
         } else if (strncmp(buff, "astep", sizeof("astep") - 1) == 0) {
@@ -103,9 +105,20 @@ int tui_loop() {
                 &action_q,
                 create_action(
                     ACTION_CF_EXIT,
-                    (ACTION_DATA){.NO_DATA= 0}));
+                    NO_DATA
+                )
+            );
             break;
-        } else {
+        } else if (strncmp(buff, "into", sizeof("into") - 1) == 0) {
+            printf("Stepping into\n");
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_CF_STEP_INTO,
+                    NO_DATA
+                )
+            );
+        }else {
             printf("Unable to match command `%s`\n", buff);
         }
     }
