@@ -67,4 +67,6 @@ typedef struct Instruction {
 void frame_info_init();
 void frame_info_destroy();
 
+int read_header(uint8_t** start, uint8_t* section_start);
+
 #endif //FRAMEINFO_H

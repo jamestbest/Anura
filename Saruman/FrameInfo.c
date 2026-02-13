@@ -22,6 +22,9 @@
 static CIEOArray CIEs;
 static FDEArray FDEs;
 
+static void print_fde(const FDE_Entry* entry);
+static void print_cie(const CIE_Entry* entry);
+
 CIE_Entry* get_cie_entry_from_offset(uint64_t offset) {
     CIEAndOffset* res= CIEO_arr_search_ie(&CIEs, offset);
     if (!res) return NULL;
@@ -44,10 +47,10 @@ void frame_info_destroy() {
     FDE_arr_destroy(&FDEs);
 }
 
-int read_header(uint8_t* start) {
+int read_header(uint8_t** start, uint8_t* section_start) {
     uint64_t length;
     MODE mode;
-    uint8_t* base= start;
+    uint8_t* base= *start;
 
     base= read_initial_length(base, &length, &mode);
     uint8_t* content_base= base;
@@ -60,7 +63,7 @@ int read_header(uint8_t* start) {
         int32_t cie_id;
         RAA(cie_id);
 
-        if (cie_id == (int32_t)-1) {
+        if (cie_id == 0) {
             is_cie= true;
         } else {
             fde_offset= cie_id;
@@ -79,7 +82,7 @@ int read_header(uint8_t* start) {
     int res= SUCCESS;
     if (is_cie) {
         CIE_Entry* cie= malloc(sizeof(CIE_Entry));
-        *cie= (CIE_Entry) {.length= length, .offset_location= (uint64_t)start};
+        *cie= (CIE_Entry) {.length= length, .offset_location= *start-section_start};
         res= read_cie_entry(&base, mode, cie);
 
         if (res != SUCCESS) {
@@ -87,12 +90,18 @@ int read_header(uint8_t* start) {
             return res;
         }
 
-        add_cie_entry(cie, (uint64_t)start);
+        add_cie_entry(cie, (uintptr_t)*start);
+        print_cie(cie);
     } else {
-        CIE_Entry* cie= get_cie_entry_from_offset(fde_offset);
-        FDE_Entry fde= (FDE_Entry) {.length= length, .cie_entry= cie, .offset_location= (uint64_t)start};
-        res= read_fde_entry(start, base, header_end, &fde);
+        CIE_Entry* cie= get_cie_entry_from_offset((uintptr_t)*start - fde_offset + 4);
+        FDE_Entry* fde= FDE_arr_add_i(&FDEs);
+        *fde= (FDE_Entry) {.length= length, .cie_entry= cie, .offset_location= (uint64_t)start};
+        res= read_fde_entry(*start, base, header_end, fde);
+
+        print_fde(fde);
     }
+
+    *start= header_end;
 
     return res;
 }
@@ -115,6 +124,10 @@ int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry) {
     uint8_t* aug_eatable= augmentation;
     uint32_t fchr= raa_utf8(&aug_eatable);
 
+    entry->code_alignment_factor= raa_uleb128(&base).v;
+    entry->data_alignment_factor= raa_leb128(&base).v;
+    entry->return_address_register= raa_uleb128(&base).v;
+
     if (fchr == '\0') {
       entry->aug_data.type= AUG_DATA_NONE;
     } else if (strcmp((const char*)augmentation, DW_AUG_STARTER_EH_STR) == 0) {
@@ -131,6 +144,9 @@ int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry) {
 
     } else if (fchr == DW_AUG_STARTER_CHR) {
         // this character is required for there to be data
+
+        //todo: use this
+        ULEB128 aug_len= raa_uleb128(&aug_data);
 
         uint32_t chr;
         while (chr= raa_utf8(&aug_eatable), chr != '\0') {
@@ -164,12 +180,11 @@ int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry) {
         }
     }
 
-    RAA(entry->address_size);
-    RAA(entry->segment_selector_size);
+    base= aug_data;
 
-    entry->code_alignment_factor= raa_uleb128(&base).v;
-    entry->data_alignment_factor= raa_leb128(&base).v;
-    entry->return_address_register= raa_uleb128(&base).v;
+    // RAA(entry->address_size);
+    // RAA(entry->segment_selector_size);
+
     entry->initial_instructions= base;
 
     return SUCCESS;
@@ -194,7 +209,7 @@ int read_fde_entry(
     entry->address_range= raa_uint(&base, addr_size);
 
     while (base < end) {
-        decode_and_execute_op(&base, entry->cie_entry);
+        Instruction instr= decode_op(&base, entry->cie_entry);
     }
 
     return SUCCESS;
@@ -345,7 +360,7 @@ void execute_initial_instr_for(uint8_t register_id, CIE_Entry* cie) {
     }
 }
 
-Instruction decode_op(uint8_t** start, CIE_Entry* cie) {
+Instruction decode_op(uint8_t** start, const CIE_Entry* cie) {
     uint64_t code_align, data_align;
 
     code_align= cie->code_alignment_factor;
@@ -534,7 +549,7 @@ Instruction decode_op(uint8_t** start, CIE_Entry* cie) {
     }
 }
 
-void execute_op(Instruction instr, CIE_Entry* cie) {
+void execute_op(Instruction instr, const CIE_Entry* cie) {
     switch (instr.opcode) {
         case DW_CFA_set_loc: {
             add_row(instr.data.d_addr);
@@ -697,7 +712,7 @@ void execute_op(Instruction instr, CIE_Entry* cie) {
     }
 }
 
-void decode_and_execute_op(uint8_t** start, CIE_Entry* cie) {
+void decode_and_execute_op(uint8_t** start, const CIE_Entry* cie) {
     Instruction instr= decode_op(start, cie);
     execute_op(instr, cie);
 }
@@ -735,13 +750,13 @@ const char* instruction_op_str(FI_OPCODE op) {
     }
 }
 
-void print_instruction(Instruction* instr, FDE_Entry* fde) {
+void print_instruction(Instruction* instr, const FDE_Entry* fde) {
     printf("Instr (%s)", instruction_op_str(instr->opcode));
-    if (fde->cie_entry == NULL) printf("<<ERROR>> FDE's CIE entry is invalid unable to print some data <<ERROR>>");
+    if (fde && fde->cie_entry == NULL) printf("<<ERROR>> FDE's CIE entry is invalid unable to print some data <<ERROR>>");
     switch (instr->opcode) {
         case DW_CFA_set_loc:
             printf(": Create new table row with location");
-            if (fde->cie_entry && fde->segment_selector != 0) printf("SS%lu:", fde->segment_selector);
+            if (fde && fde->cie_entry && fde->segment_selector != 0) printf("SS%lu:", fde->segment_selector);
             printf("%lu", instr->data.d_addr);
             break;
 
@@ -823,22 +838,26 @@ void print_instruction(Instruction* instr, FDE_Entry* fde) {
     }
 }
 
-void print_instructions(const char* prefix, uint8_t* instructions, uint64_t instructions_size, FDE_Entry* entry) {
+void print_instructions(const char* prefix, uint8_t* instructions, uint64_t instructions_size, const CIE_Entry* entry, const FDE_Entry* fde) {
     uint8_t* base= instructions;
 
-    if (entry == NULL || entry->cie_entry == NULL) {
-        printf("%sEntry %p has CIE %p; unable to print instruction", prefix, entry, entry != NULL ? entry->cie_entry : NULL);
+    if (entry == NULL) {
+        printf("%sEntry %p has NULL CIE; unable to print instruction", prefix, entry);
         return;
     }
 
     while (base < instructions + instructions_size) {
-        Instruction instr= decode_op(&base, entry->cie_entry);
+        Instruction instr= decode_op(&base, entry);
         putz(prefix);
-        print_instruction(&instr, entry);
+        print_instruction(&instr, fde);
     }
 }
 
-void print_fde(FDE_Entry* entry) {
+void print_fde(const FDE_Entry* entry) {
+    if (!entry) {
+        printf("FDE Entry <<ERROR>> NULL <<ERROR>>\n");
+        return;
+    }
     printf("FDE Entry @%lx | %lx bytes\n", entry->offset_location, entry->length);
     if (entry->cie_entry == NULL) printf(" - Linked CIE: <ERROR> Invalid linked cie <ERROR>\n");
     else printf(" - Linked CIE: @%lx\n", entry->cie_entry->offset_location);
@@ -849,10 +868,21 @@ void print_fde(FDE_Entry* entry) {
     }
     printf("[%lx-%lx]\n", entry->initial_location, entry->initial_location + entry->address_range);
     printf(" - Instructions (%u bytes):\n", entry->instructions_size);
-    if (entry->cie_entry == NULL) printf("     <<ERROR>> Unable to print instructions as the CIE entry linked is invalid <<ERROR>>\n");
-    else print_instructions("      ", entry->instructions, entry->instructions_size, entry->cie_entry);
+    print_instructions("      ", entry->instructions, entry->instructions_size, entry->cie_entry, entry);
 }
 
-void print_cie(CIE_Entry* entry) {
-
+void print_cie(const CIE_Entry* entry) {
+    if (!entry) {
+        printf("FDE Entry <<ERROR>> NULL <<ERROR>>\n");
+        return;
+    }
+    printf("CIE Entry v.%u | %lx bytes\n", entry->version, entry->length);
+    printf(" - Addr size: %u\n", entry->address_size);
+    printf(" - Alignments: \n");
+    printf("    - Code: %lu\n", entry->code_alignment_factor);
+    printf("    - Data: %ld\n", entry->data_alignment_factor);
+    printf(" - Return address register: %lu\n", entry->return_address_register);
+    printf(" - Segment selector size: %u\n", entry->segment_selector_size);
+    printf(" - Initial instructions (%u bytes):\n", entry->instructions_size);
+    print_instructions("      ", entry->initial_instructions, entry->instructions_size, entry, NULL);
 }

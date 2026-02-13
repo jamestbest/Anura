@@ -80,9 +80,9 @@ static int read_fde_entry(
 
 static int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry);
 
-static Instruction decode_op(uint8_t** start, CIE_Entry* cie);
-static void execute_op(Instruction instr, CIE_Entry* cie);
-static void decode_and_execute_op(uint8_t** start, CIE_Entry* cie);
+static Instruction decode_op(uint8_t** start, const CIE_Entry* cie);
+static void execute_op(Instruction instr, const CIE_Entry* cie);
+static void decode_and_execute_op(uint8_t** start, const CIE_Entry* cie);
 
 static int u64_cmp(uint64_t a, uint64_t b) {
     if (a < b) return -1;
