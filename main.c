@@ -261,7 +261,6 @@ Action* create_action(ACTION_TYPE type, ACTION_DATA data) {
 
 int main(int argc, char* argv[]) {
 //    disassemble_to_str(NULL);
-
     if (argc <= 1) {
         perror("Usage; expected at least one argument for the program path\n");
         return 1;
