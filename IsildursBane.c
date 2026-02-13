@@ -15,6 +15,8 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
+#include "Saruman/Saruman.h"
+
 uintptr_t base;
 
 typedef enum ACTION_HANDLE_RES {
@@ -23,15 +25,61 @@ typedef enum ACTION_HANDLE_RES {
     ACTION_HANDLE_CONTINUE
 } ACTION_HANDLE_RES;
 
+typedef enum CONTROL_STATE {
+    STATE_NORMAL,
+    STATE_STEP_INTO // we handle SIG TRAPS and send single step until
+} CONTROL_STATE;
+
+CONTROL_STATE state= STATE_NORMAL;
+uint64_t step_into_line= 0;
+
+ACTION_HANDLE_RES handle_cf_single_step() {
+    const long long res= target.target_single_step_assembly();
+
+    if (res != 0) {
+        printf("Failed to single step target with err code %lld as %s\n", res, strerror(res));
+        return ACTION_HANDLE_CONTINUE;
+    }
+
+    return ACTION_HANDLE_PROC_WAIT;
+}
+
+ACTION_HANDLE_RES handle_cf_continue() {
+    printf("Continuing process\n");
+    const long res= target.target_cf_continue();
+    if (res) printf("Failed to continue process errno %d of %s\n", errno, strerror(errno));
+    else printf("Continued process\n");
+
+    return ACTION_HANDLE_PROC_WAIT;
+}
+
+ACTION_HANDLE_RES handle_step_into_step() {
+    printf("Handling step into");
+
+    const uintptr_t c_addr= target.target_get_pc();
+    const uintptr_t v_addr= (uintptr_t)target.target_addr_runtime_to_virtual((void*)c_addr);
+
+    const AddrLineRes res= addr2line(v_addr);
+    if (!res.succ) {
+        printf("Failed to resolve line in step into\n");
+        // here we have no line information so we assume that we've reached a new location
+        state= STATE_NORMAL;
+        return handle_cf_continue();
+    }
+
+    if (step_into_line != res.line) {
+        state= STATE_NORMAL;
+        printf("Reached new line %lu\n", res.line);
+        return ACTION_HANDLE_CONTINUE;
+    }
+
+    return handle_cf_single_step();
+}
+
 ACTION_HANDLE_RES handle_action(Action* action) {
     switch (action->type) {
         case ACTION_CF_CONTINUE: {
-            printf("Continuing process\n");
-            long long res= ptrace(PTRACE_CONT, t_pid, NULL, 0);
-            if (res) printf("Failed to continue process errno %d of %s\n", errno, strerror(errno));
-            else printf("Continued process\n");
-
-            return ACTION_HANDLE_PROC_WAIT;
+            return handle_cf_continue();
         }
 
         case ACTION_BP_ADD: {
@@ -52,18 +100,27 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             bool assembly_level= action->data.CF_SINGLE_STEP.assembly_level;
             printf("Control got single step at %s level\n", assembly_level ? "assembly" : "line");
             if (assembly_level) {
-                long long res= target.target_single_step_assembly();
-
-                if (res != 0) {
-                    printf("Failed to single step target with err code %lld as %s\n", res, strerror(res));
-                    return ACTION_HANDLE_CONTINUE;
-                }
-
-                return ACTION_HANDLE_PROC_WAIT;
+                return handle_cf_single_step();
             } else {
                 printf("Got request to single step line; not impl\n");
             }
             break;
+        }
+        case ACTION_CF_STEP_INTO: {
+            const uintptr_t c_addr= target.target_get_pc();
+            const uintptr_t v_addr= (uintptr_t)target.target_addr_runtime_to_virtual((void*)c_addr);
+            printf("Current addr: %#lX\n", c_addr);
+            printf("Current virtual addr: %#lX\n", v_addr);
+            const AddrLineRes line= addr2line(v_addr);
+            if (!line.succ) {
+                perror("Unable to find line associated with current program counter to step into");
+                return ACTION_HANDLE_CONTINUE;
+            }
+            step_into_line= line.line;
+            state= STATE_STEP_INTO;
+            target.target_single_step_assembly();
+
+            return ACTION_HANDLE_PROC_WAIT;
         }
         case ACTION_CF_EXIT:
             ptrace(PTRACE_KILL, t_pid, NULL, 0);
@@ -71,6 +128,11 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             return ACTION_HANDLE_EXIT;
     }
 }
+
+// these don't seem to be exposed else where?
+#define TRAP_BRKPT 1
+#define TRAP_TRACE 2
+#define TRAP_HWBKPT 3
 
 void* control_target(void* filepath_p) {
     long res;
@@ -162,6 +224,25 @@ end_q_stat_loop1:;
 
         if (WIFSTOPPED(status)) {
             hlog("Target stopped by signal %d\n", WSTOPSIG(status));
+
+            int signal= WSTOPSIG(status);
+            if (signal == SIGTRAP) {
+                siginfo_t siginfo;
+                ptrace(PTRACE_GETSIGINFO, target.pid, 0, &siginfo);
+                switch (siginfo.si_code) {
+                    case TRAP_TRACE: {
+                        if (state == STATE_STEP_INTO) {
+                            ACTION_HANDLE_RES res= handle_step_into_step();
+                            switch (res) {
+                                case ACTION_HANDLE_PROC_WAIT:
+                                    goto end_q_stat_loop;
+                                case ACTION_HANDLE_CONTINUE:
+                                    break;
+                            }
+                        }
+                    }
+                }
+            }
 
             void* q_status;
             while (q_status= queueb_pop_blocking(&action_q), q_status) {
