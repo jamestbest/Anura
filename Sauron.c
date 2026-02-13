@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "Saruman/FrameInfo.h"
+
 static void print_program_header(Elf64_Phdr* header);
 
 bool verify_special(const uint8_t* start) {
@@ -383,6 +385,7 @@ int decode(FILE* elf) {
     void* dl_data= NULL;
     void* str_data= NULL;
     void* text_data= NULL;
+    void* eh_frame_data= NULL;
     uint64_t text_off= 0;
 
     for (int i = 0; i < header.e_shnum; ++i) {
@@ -422,9 +425,20 @@ int decode(FILE* elf) {
                 continue;
             }
 
+            if (strcmp(&sstring_table[section.sh_name], ".eh_frame") == 0) {
+                eh_frame_data= prog_data;
+                continue;
+            }
+
             free(prog_data);
         }
     }
+
+    frame_info_init();
+    uint8_t* frame_parsing= eh_frame_data;
+    read_header((uint8_t**)&frame_parsing, eh_frame_data);
+    // read_header((uint8_t**)&frame_parsing, eh_frame_data);
+    // read_header((uint8_t**)&frame_parsing, eh_frame_data);
 
     decode_lines(dl_data, str_data, text_data, text_off);
 
