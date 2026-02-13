@@ -33,11 +33,12 @@ extern const LC LC_ERR;
 extern const ARange ARange_ERR;
 
 // OLD OLD DEPRICATED DON@T USE
-LC addr2line(uintptr_t addr);
+// LC addr2line(uintptr_t addr);
 ARange line2addr(uint32_t line);
 
 // THESE USE THE HEADER
 LineAddrRes line2startaddr(uint32_t l);
+AddrLineRes addr2line(uintptr_t addr);
 
 typedef struct LNData {
     uint16_t start_offset;

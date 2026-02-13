@@ -6,12 +6,15 @@
 
 #include "../Sauron.h"
 #include "DWARFParsing.h"
+#include "shared/Array.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "Helper_String.h"
 
 const LC LC_ERR= {-1, -1};
 const ARange ARange_ERR= {-1, -1};
@@ -31,6 +34,18 @@ static bool epilogue_begin;
 
 static uint32_t isa;
 static uint32_t discrim;
+
+typedef struct LineRange {
+    uintptr_t start_inclusive;
+    uintptr_t end_exclusive;
+    uint64_t line;
+} LineRange;
+ARRAY_PROTO(LineRange, LineRange)
+ARRAY_ADD(LineRange, LineRange)
+
+LineRangeArray line_ranges;
+
+static void print_line_range(LineRange* lr);
 
 // EXTENDED OPCODES
 typedef enum DW_LNE {
@@ -97,7 +112,6 @@ const char* DW_LNS_STRS[]= {
 };
 
 #include "../Target.h"
-#include "Array.h"
 
 ARRAY_PROTO(uint8_t, ubyte)
 ARRAY_ADD(uint8_t, ubyte)
@@ -405,6 +419,13 @@ static int read_header(uint8_t* start, char* string_data) {
         if (addr_r.s != -1) peek_text_at_addr(addr_r.s, addr_r.e - addr_r.s);
     }
 
+    printf("CONVERSIONS: \n");
+    for (uintptr_t i = 0X145E; i < 0X14C6; ++i) {
+        const AddrLineRes res= addr2line(i);
+        if (!res.succ) printf("Failed to convert %#lX to line\n", i);
+        else printf("Addr %#lX is line %lu\n", i, res.line);
+    }
+
     if (info.version < 5) {
         return 0;
     }
@@ -512,27 +533,27 @@ ARange line2addr(uint32_t line) {
 //  so finding the value of an address needs only
 //  to find the first value greater than and then step back
 //  once. If this is the start then there is no
-LC addr2line(uintptr_t addr) {
-    for (int i= 0; i < matrix.pos; ++i) {
-        FrameRow* row= MRow_arr_ptr(&matrix, i);
-
-        if (addr == row->pc) return (LC) {
-            .line= row->line,
-            .col= row->col
-        };
-
-        if (addr < row->pc) {
-            if (i == 0) return LC_ERR;
-            FrameRow* prev= MRow_arr_ptr(&matrix, i - 1);
-            return (LC) {
-                .line= prev->line,
-                .col= prev->col
-            };
-        }
-    }
-
-    return LC_ERR;
-}
+// LC addr2line(uintptr_t addr) {
+//     for (int i= 0; i < matrix.pos; ++i) {
+//         FrameRow* row= MRow_arr_ptr(&matrix, i);
+//
+//         if (addr == row->pc) return (LC) {
+//             .line= row->line,
+//             .col= row->col
+//         };
+//
+//         if (addr < row->pc) {
+//             if (i == 0) return LC_ERR;
+//             FrameRow* prev= MRow_arr_ptr(&matrix, i - 1);
+//             return (LC) {
+//                 .line= prev->line,
+//                 .col= prev->col
+//             };
+//         }
+//     }
+//
+//     return LC_ERR;
+// }
 
 void on_new_row_header();
 LNInfo LN_info;
@@ -554,6 +575,8 @@ void create_header() {
     LN_info.entries= malloc(sizeof (uint16_t) * 3 * ASSUMED_LINE_COUNT);
     LN_info.next_free= (uint8_t *)LN_info.entries;
     LN_info.last_entry= 0;
+
+    line_ranges= LineRange_arr_create();
 
     // [[todo]] could store the free parts of what is essentially a heap
     //  and fill them first. It is unlikely that there will be lots of gaps I'd wager
@@ -612,6 +635,42 @@ LineAddrRes line2startaddr(uint32_t l) {
     };
 }
 
+LineRange* furthest_range_containing_addr(uintptr_t addr) {
+    size_t low= 0;
+    size_t high= line_ranges.pos;
+
+    while (low < high) {
+        const size_t mid= low + (high - low) / 2;
+
+        if (LineRange_arr_ptr(&line_ranges, mid)->start_inclusive <= addr) {
+            low= mid + 1;
+        } else {
+            high= mid;
+        }
+    }
+
+    if (low == 0) return NULL;
+
+    LineRange* res= LineRange_arr_ptr(&line_ranges, low - 1);
+    if (addr < res->end_exclusive) return res;
+
+    return NULL;
+}
+
+AddrLineRes addr2line(uintptr_t addr) {
+    printf("Attempting to find line for addr %lX\n", addr);
+    const LineRange* res= furthest_range_containing_addr(addr);
+
+    if (res == NULL) {
+        return (AddrLineRes) {.succ= false};
+    }
+
+    return (AddrLineRes) {
+        .succ= true,
+        .line= res->line
+    };
+}
+
 void on_new_row_header() {
     add_new_row_to_matrix(); // [[todo]] TEMP!
 
@@ -620,6 +679,27 @@ void on_new_row_header() {
     //  if they are we can just update the last data in the entry
     //  if they are not then we either add a new entry, or a new data entry
     if (row.line > LN_info.header.max_line) assert(false);
+
+    bool add_new= true;
+    if (line_ranges.pos != 0) {
+        LineRange* prev= LineRange_arr_peek(&line_ranges);
+        prev->end_exclusive= row.pc;
+
+        if (prev->line == row.line) add_new= false;
+        else {
+            print_line_range(prev);
+            newline();
+        }
+    }
+
+    if (add_new) {
+        const LineRange lr= (LineRange) {
+            .line= row.line,
+            .start_inclusive= row.pc,
+            .end_exclusive= -1
+        };
+        LineRange_arr_add(&line_ranges, lr);
+    }
 
     if (last_row.line != 0) {
         if (last_row.line == row.line) {
@@ -721,4 +801,8 @@ void on_new_row_header() {
 
         LN_info.next_free+= sizeof(LNEntry) + sizeof(LNData) * 1;
     }
+}
+
+void print_line_range(LineRange* lr) {
+    printf("Line range: [%#lX, %#lX): %lu", lr->start_inclusive, lr->end_exclusive, lr->line);
 }
