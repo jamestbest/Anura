@@ -108,6 +108,7 @@ int tui_loop() {
                     NO_DATA
                 )
             );
+            target.target_interrupt();
             break;
         } else if (strncmp(buff, "into", sizeof("into") - 1) == 0) {
             printf("Stepping into\n");
