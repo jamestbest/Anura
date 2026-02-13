@@ -22,7 +22,7 @@ _Static_assert(SW_INT_TYPE SW_INT_CODE == SW_INT_CODE);
 _Static_assert(sizeof SW_INT_TYPE == sizeof ((BPInfo){0}.data.shadow), "The shadow element should encapsulate all data lost from the Software interrupt code");
 
 long long place_bp(void* address, uint32_t line) {
-    long long r7= ptrace(PTRACE_PEEKUSER, t_pid, offsetof(struct user, u_debugreg[7]));
+    long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
 
     bool bp_used[4]= {0};
     unsigned int free_bp= -1;
@@ -40,7 +40,7 @@ long long place_bp(void* address, uint32_t line) {
         unsigned int offset= address - a_addr;
 
         errno= 0;
-        long long data= ptrace(PTRACE_PEEKDATA, t_pid, a_addr, a_addr);
+        long long data= ptrace(PTRACE_PEEKDATA, target.pid, a_addr, a_addr);
 
         if (data == -1 && errno) {
             return errno;
@@ -50,7 +50,7 @@ long long place_bp(void* address, uint32_t line) {
         char shadow= ((data >> offset) & 0xFFUL);
         data= ((long long)SW_INT_CODE << offset) | (data & ~(0xFFL << offset));
 
-        long long res= ptrace(PTRACE_POKETEXT, t_pid, a_addr, data);
+        long long res= ptrace(PTRACE_POKETEXT, target.pid, a_addr, data);
         if (res == -1) return errno;
 
         BPAddressInfo* addr_info= get_or_add_bp_address_info(address);
@@ -69,10 +69,10 @@ long long place_bp(void* address, uint32_t line) {
     r7 &= (~(0b11 << (18 + (free_bp << 2)))); // set LENx to 00 FOLLOWING R/W0 being 00 (Vol. 3B 19-5)
 
     long long res= 0;
-    res= ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[7]), r7);
+    res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[7]), r7);
     if (res != 0) return res;
 
-    res= ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[free_bp]), (long long)address);
+    res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[free_bp]), (long long)address);
 
     BPAddressInfo* addr_info= get_or_add_bp_address_info(address);
     BPInfo_arr_add(&addr_info->bps, (BPInfo) {
@@ -88,11 +88,11 @@ long long place_bp(void* address, uint32_t line) {
 void breakpoint_hit_cleanup() {
     // clear R6 for the next
     long long r6= 1 << 16 | 1 << 11; // Enable RTM & BLD (19-4 Vol. 3B)
-    ptrace(PTRACE_POKEUSER, t_pid, offsetof(struct user, u_debugreg[6]), r6);
+    ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[6]), r6);
 }
 
 void interrupt() {
-    kill(t_pid, SIGINT);
+    kill(target.pid, SIGINT);
 }
 
 void interrupt_handler(int sig) {
@@ -106,6 +106,28 @@ void interrupt_handler_setup() {
     signal(SIGINT, interrupt_handler);
 }
 
+struct user_regs_struct get_regs(bool* succ) {
+    struct user_regs_struct regs;
+
+    const long res= ptrace(PTRACE_GETREGS, target.pid, NULL, &regs);
+    if (res) *succ=false;
+
+    *succ= true;
+    return regs;
+}
+
+uintptr_t get_pc() {
+    bool succ;
+    const struct user_regs_struct regs= get_regs(&succ);
+
+    if (succ) return regs.rip;
+    return -1;
+}
+
+long cf_continue() {
+    return ptrace(PTRACE_CONT, target.pid, 0, 0);
+}
+
 int linux_x64_init_target(Target* t) {
     linux_init_target(t);
 
@@ -113,6 +135,8 @@ int linux_x64_init_target(Target* t) {
     t->target_breakpoint_hit_cleanup= breakpoint_hit_cleanup;
     t->target_interrupt= interrupt;
     t->target_interrupt_handler_setup= interrupt_handler_setup;
+    t->target_cf_continue= cf_continue;
+    t->target_get_pc= get_pc;
 
     return 0;
 }
