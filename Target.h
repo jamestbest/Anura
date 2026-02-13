@@ -15,6 +15,11 @@ typedef struct LineAddrRes {
     void* addr;
 } LineAddrRes;
 
+typedef struct AddrLineRes {
+    bool succ;
+    uint64_t line;
+} AddrLineRes;
+
 typedef struct Target {
     PROCESS_ID pid;
 
@@ -35,6 +40,11 @@ typedef struct Target {
 
     void (*target_interrupt)();
     void (*target_interrupt_handler_setup)();
+
+    uintptr_t (*target_get_pc)();
+    long (*target_cf_continue)();
+
+    void* (*target_addr_runtime_to_virtual)(void* r_addr);
 } Target;
 
 typedef enum TARGETS {
