@@ -35,6 +35,11 @@ void t3() {
     t2();
 }
 
+void tt(int a) {
+    tlog("Wow %d\n", a);
+    t2();
+}
+
 void t4() {
     tlog("I am in T4\n");
     t3();
@@ -42,9 +47,13 @@ void t4() {
 }
 
 void t5() {
+    int a=2;
+    int b=3;
+
     tlog("I am in T5\n");
     t4();
     t3();
+    tt(1 + b * a << 1);
     t2();
 }
 
