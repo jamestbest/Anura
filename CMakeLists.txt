@@ -42,6 +42,8 @@ add_executable(Anura main.c shared/Array.c
         Saruman/DWARFParsing.h
         Saruman/FrameInfoInternal.h
         Saruman/eh_header.h
+        DWARF/Balin.c
+        DWARF/Balin.h
 
 )
 
