@@ -258,8 +258,11 @@ Action* create_action(ACTION_TYPE type, ACTION_DATA data) {
 
     return action;
 }
-
+// talking about step over
+// talking about things that arent' supported but there is information that could be in place by the compiler
+// break point on an if that is
 int main(int argc, char* argv[]) {
+
 //    disassemble_to_str(NULL);
     if (argc <= 1) {
         perror("Usage; expected at least one argument for the program path\n");
