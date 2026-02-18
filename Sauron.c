@@ -385,6 +385,7 @@ int decode(FILE* elf) {
     void* dl_data= NULL;
     void* str_data= NULL;
     void* text_data= NULL;
+    void* abbrev_data= NULL;
     void* eh_frame_data= NULL;
     uint64_t text_off= 0;
 
@@ -427,6 +428,11 @@ int decode(FILE* elf) {
 
             if (strcmp(&sstring_table[section.sh_name], ".eh_frame") == 0) {
                 eh_frame_data= prog_data;
+                continue;
+            }
+
+            if (strcmp(&sstring_table[section.sh_name], ".debug_abbrev") == 0) {
+                abbrev_data= prog_data;
                 continue;
             }
 
