@@ -27,11 +27,19 @@ typedef enum ACTION_HANDLE_RES {
 
 typedef enum CONTROL_STATE {
     STATE_NORMAL,
-    STATE_STEP_INTO // we handle SIG TRAPS and send single step until
+    STATE_STEP_INTO, // we handle SIG TRAPS and send single step until
+    STATE_STEP_OVER,
 } CONTROL_STATE;
 
 CONTROL_STATE state= STATE_NORMAL;
 uint64_t step_into_line= 0;
+
+typedef struct StepOverInfo {
+    uint64_t line;
+    uint64_t cfa_value;
+    uintptr_t ip_value;
+} StepOverInfo;
+StepOverInfo step_over_info;
 
 ACTION_HANDLE_RES handle_cf_single_step() {
     const long long res= target.target_single_step_assembly();
@@ -51,6 +59,62 @@ ACTION_HANDLE_RES handle_cf_continue() {
     else printf("Continued process\n");
 
     return ACTION_HANDLE_PROC_WAIT;
+}
+
+ACTION_HANDLE_RES handle_step_over() {
+    /*  There is quite a lot to stepping over a line
+     *   the basic idea is that we want to stop when we're on a new line of this function
+     *   but it must be the same instance (i.e. on the same rbp (*))
+     *   we might also leave to the caller (in which case we stop immediately)
+     *   we might leave to another called function (in which case we want to skip all this)
+     *   we might be in a tail call optimisation
+     */
+
+    // we have just executed a single step trap
+
+    const uintptr_t c_ip= target.target_get_pc();
+    const uint64_t c_cfa= target.target_get_cfa();
+
+    const uintptr_t c_vaddr= target.target_addr_runtime_to_virtual(c_ip);
+    const AddrLineRes line= addr2line(c_vaddr);
+
+    if (!line.succ) {
+        printf("Unable to get line information for ip address %#lx\n", c_ip);
+        return ACTION_HANDLE_CONTINUE;
+    }
+
+    const bool on_same_line= line.line == step_over_info.line;
+    const bool in_same_function_instance= c_cfa == step_over_info.cfa_value;
+
+    if (on_same_line && in_same_function_instance) {
+        // here we're still on the same line
+        return handle_cf_single_step();
+    }
+    if (!on_same_line && in_same_function_instance) {
+        // this is the easy condition for step-over because we've reached a new line in the same instance of a function
+        //  so just inform the gui that we've stopped wait
+        // todo inform gui
+        printf("Reached newline from step over, original line: %lu, new line %lu\n", step_over_info.line, line.line);
+        return ACTION_HANDLE_CONTINUE;
+    }
+
+    if (!in_same_function_instance) {
+        // here there are some choices
+        // the simple one is that we've called another function and so the stack has grown
+        if (c_cfa < step_over_info.cfa_value) {
+            uintptr_t return_address= target.target_get_return_addr();
+            target.target_place_temp_bp(return_address, BP_REASON_STEP_OVER);
+            return ACTION_HANDLE_PROC_WAIT;
+        }
+        if (c_cfa >= step_over_info.cfa_value) {
+            // here there are two options
+            //  either this is from a return (in which case we just stop)
+            //  or it's from a tail call optimisation and we're in the next call, unfortunately we must also stop here
+            //   as this may also be a tail call
+            printf("Reached caller from step over\n");
+            return ACTION_HANDLE_CONTINUE;
+        }
+    }
 }
 
 ACTION_HANDLE_RES handle_step_into_step() {
@@ -96,6 +160,17 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             return ACTION_HANDLE_CONTINUE;
         }
 
+        case ACTION_BP_REMOVE: {
+            printf("Removing breakpoint\n");
+            uint32_t line= action->data.BP_REMOVE.line;
+
+            long long res= target.target_remove_bp_at_line(line);
+            if (res) printf("Failed to place bp at %d with errno %lld of %s\n", line, res, strerror(res));
+            else printf("Removed bp at line %d\n", line);
+
+            return ACTION_HANDLE_CONTINUE;
+        }
+
         case ACTION_CF_SINGLE_STEP: {
             bool assembly_level= action->data.CF_SINGLE_STEP.assembly_level;
             printf("Control got single step at %s level\n", assembly_level ? "assembly" : "line");
@@ -118,6 +193,24 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             }
             step_into_line= line.line;
             state= STATE_STEP_INTO;
+            target.target_single_step_assembly();
+
+            return ACTION_HANDLE_PROC_WAIT;
+        }
+        case ACTION_CF_STEP_OVER: {
+            const uintptr_t c_addr= target.target_get_pc();
+            const uintptr_t v_addr= (uintptr_t)target.target_addr_runtime_to_virtual((void*)c_addr);
+            printf("Current addr: %#lX\n", c_addr);
+            printf("Current virtual addr: %#lX\n", v_addr);
+            const AddrLineRes line= addr2line(v_addr);
+            if (!line.succ) {
+                perror("Unable to find line associated with current program counter to step over");
+                return ACTION_HANDLE_PROC_WAIT;
+            }
+            step_over_info.line= line.line;
+            step_over_info.ip_value= v_addr;
+            step_over_info.cfa_value= target.target_get_cfa();
+            state= STATE_STEP_OVER;
             target.target_single_step_assembly();
 
             return ACTION_HANDLE_PROC_WAIT;
@@ -208,16 +301,16 @@ end_q_stat_loop1:;
             rip--;
         }
 
-        BPAddressInfo* bp= BPAddressInfo_arr_search_ie(&bp_info, (void*)rip);
-        if (!bp || bp->bps.pos == 0) {
+        const BPAddressInfo* bp= BPAddressInfo_arr_search_ie(&bp_info, (void*)rip);
+        if (!bp || bp->user_bp_count == 0) {
             hlog("The tracee stopped via a non breakpoint event with rip= %p\n", (void*)rip);
-        } else if (bp->bps.pos == 1) {
-            BPInfo* info= BPInfo_arr_ptr(&bp->bps, 0);
-            hlog("The tracee stopped via %s breakpoint at %p which is in line %u\n", BP_TYPE_STRS[info->type], rip, info->line);
         } else {
-            hlog("The tracee stopped via an address with multiple breakpoints created at lines");
-            for (int i= 0; i < bp->bps.pos; ++i) printf(" %u%c", BPInfo_arr_ptr(&bp->bps, i)->line, i == bp->bps.pos - 1 ? ' ' : ',');
-            printf("\n");
+            hlog("The tracee stopped via %s breakpoint at %p which is in line %u, there are %u breakpoints at this location\n",
+                BP_TYPE_STRS[bp->canonical_bp.type],
+                rip,
+                bp->canonical_bp.line,
+                bp->user_bp_count
+            );
         }
 
         target.target_breakpoint_hit_cleanup();
@@ -231,15 +324,33 @@ end_q_stat_loop1:;
                 ptrace(PTRACE_GETSIGINFO, target.pid, 0, &siginfo);
                 switch (siginfo.si_code) {
                     case TRAP_TRACE: {
-                        if (state == STATE_STEP_INTO) {
-                            ACTION_HANDLE_RES res= handle_step_into_step();
-                            switch (res) {
-                                case ACTION_HANDLE_PROC_WAIT:
-                                    goto end_q_stat_loop;
-                                case ACTION_HANDLE_CONTINUE:
-                                    break;
+                        switch (state) {
+                            case STATE_STEP_INTO: {
+                                ACTION_HANDLE_RES res= handle_step_into_step();
+                                switch (res) {
+                                    case ACTION_HANDLE_PROC_WAIT:
+                                        goto end_q_stat_loop;
+                                    case ACTION_HANDLE_CONTINUE:
+                                        break;
+                                }
+                                break;
+                            }
+                            case STATE_STEP_OVER: {
+                                const ACTION_HANDLE_RES res= handle_step_over();
+                                switch (res) {
+                                    case ACTION_HANDLE_PROC_WAIT:
+                                        goto end_q_stat_loop;
+                                    case ACTION_HANDLE_CONTINUE:
+                                        break;
+                                }
+                                break;
+                            }
+                            case STATE_NORMAL: {
+                                printf("Recieved trap in normal state\n");
+                                break;
                             }
                         }
+
                     }
                 }
             }

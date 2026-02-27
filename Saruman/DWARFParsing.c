@@ -43,8 +43,8 @@ PointerEncoding raa_pointer_encoding(uint8_t** start) {
 
     *start += 1;
 
-    PEValueFormat vf= combined & 0x0f;
-    PEApplication ap= combined & 0xf0;
+    const PEValueFormat vf= combined & 0x0f;
+    const PEApplication ap= combined & 0xf0;
 
     return (PointerEncoding) {
         .value= vf,
@@ -52,17 +52,27 @@ PointerEncoding raa_pointer_encoding(uint8_t** start) {
     };
 }
 
-Pointer raa_pointer_value_from_PE(uint8_t** start, PointerEncoding pe) {
+bool pointer_is_omit(const PointerEncoding pe) {
+    return pe.value == DW_EH_PE_V_omit && pe.application == DW_EH_PE_A_omit;
+}
+
+Pointer raa_pointer_value_without_app(uint8_t** start, const PointerEncoding pe) {
     Pointer res= (Pointer) {
         .application= pe.application,
         .signed_ptr= false,
-        .ptr_u= 0x0
+        .ptr_u= 0x0,
+        .omitted= false
     };;
+
+    if (pe.value == DW_EH_PE_V_omit && pe.application == DW_EH_PE_A_omit) {
+        res.omitted= true;
+        return res;
+    }
 
     switch (pe.value) {
         case DW_EH_PE_absptr: {
             // the size is from the architecture
-            uint8_t class= ELF.header.e_ident[EI_CLASS];
+            const uint8_t class= ELF.header.e_ident[EI_CLASS];
             uint8_t pointer_size;
             switch (class) {
                 case ELFCLASS32: pointer_size= 4; break;
@@ -106,6 +116,40 @@ Pointer raa_pointer_value_from_PE(uint8_t** start, PointerEncoding pe) {
             break;
     }
 
+    if (res.signed_ptr) res.value= res.ptr_s;
+    else res.value= res.ptr_u;
+
+    return res;
+}
+
+Pointer raa_pointer_value_from_PE(uint8_t** start, const PointerEncoding pe, const Section* section, const Section* data_section, uintptr_t virtual_func_start) {
+    uint8_t* base= *start;
+    Pointer res= raa_pointer_value_without_app(start, pe);
+
+    switch (pe.application) {
+        case DW_EH_PE_pcrel: {
+            res.value= section->header->sh_addr + (base - section->data);
+            break;
+        }
+        case DW_EH_PE_textrel: {
+            res.value= ELF.section_map.text.header->sh_addr;
+            break;
+        }
+        case DW_EH_PE_datarel: {
+            res.value= data_section->header->sh_addr;
+            break;
+        }
+        case DW_EH_PE_funcrel: {
+            if (!virtual_func_start) assert(false);
+            res.value= virtual_func_start;
+        }
+            break;
+        case DW_EH_PE_aligned: assert(false);
+    }
+
+    if (res.signed_ptr) res.value += res.ptr_s;
+    else res.value += res.ptr_u;
+
     return res;
 }
 
@@ -127,6 +171,31 @@ uint8_t* read_initial_length(uint8_t* start, uint64_t* length, MODE* mode) {
     *length= l64;
 
     return start;
+}
+
+uint64_t raa_initial_length(uint8_t** start, MODE* mode) {
+    const uint32_t l32= raa_uint(start, 4);
+    uint64_t l64;
+
+    if (l32 == 0xFFFFFFFF) {
+        *mode= MODE_64bit;
+        l64= raa_uint(start, 8);
+    } else {
+        *mode= MODE_32bit;
+        l64= l32;
+    }
+
+    return l64;
+}
+
+uint64_t raa_offset_by_mode(uint8_t** start, const MODE mode) {
+    if (mode == MODE_32bit) {
+        return raa_uint(start, 4);
+    }
+    if (mode == MODE_64bit) {
+        return raa_uint(start, 8);
+    }
+    assert(false);
 }
 
 uint64_t decode_uleb128(uint8_t* start) {
@@ -196,21 +265,45 @@ LEB128 read_leb128(uint8_t* start) {
     };
 }
 
-DW_EXPR* raa_expr(uint8_t** start) {
-    ULEB128 length= raa_uleb128(start);
+DW_EXPR raa_expr(uint8_t** start) {
+    const ULEB128 length= raa_uleb128(start);
     //[[todo]]: actual expression parsing
-    *start += length.v;
 
-    return NULL;
+    uint8_t* base= *start;
+    *start+= length.v;
+
+    return (DW_EXPR) {
+        .length= length.v,
+        .data= base
+    };
 }
 
-DW_BLOCK* raa_block(uint8_t** start) {
-    ULEB128 length= raa_uleb128(start);
+DW_BLOCK raa_block(uint8_t** start) {
+    const ULEB128 length= raa_uleb128(start);
 
     // [[todo]] actual block parsing?
-    *start += length.v;
+    uint8_t* base= *start;
+    *start+= length.v;
 
-    return NULL;
+    return (DW_BLOCK) {
+        .length= length.v,
+        .data= base
+    };
+}
+
+DW_BLOCK raa_block_x(uint8_t** start, uint8_t size) {
+    const uint64_t length= raa_uint(start, size);
+
+    return (DW_BLOCK) {
+        .length= length,
+        .data= *start
+    };
+}
+
+void raa_const_array(uint8_t** start, uint8_t** dst, size_t length) {
+    for (size_t i = 0; i < length; i++) {
+        *dst[i]= raa_uint(start, 1);
+    }
 }
 
 uint8_t* raa_null_term_string(uint8_t** start) {
@@ -234,4 +327,31 @@ uint32_t raa_utf8(uint8_t** start) {
 
 void print_expression(DW_EXPR* expression) {
     printf("<<TODO>> expr <<TODO>>");
+}
+
+void print_pointer(const Pointer* pointer) {
+    switch (pointer->application) {
+        case DW_EH_PE_pcrel:
+            printf("[PC-rel]");
+            break;
+        case DW_EH_PE_textrel:
+            printf("[Text-rel]");
+            break;
+        case DW_EH_PE_datarel:
+            printf("[Data-rel]");
+            break;
+        case DW_EH_PE_funcrel:
+            printf("[Func-rel]");
+            break;
+        case DW_EH_PE_aligned:
+            printf("[Aligned]");
+            break;
+    }
+    if (pointer->signed_ptr) {
+        printf(" %ld (s)", pointer->ptr_s);
+    } else {
+        printf(" %lu", pointer->ptr_u);
+    }
+
+    printf(" V: %#lx", pointer->value);
 }

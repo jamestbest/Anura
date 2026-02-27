@@ -18,12 +18,21 @@
 
 #include "Errors.h"
 #include "Helper_String.h"
+#include "Sauron.h"
 
 static CIEOArray CIEs;
 static FDEArray FDEs;
 
 static void print_fde(const FDE_Entry* entry);
 static void print_cie(const CIE_Entry* entry);
+static void decode_and_execute_ops(uint8_t* base, uint64_t size, const CIE_Entry* cie);
+
+static int read_header(uint8_t** start, uint8_t* section_start);
+
+static void add_row(uint64_t address);
+static void create_matrix();
+
+static void print_matrix();
 
 CIE_Entry* get_cie_entry_from_offset(uint64_t offset) {
     CIEAndOffset* res= CIEO_arr_search_ie(&CIEs, offset);
@@ -40,11 +49,54 @@ void add_cie_entry(CIE_Entry* entry, uint64_t offset) {
 void frame_info_init() {
     CIEs= CIEO_arr_create();
     FDEs= FDE_arr_create();
+
+    create_matrix();
 }
 
 void frame_info_destroy() {
     CIEO_arr_destroy(&CIEs);
     FDE_arr_destroy(&FDEs);
+}
+
+typedef struct FrameInfoHdr {
+    uint8_t version;
+    PointerEncoding eh_frame_ptr_encoding;
+    PointerEncoding fde_count_encoding;
+    PointerEncoding table_encoding;
+
+    Pointer eh_frame_ptr;
+    Pointer fde_count;
+} FrameInfoHdr;
+FrameInfoHdr header;
+
+int parse_frame_info_hdr(Section* hdr) {
+    uint8_t* base= hdr->data;
+
+    header.version= raa_uint(&base, 1);
+    header.eh_frame_ptr_encoding= raa_pointer_encoding(&base);
+    header.fde_count_encoding= raa_pointer_encoding(&base);
+    header.table_encoding= raa_pointer_encoding(&base);
+
+    header.eh_frame_ptr= raa_pointer_value_from_PE(&base, header.eh_frame_ptr_encoding, hdr, hdr, 0);
+    header.fde_count= raa_pointer_value_from_PE(&base, header.fde_count_encoding, hdr, hdr, 0);
+
+    // todo the search table
+
+    return SUCCESS;
+}
+
+int parse_frame_info(Section* section, Section* hdr) {
+    parse_frame_info_hdr(hdr);
+
+    frame_info_init();
+
+    uint8_t* base= section->data;
+    while (base < section->data + section->header->sh_size) {
+        const int res= read_header(&base, section->data);
+        if (res != SUCCESS) return res;
+    }
+
+    return SUCCESS;
 }
 
 int read_header(uint8_t** start, uint8_t* section_start) {
@@ -53,6 +105,10 @@ int read_header(uint8_t** start, uint8_t* section_start) {
     uint8_t* base= *start;
 
     base= read_initial_length(base, &length, &mode);
+    if (length == 0) {
+        *start= base;
+        return SUCCESS;
+    }
     uint8_t* content_base= base;
     uint8_t* header_end= content_base + length;
 
@@ -83,7 +139,7 @@ int read_header(uint8_t** start, uint8_t* section_start) {
     if (is_cie) {
         CIE_Entry* cie= malloc(sizeof(CIE_Entry));
         *cie= (CIE_Entry) {.length= length, .offset_location= *start-section_start};
-        res= read_cie_entry(&base, mode, cie);
+        res= read_cie_entry(&base, mode, header_end, cie);
 
         if (res != SUCCESS) {
             free(cie);
@@ -96,7 +152,7 @@ int read_header(uint8_t** start, uint8_t* section_start) {
         CIE_Entry* cie= get_cie_entry_from_offset((uintptr_t)*start - fde_offset + 4);
         FDE_Entry* fde= FDE_arr_add_i(&FDEs);
         *fde= (FDE_Entry) {.length= length, .cie_entry= cie, .offset_location= (uint64_t)start};
-        res= read_fde_entry(*start, base, header_end, fde);
+        res= read_fde_entry(*start, base, header_end, section_start, fde);
 
         print_fde(fde);
     }
@@ -106,13 +162,13 @@ int read_header(uint8_t** start, uint8_t* section_start) {
     return res;
 }
 
-int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry) {
+// https://refspecs.linuxbase.org/LSB_3.1.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html
+int read_cie_entry(uint8_t** start, MODE mode, uint8_t* header_end, CIE_Entry* entry) {
     uint8_t* base= *start;
 
     RAA(entry->version);
 
     uint8_t* augmentation= raa_null_term_string(&base);
-    uint8_t* aug_data= base;
 
     entry->aug_data= (struct AugData) {
         .has_fde_L_pointer_encoding= false,
@@ -127,6 +183,8 @@ int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry) {
     entry->code_alignment_factor= raa_uleb128(&base).v;
     entry->data_alignment_factor= raa_leb128(&base).v;
     entry->return_address_register= raa_uleb128(&base).v;
+
+    uint8_t* aug_data= base;
 
     if (fchr == '\0') {
       entry->aug_data.type= AUG_DATA_NONE;
@@ -165,7 +223,13 @@ int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry) {
                     // there are TWO arguments in the CIE (this)
                     entry->aug_data.has_personality_routine_handler= true;
                     entry->aug_data.P_pointer_encoding= raa_pointer_encoding(&aug_data);
-                    entry->aug_data.P_personality_routine_handler= raa_pointer_value_from_PE(&aug_data, entry->aug_data.P_pointer_encoding);
+                    entry->aug_data.P_personality_routine_handler= raa_pointer_value_from_PE(
+                        &aug_data,
+                        entry->aug_data.P_pointer_encoding,
+                        &ELF.section_map.eh_frame,
+                        &ELF.section_map.data,
+                        0
+                    );
                     break;
                 }
                 case DW_AUG_OPTION_ADDRESS_POINTER_CHR: {
@@ -186,6 +250,7 @@ int read_cie_entry(uint8_t** start, MODE mode, CIE_Entry* entry) {
     // RAA(entry->segment_selector_size);
 
     entry->initial_instructions= base;
+    entry->instructions_size= header_end - base;
 
     return SUCCESS;
 }
@@ -194,6 +259,7 @@ int read_fde_entry(
     uint8_t* header_base,
     uint8_t* base,
     const uint8_t* end,
+    const uint8_t* section_start,
     FDE_Entry* entry
 ) {
     if (entry->cie_entry->segment_selector_size != 0) {
@@ -203,14 +269,20 @@ int read_fde_entry(
         entry->segment_selector= segment_selector;
     }
 
-    uint8_t addr_size= entry->cie_entry->address_size;
+    const PointerEncoding encoding= entry->cie_entry->aug_data.R_pointer_encoding;
 
-    entry->initial_location= raa_uint(&base, addr_size);
-    entry->address_range= raa_uint(&base, addr_size);
+    uint8_t* init_loc_base= base;
+    entry->initial_location= raa_pointer_value_from_PE(&base, encoding, &ELF.section_map.eh_frame, &ELF.section_map.eh_frame_hdr, 0);
+    entry->address_range= raa_pointer_value_without_app(&base, encoding);
 
-    while (base < end) {
-        Instruction instr= decode_op(&base, entry->cie_entry);
-    }
+    entry->instructions= base;
+    entry->instructions_size= end - base;
+
+    //init_loc_base - section_start + 0x000020d8 + -4088
+
+    // while (base < end) {
+    //     Instruction instr= decode_op(&base, entry->cie_entry);
+    // }
 
     return SUCCESS;
 }
@@ -224,7 +296,7 @@ uint64_t read_address(uint8_t** base_ptr, CIE_Entry* cie) {
 typedef union RRData {
     int64_t offset;
     uint8_t reg;
-    DW_EXPR* expr;
+    DW_EXPR expr;
 } RRData;
 
 typedef struct RegisterRule {
@@ -243,7 +315,7 @@ ARRAY_PROTO(RegisterData, RegisterData)
 ARRAY_ADD(RegisterData, RegisterData)
 
 typedef union CFAData {
-    DW_EXPR* expr;
+    DW_EXPR expr;
     struct {
         uint8_t register_id;
         int64_t offset;
@@ -255,7 +327,7 @@ typedef enum CFADataType {
     CFA_DT_REG_OFF
 } CFADataType;
 
-typedef union CFARule {
+typedef struct CFARule {
     CFADataType type;
     CFAData data;
 } CFARule;
@@ -269,11 +341,15 @@ typedef struct MRow {
 ARRAY_PROTO(FrameRow, FrameRow)
 ARRAY_ADD(FrameRow, FrameRow)
 
-static FrameRowArray matrix;
+typedef FrameRowArray Matrix;
+
+static Matrix matrix;
 static FrameRowArray row_stack;
 
 void create_matrix() {
+    if (matrix.arr) FrameRow_arr_destroy(&matrix);
     matrix= FrameRow_arr_create();
+    add_row(0);
     row_stack= FrameRow_arr_create();
 }
 
@@ -282,6 +358,23 @@ void add_row(uint64_t address) {
         .address= address,
         .register_rules= RegisterData_arr_create()
     };
+
+    FrameRow_arr_add(&matrix, row);
+}
+
+void add_row_copied(const uintptr_t address) {
+    FrameRow* prev= FrameRow_arr_peek(&matrix);
+    if (!prev) assert(false);
+
+    FrameRow row= (FrameRow) {
+        .address= address,
+        .register_rules= RegisterData_arr_construct(prev->register_rules.pos),
+        .cfa_rule= prev->cfa_rule
+    };
+
+    for (int i = 0; i < prev->register_rules.pos; ++i) {
+        RegisterData_arr_add(&row.register_rules, RegisterData_arr_get(&prev->register_rules, i));
+    }
 
     FrameRow_arr_add(&matrix, row);
 }
@@ -386,6 +479,8 @@ Instruction decode_op(uint8_t** start, const CIE_Entry* cie) {
         instr.opcode= (FI_OPCODE)(hi);
     }
 
+    *start += 1;
+
     switch (instr.opcode) {
         case DW_CFA_set_loc: {
             uint64_t addr= read_address(start, cie);
@@ -451,7 +546,7 @@ Instruction decode_op(uint8_t** start, const CIE_Entry* cie) {
         }
 
         case DW_CFA_def_cfa_expression: {
-            DW_EXPR* expr= raa_expr(start);
+            DW_EXPR expr= raa_expr(start);
 
             instr.data.d_expr= expr;
 
@@ -479,7 +574,7 @@ Instruction decode_op(uint8_t** start, const CIE_Entry* cie) {
             ULEB128 off= raa_uleb128(start);
 
             instr.data.register_id= reg;
-            instr.data.d_offset= off.v;
+            instr.data.d_offset= off.v * data_align;
 
             break;
         }
@@ -490,7 +585,7 @@ Instruction decode_op(uint8_t** start, const CIE_Entry* cie) {
             ULEB128 off= raa_uleb128(start);
 
             instr.data.register_id= reg.v;
-            instr.data.d_offset= off.v;
+            instr.data.d_offset= off.v * data_align;
 
             break;
         }
@@ -519,9 +614,7 @@ Instruction decode_op(uint8_t** start, const CIE_Entry* cie) {
         case DW_CFA_expression:
         case DW_CFA_val_expression:{
             ULEB128 reg= raa_uleb128(start);
-            DW_BLOCK* block= raa_block(start);
-            // DW_EXPR* expr= create_expr(DW_EXPR_PUSH, );
-            DW_EXPR* expr= block;
+            DW_EXPR expr= raa_expr(start);
 
             instr.data.register_id= reg.v;
             instr.data.d_expr= expr;
@@ -547,12 +640,14 @@ Instruction decode_op(uint8_t** start, const CIE_Entry* cie) {
         case DW_CFA_nop:
             break;
     }
+
+    return instr;
 }
 
 void execute_op(Instruction instr, const CIE_Entry* cie) {
     switch (instr.opcode) {
         case DW_CFA_set_loc: {
-            add_row(instr.data.d_addr);
+            add_row_copied(instr.data.d_addr);
             break;
         }
 
@@ -560,9 +655,9 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
         case DW_CFA_advance_loc1:
         case DW_CFA_advance_loc2:
         case DW_CFA_advance_loc4: {
-            FrameRow* c_row= FrameRow_arr_peek(&matrix);
-            uint64_t n_addr= instr.data.d_delta + c_row->address;
-            add_row(n_addr);
+            const FrameRow* c_row= FrameRow_arr_peek(&matrix);
+            const uint64_t n_addr= instr.data.d_delta + c_row->address;
+            add_row_copied(n_addr);
 
             break;
         }
@@ -713,10 +808,46 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
 }
 
 void decode_and_execute_op(uint8_t** start, const CIE_Entry* cie) {
-    Instruction instr= decode_op(start, cie);
+    const Instruction instr= decode_op(start, cie);
     execute_op(instr, cie);
 }
 
+void decode_and_execute_ops(uint8_t* base, uint64_t size, const CIE_Entry* cie) {
+    const uint8_t* end= base + size;
+    while (base < end) {
+        decode_and_execute_op(&base, cie);
+    }
+
+    return;
+}
+
+void create_matrix_of(const FDE_Entry* fde) {
+    create_matrix();
+
+    decode_and_execute_ops(fde->cie_entry->initial_instructions, fde->cie_entry->instructions_size, fde->cie_entry);
+    FrameRow* first= FrameRow_arr_ptr(&matrix, 0);
+    first->address= fde->initial_location.ptr_s;
+    decode_and_execute_ops(fde->instructions, fde->instructions_size, fde->cie_entry);
+}
+
+uint64_t cfa_value_at(uintptr_t pc) {
+    
+}
+
+FDE_Entry* get_fde_for_pc(const uintptr_t pc) {
+    if (!pointer_is_omit(header.table_encoding)) {
+        printf("Test\n");
+    }
+
+    for (int i = 0; i < FDEs.pos; ++i) {
+        FDE_Entry* fde= FDE_arr_ptr(&FDEs, i);
+        if (fde->initial_location.value <= pc && fde->initial_location.value + fde->address_range.value <= pc) {
+            return fde;
+        }
+    }
+
+    return NULL;
+}
 
 const char* instruction_op_str(FI_OPCODE op) {
     switch (op) {
@@ -773,7 +904,7 @@ void print_instruction(Instruction* instr, const FDE_Entry* fde) {
             break;
 
         case DW_CFA_def_cfa_register:
-            printf(": Set CFA Rule to Register %u + Offset; Keep old offset", instr->data.register_id);
+            printf(": Set CFA Rule to Register %u + Offset; Keep old offset", instr->data.d_register);
             break;
 
         case DW_CFA_def_cfa_offset:
@@ -783,7 +914,7 @@ void print_instruction(Instruction* instr, const FDE_Entry* fde) {
 
         case DW_CFA_def_cfa_expression:
             printf(": Set CFA to expression:  ");
-            print_expression(instr->data.d_expr);
+            print_expression(&instr->data.d_expr);
             break;
 
         case DW_CFA_undefined:
@@ -811,12 +942,12 @@ void print_instruction(Instruction* instr, const FDE_Entry* fde) {
 
         case DW_CFA_expression:
             printf(": Set Register %u to Expression: ", instr->data.register_id);
-            print_expression(instr->data.d_expr);
+            print_expression(&instr->data.d_expr);
             break;
 
         case DW_CFA_val_expression:
             printf(": Set Register %u to Value Expression: ", instr->data.register_id);
-            print_expression(instr->data.d_expr);
+            print_expression(&instr->data.d_expr);
             break;
 
         case DW_CFA_restore:
@@ -850,6 +981,7 @@ void print_instructions(const char* prefix, uint8_t* instructions, uint64_t inst
         Instruction instr= decode_op(&base, entry);
         putz(prefix);
         print_instruction(&instr, fde);
+        newline();
     }
 }
 
@@ -866,9 +998,16 @@ void print_fde(const FDE_Entry* entry) {
     if (entry->cie_entry && entry->cie_entry->segment_selector_size != 0) {
         printf("SS%lu:", entry->segment_selector);
     }
-    printf("[%lx-%lx]\n", entry->initial_location, entry->initial_location + entry->address_range);
+    printf("[");
+    print_pointer(&entry->initial_location);
+    printf(" range ");
+    print_pointer(&entry->address_range);
+    printf("]\n");
     printf(" - Instructions (%u bytes):\n", entry->instructions_size);
     print_instructions("      ", entry->instructions, entry->instructions_size, entry->cie_entry, entry);
+
+    create_matrix_of(entry);
+    print_matrix();
 }
 
 void print_cie(const CIE_Entry* entry) {
@@ -885,4 +1024,55 @@ void print_cie(const CIE_Entry* entry) {
     printf(" - Segment selector size: %u\n", entry->segment_selector_size);
     printf(" - Initial instructions (%u bytes):\n", entry->instructions_size);
     print_instructions("      ", entry->initial_instructions, entry->instructions_size, entry, NULL);
+}
+
+void print_cfa_rule(const CFARule* cfa) {
+    switch (cfa->type) {
+        case CFA_DT_EXPRESSION:
+            print_expression(&cfa->data.expr);
+            break;
+        case CFA_DT_REG_OFF:
+            printf("R%u + %ld", cfa->data.reg_off.register_id, cfa->data.reg_off.offset);
+            break;
+        default: assert(false);
+    }
+}
+
+void print_register_data(const RegisterData* data) {
+    printf("R%u= ", data->register_id);
+    switch (data->rule.op) {
+        case DW_CFA_undefined: printf("undefined"); break;
+        case DW_CFA_same_value: printf("same value"); break;
+        case DW_CFA_offset: printf("@(cfa + %ld)", data->rule.data.offset); break;
+        case DW_CFA_val_offset: printf("cfa + %ld (val)", data->rule.data.offset); break;
+        case DW_CFA_register: printf("R%u", data->rule.data.reg); break;
+        case DW_CFA_expression: {
+            // todo
+            printf("@(Expr)");
+            break;
+        }
+        case DW_CFA_val_expression: {
+            printf("Expr (val)");
+            break;
+        }
+        default: assert(false);
+    }
+}
+
+void print_matrix() {
+    for (int i = 0; i < matrix.pos; ++i) {
+        const FrameRow* row= FrameRow_arr_ptr(&matrix, i);
+        printf("@%#lX: ", row->address);
+        printf(" <CFA= ");
+        print_cfa_rule(&row->cfa_rule);
+        printf(">");
+
+        for (int j = 0; j < row->register_rules.pos; ++j) {
+            RegisterData* rule= RegisterData_arr_ptr(&row->register_rules, j);
+            printf(" <");
+            print_register_data(rule);
+            printf(">");
+        }
+        newline();
+    }
 }

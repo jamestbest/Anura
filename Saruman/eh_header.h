@@ -18,6 +18,7 @@ typedef enum PEValueFormat {
     DW_EH_PE_sdata2= 0x0A,      // 2 byte signed
     DW_EH_PE_sdata4= 0x0B,      // 4 byte signed
     DW_EH_PE_sdata8= 0x0C,      // 8 byte signed
+    DW_EH_PE_V_omit= 0x0F
 } PEValueFormat;
 
 typedef enum PEApplication {
@@ -26,6 +27,7 @@ typedef enum PEApplication {
     DW_EH_PE_datarel= 0x30,     // Value is relative to the start of the .got or .eh_frame_hdr section
     DW_EH_PE_funcrel= 0x40,     // Value is relative to the start of the function
     DW_EH_PE_aligned= 0x50,     // Value is aligned to an address unit sized boundary
+    DW_EH_PE_A_omit= 0xF0
 } PEApplication;
 
 typedef enum PESpecial {
@@ -40,10 +42,12 @@ typedef struct PointerEncoding {
 typedef struct Pointer {
     PEApplication application;
     bool signed_ptr;
+    bool omitted;
     union {
         uint64_t ptr_u;
         int64_t  ptr_s;
     };
+    uintptr_t value;
 } Pointer;
 
 #endif //EH_HEADER_H

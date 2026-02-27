@@ -8,10 +8,14 @@
 // They are encoded as 2 bits high
 //  6 bits low, to allow some operand data
 //  for some instructions
-#define FI_OP_ENCODING(hi, low) ((hi << 6) & 0b11000000) | (low & 0b00111111)
+#define FI_OP_ENCODING(hi, low) (((hi << 6) & 0b11000000) | (low & 0b00111111))
+
 #include "DWARFParsing.h"
 
 #include <stdint.h>
+#include <elf.h>
+
+#include "Sauron.h"
 
 typedef enum FI_OPCODE {
     DW_CFA_set_loc= FI_OP_ENCODING(0, 1),
@@ -53,7 +57,7 @@ typedef struct IData {
     union {
         int64_t d_offset;
         uint8_t d_register;
-        DW_EXPR* d_expr;
+        DW_EXPR d_expr;
         uint8_t d_delta;
         uint64_t d_addr;
     };
@@ -67,6 +71,61 @@ typedef struct Instruction {
 void frame_info_init();
 void frame_info_destroy();
 
-int read_header(uint8_t** start, uint8_t* section_start);
+typedef enum AugDataType {
+    AUG_DATA_NONE,
+    AUG_DATA_EH,
+    AUG_DATA_AUG
+} AugDataType;
+
+typedef struct CIE_Entry {
+    uint64_t offset_location;
+    uint64_t length;
+    uint8_t version;
+
+    struct AugData {
+        uint8_t* aug_string;
+        AugDataType type;
+
+        union {
+            uint64_t eh_data;
+            struct {
+                Pointer P_personality_routine_handler;
+
+                PointerEncoding L_pointer_encoding;
+                PointerEncoding P_pointer_encoding;
+                PointerEncoding R_pointer_encoding;
+
+                bool has_fde_L_pointer_encoding; // L in aug
+                bool has_personality_routine_handler; // P in aug
+                bool has_fde_address_pointer_encoding; // R in aug
+            };
+        };
+    } aug_data;
+
+    uint8_t address_size;
+    uint8_t segment_selector_size;
+    uint64_t code_alignment_factor;
+    int64_t data_alignment_factor;
+    uint64_t return_address_register;
+    uint8_t* initial_instructions;
+    uint32_t instructions_size;
+    uint8_t* padding;
+} CIE_Entry;
+
+typedef struct FDE_Entry {
+    uint64_t offset_location;
+    uint64_t length;
+    CIE_Entry* cie_entry;
+    uint64_t segment_selector;
+    Pointer initial_location;
+    Pointer address_range;
+    uint8_t* instructions;
+    uint32_t instructions_size;
+    uint8_t* padding;
+} FDE_Entry;
+
+int parse_frame_info(Section* section, Section* hdr);
+FDE_Entry* get_fde_for_pc(uintptr_t pc);
+void create_matrix_of(const FDE_Entry* fde);
 
 #endif //FRAMEINFO_H

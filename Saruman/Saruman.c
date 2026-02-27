@@ -439,7 +439,7 @@ static int read_header(uint8_t* start, char* string_data) {
         ULEB128 r= read_uleb128(base);
         base += r.size;
 
-        printf("Dir entries contain %s as a %s\n", DW_LNCT_STRS[l.v], DW_FORM_STRS[r.v]);
+        printf("Dir entries contain %s as a %s\n", DW_LNCT_STRS[l.v], form_strs(r.v));
     }
 
     ULEB128 dfc= read_uleb128(base);
@@ -477,21 +477,13 @@ void init() {
     isa= discrim= 0;
 }
 
-
-// int s_op(S_OP op) {
-//     basic_block= prologue_end= epilogue_begin= false;
-//     discrim= 0;
-//
-//     DW_LNS_advance_pc
-// }
-
-int decode_lines(uint8_t* start, void* string_data, void* t_data, uint64_t t_off) {
+int decode_lines() {
     init();
 
-    text_data= t_data;
-    text_off= t_off;
+    text_data= ELF.section_map.text.data;
+    text_off= ELF.section_map.text.header->sh_offset;
 
-    read_header(start, string_data);
+    read_header(ELF.section_map.debug_line.data, (char*)ELF.section_map.debug_line_str.data);
 
     return 0;
 }

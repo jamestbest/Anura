@@ -5,6 +5,10 @@
 #ifndef BALIN_H
 #define BALIN_H
 
+#include "shared/Array.h"
+#include "Saruman/DWARFParsing.h"
+#include "Sauron.h"
+
 typedef enum TAGS {
     DW_TAG_array_type= 0x01,
     DW_TAG_class_type= 0x02,
@@ -78,81 +82,7 @@ typedef enum TAGS {
     DW_TAG_hi_user= 0xffff,
 } DW_TAG;
 
-const char* tag_string(const DW_TAG tag) {
-    switch (tag) {
-        case DW_TAG_array_type: return "DW_TAG_array_type";
-        case DW_TAG_class_type: return "DW_TAG_class_type";
-        case DW_TAG_entry_point: return "DW_TAG_entry_point";
-        case DW_TAG_enumeration_type: return "DW_TAG_enumeration_type";
-        case DW_TAG_formal_parameter: return "DW_TAG_formal_parameter";
-        case DW_TAG_imported_declaration: return "DW_TAG_imported_declaration";
-        case DW_TAG_label: return "DW_TAG_label";
-        case DW_TAG_lexical_block: return "DW_TAG_lexical_block";
-        case DW_TAG_member: return "DW_TAG_member";
-        case DW_TAG_pointer_type: return "DW_TAG_pointer_type";
-        case DW_TAG_reference_type: return "DW_TAG_reference_type";
-        case DW_TAG_compile_unit: return "DW_TAG_compile_unit";
-        case DW_TAG_string_type: return "DW_TAG_string_type";
-        case DW_TAG_structure_type: return "DW_TAG_structure_type";
-        case DW_TAG_subroutine_type: return "DW_TAG_subroutine_type";
-        case DW_TAG_typedef: return "DW_TAG_typedef";
-        case DW_TAG_union_type: return "DW_TAG_union_type";
-        case DW_TAG_unspecified_parameters: return "DW_TAG_unspecified_parameters";
-        case DW_TAG_variant: return "DW_TAG_variant";
-        case DW_TAG_common_block: return "DW_TAG_common_block";
-        case DW_TAG_common_inclusion: return "DW_TAG_common_inclusion";
-        case DW_TAG_inheritance: return "DW_TAG_inheritance";
-        case DW_TAG_inlined_subroutine: return "DW_TAG_inlined_subroutine";
-        case DW_TAG_module: return "DW_TAG_module";
-        case DW_TAG_ptr_to_member_type: return "DW_TAG_ptr_to_member_type";
-        case DW_TAG_set_type: return "DW_TAG_set_type";
-        case DW_TAG_subrange_type: return "DW_TAG_subrange_type";
-        case DW_TAG_with_stmt: return "DW_TAG_with_stmt";
-        case DW_TAG_access_declaration: return "DW_TAG_access_declaration";
-        case DW_TAG_base_type: return "DW_TAG_base_type";
-        case DW_TAG_catch_block: return "DW_TAG_catch_block";
-        case DW_TAG_const_type: return "DW_TAG_const_type";
-        case DW_TAG_constant: return "DW_TAG_constant";
-        case DW_TAG_enumerator: return "DW_TAG_enumerator";
-        case DW_TAG_file_type: return "DW_TAG_file_type";
-        case DW_TAG_friend: return "DW_TAG_friend";
-        case DW_TAG_namelist: return "DW_TAG_namelist";
-        case DW_TAG_namelist_item: return "DW_TAG_namelist_item";
-        case DW_TAG_packed_type: return "DW_TAG_packed_type";
-        case DW_TAG_subprogram: return "DW_TAG_subprogram";
-        case DW_TAG_template_type_parameter: return "DW_TAG_template_type_parameter";
-        case DW_TAG_template_value_parameter: return "DW_TAG_template_value_parameter";
-        case DW_TAG_thrown_type: return "DW_TAG_thrown_type";
-        case DW_TAG_try_block: return "DW_TAG_try_block";
-        case DW_TAG_variant_part: return "DW_TAG_variant_part";
-        case DW_TAG_variable: return "DW_TAG_variable";
-        case DW_TAG_volatile_type: return "DW_TAG_volatile_type";
-        case DW_TAG_dwarf_procedure: return "DW_TAG_dwarf_procedure";
-        case DW_TAG_restrict_type: return "DW_TAG_restrict_type";
-        case DW_TAG_interface_type: return "DW_TAG_interface_type";
-        case DW_TAG_namespace: return "DW_TAG_namespace";
-        case DW_TAG_imported_module: return "DW_TAG_imported_module";
-        case DW_TAG_unspecified_type: return "DW_TAG_unspecified_type";
-        case DW_TAG_partial_unit: return "DW_TAG_partial_unit";
-        case DW_TAG_imported_unit: return "DW_TAG_imported_unit";
-        case DW_TAG_condition: return "DW_TAG_condition";
-        case DW_TAG_shared_type: return "DW_TAG_shared_type";
-        case DW_TAG_type_unit: return "DW_TAG_type_unit";
-        case DW_TAG_rvalue_reference_type: return "DW_TAG_rvalue_reference_type";
-        case DW_TAG_template_alias: return "DW_TAG_template_alias";
-        case DW_TAG_coarray_type: return "DW_TAG_coarray_type";
-        case DW_TAG_generic_subrange: return "DW_TAG_generic_subrange";
-        case DW_TAG_dynamic_type: return "DW_TAG_dynamic_type";
-        case DW_TAG_atomic_type: return "DW_TAG_atomic_type";
-        case DW_TAG_call_site: return "DW_TAG_call_site";
-        case DW_TAG_call_site_parameter: return "DW_TAG_call_site_parameter";
-        case DW_TAG_skeleton_unit: return "DW_TAG_skeleton_unit";
-        case DW_TAG_immutable_type: return "DW_TAG_immutable_type";
-        case DW_TAG_lo_user: return "DW_TAG_lo_user";
-        case DW_TAG_hi_user: return "DW_TAG_hi_user";
-        default: return "Unknown tag";
-    }
-}
+const char* tag_string(DW_TAG tag);
 
 typedef enum ATTRIBUTES {
     DW_AT_sibling= 0x01,
@@ -278,132 +208,97 @@ typedef enum ATTRIBUTES {
     DW_AT_hi_user= 0x3fff,
 } DW_AT;
 
-const char* attribute_str(const DW_AT attr) {
-    switch (attr) {
-        case DW_AT_sibling: return "DW_AT_sibling";
-        case DW_AT_location: return "DW_AT_location";
-        case DW_AT_name: return "DW_AT_name";
-        case DW_AT_ordering: return "DW_AT_ordering";
-        case DW_AT_byte_size: return "DW_AT_byte_size";
-        case DW_AT_bit_size: return "DW_AT_bit_size";
-        case DW_AT_stmt_list: return "DW_AT_stmt_list";
-        case DW_AT_low_pc: return "DW_AT_low_pc";
-        case DW_AT_high_pc: return "DW_AT_high_pc";
-        case DW_AT_language: return "DW_AT_language";
-        case DW_AT_discr: return "DW_AT_discr";
-        case DW_AT_discr_value: return "DW_AT_discr_value";
-        case DW_AT_visibility: return "DW_AT_visibility";
-        case DW_AT_import: return "DW_AT_import";
-        case DW_AT_string_length: return "DW_AT_string_length";
-        case DW_AT_common_reference: return "DW_AT_common_reference";
-        case DW_AT_comp_dir: return "DW_AT_comp_dir";
-        case DW_AT_const_value: return "DW_AT_const_value";
-        case DW_AT_containing_type: return "DW_AT_containing_type";
-        case DW_AT_default_value: return "DW_AT_default_value";
-        case DW_AT_inline: return "DW_AT_inline";
-        case DW_AT_is_optional: return "DW_AT_is_optional";
-        case DW_AT_lower_bound: return "DW_AT_lower_bound";
-        case DW_AT_producer: return "DW_AT_producer";
-        case DW_AT_prototyped: return "DW_AT_prototyped";
-        case DW_AT_return_addr: return "DW_AT_return_addr";
-        case DW_AT_start_scope: return "DW_AT_start_scope";
-        case DW_AT_bit_stride: return "DW_AT_bit_stride";
-        case DW_AT_upper_bound: return "DW_AT_upper_bound";
-        case DW_AT_abstract_origin: return "DW_AT_abstract_origin";
-        case DW_AT_accessibility: return "DW_AT_accessibility";
-        case DW_AT_address_class: return "DW_AT_address_class";
-        case DW_AT_artificial: return "DW_AT_artificial";
-        case DW_AT_base_types: return "DW_AT_base_types";
-        case DW_AT_calling_convention: return "DW_AT_calling_convention";
-        case DW_AT_count: return "DW_AT_count";
-        case DW_AT_data_member_location: return "DW_AT_data_member_location";
-        case DW_AT_decl_column: return "DW_AT_decl_column";
-        case DW_AT_decl_file: return "DW_AT_decl_file";
-        case DW_AT_decl_line: return "DW_AT_decl_line";
-        case DW_AT_declaration: return "DW_AT_declaration";
-        case DW_AT_discr_list: return "DW_AT_discr_list";
-        case DW_AT_encoding: return "DW_AT_encoding";
-        case DW_AT_external: return "DW_AT_external";
-        case DW_AT_frame_base: return "DW_AT_frame_base";
-        case DW_AT_friend: return "DW_AT_friend";
-        case DW_AT_identifier_case: return "DW_AT_identifier_case";
-        case DW_AT_namelist_item: return "DW_AT_namelist_item";
-        case DW_AT_priority: return "DW_AT_priority";
-        case DW_AT_segment: return "DW_AT_segment";
-        case DW_AT_specification: return "DW_AT_specification";
-        case DW_AT_static_link: return "DW_AT_static_link";
-        case DW_AT_type: return "DW_AT_type";
-        case DW_AT_use_location: return "DW_AT_use_location";
-        case DW_AT_variable_parameter: return "DW_AT_variable_parameter";
-        case DW_AT_virtuality: return "DW_AT_virtuality";
-        case DW_AT_vtable_elem_location: return "DW_AT_vtable_elem_location";
-        case DW_AT_allocated: return "DW_AT_allocated";
-        case DW_AT_associated: return "DW_AT_associated";
-        case DW_AT_data_location: return "DW_AT_data_location";
-        case DW_AT_byte_stride: return "DW_AT_byte_stride";
-        case DW_AT_entry_pc: return "DW_AT_entry_pc";
-        case DW_AT_use_UTF8: return "DW_AT_use_UTF8";
-        case DW_AT_extension: return "DW_AT_extension";
-        case DW_AT_ranges: return "DW_AT_ranges";
-        case DW_AT_trampoline: return "DW_AT_trampoline";
-        case DW_AT_call_column: return "DW_AT_call_column";
-        case DW_AT_call_file: return "DW_AT_call_file";
-        case DW_AT_call_line: return "DW_AT_call_line";
-        case DW_AT_description: return "DW_AT_description";
-        case DW_AT_binary_scale: return "DW_AT_binary_scale";
-        case DW_AT_decimal_scale: return "DW_AT_decimal_scale";
-        case DW_AT_small: return "DW_AT_small";
-        case DW_AT_decimal_sign: return "DW_AT_decimal_sign";
-        case DW_AT_digit_count: return "DW_AT_digit_count";
-        case DW_AT_picture_string: return "DW_AT_picture_string";
-        case DW_AT_mutable: return "DW_AT_mutable";
-        case DW_AT_threads_scaled: return "DW_AT_threads_scaled";
-        case DW_AT_explicit: return "DW_AT_explicit";
-        case DW_AT_object_pointer: return "DW_AT_object_pointer";
-        case DW_AT_endianity: return "DW_AT_endianity";
-        case DW_AT_elemental: return "DW_AT_elemental";
-        case DW_AT_pure: return "DW_AT_pure";
-        case DW_AT_recursive: return "DW_AT_recursive";
-        case DW_AT_signature: return "DW_AT_signature";
-        case DW_AT_main_subprogram: return "DW_AT_main_subprogram";
-        case DW_AT_data_bit_offset: return "DW_AT_data_bit_offset";
-        case DW_AT_const_expr: return "DW_AT_const_expr";
-        case DW_AT_enum_class: return "DW_AT_enum_class";
-        case DW_AT_linkage_name: return "DW_AT_linkage_name";
-        case DW_AT_string_length_bit_size: return "DW_AT_string_length_bit_size";
-        case DW_AT_string_length_byte_size: return "DW_AT_string_length_byte_size";
-        case DW_AT_rank: return "DW_AT_rank";
-        case DW_AT_str_offsets_base: return "DW_AT_str_offsets_base";
-        case DW_AT_addr_base: return "DW_AT_addr_base";
-        case DW_AT_rnglists_base: return "DW_AT_rnglists_base";
-        case DW_AT_dwo_name: return "DW_AT_dwo_name";
-        case DW_AT_reference: return "DW_AT_reference";
-        case DW_AT_rvalue_reference: return "DW_AT_rvalue_reference";
-        case DW_AT_macros: return "DW_AT_macros";
-        case DW_AT_call_all_calls: return "DW_AT_call_all_calls";
-        case DW_AT_call_all_source_calls: return "DW_AT_call_all_source_calls";
-        case DW_AT_call_all_tail_calls: return "DW_AT_call_all_tail_calls";
-        case DW_AT_call_return_pc: return "DW_AT_call_return_pc";
-        case DW_AT_call_value: return "DW_AT_call_value";
-        case DW_AT_call_origin: return "DW_AT_call_origin";
-        case DW_AT_call_parameter: return "DW_AT_call_parameter";
-        case DW_AT_call_pc: return "DW_AT_call_pc";
-        case DW_AT_call_tail_call: return "DW_AT_call_tail_call";
-        case DW_AT_call_target: return "DW_AT_call_target";
-        case DW_AT_call_target_clobbered: return "DW_AT_call_target_clobbered";
-        case DW_AT_call_data_location: return "DW_AT_call_data_location";
-        case DW_AT_call_data_value: return "DW_AT_call_data_value";
-        case DW_AT_noreturn: return "DW_AT_noreturn";
-        case DW_AT_alignment: return "DW_AT_alignment";
-        case DW_AT_export_symbols: return "DW_AT_export_symbols";
-        case DW_AT_deleted: return "DW_AT_deleted";
-        case DW_AT_defaulted: return "DW_AT_defaulted";
-        case DW_AT_loclists_base: return "DW_AT_loclists_base";
-        case DW_AT_lo_user: return "DW_AT_lo_user";
-        case DW_AT_hi_user: return "DW_AT_hi_user";
-        default: return "Unknown attribute";
-    }
-}
+const char* attribute_str(DW_AT attr);
 
+typedef struct AttributeData {
+    DW_AT attr;
+    DW_FORM form;
+    int64_t impl_const;
+} ATData;
+
+ARRAY_PROTO(ATData, ATData)
+
+typedef struct TagData {
+    size_t id;
+    DW_TAG tag;
+    bool has_children;
+    ATDataArray attributes;
+} TagData;
+
+ARRAY_PROTO(TagData, TagData)
+
+typedef struct Table {
+    TagDataArray abbrevs;
+    uint64_t offset;
+} Table;
+ARRAY_PROTO(Table, Table)
+
+void print_abbrev_tables(const TableArray* tables);
+int parse_abbrev(Section* section, TableArray* tables);
+int parse_info(Section* section, TableArray* abbrev_tables);
+
+typedef enum CU_TYPE {
+    DW_UT_compile= 0x01,
+    DW_UT_type= 0x02,
+    DW_UT_partial= 0x03,
+    DW_UT_skeleton= 0x04,
+    DW_UT_split_compile= 0x05,
+    DW_UT_split_type= 0x06,
+    DW_UT_lo_user= 0x80,
+    DW_UT_hi_user= 0xff,
+} CU_TYPE;
+
+const char* cu_type_str(CU_TYPE type);
+
+typedef struct CU_HEADER {
+    uint64_t length;
+    uint64_t abbrev_offset;
+    uint16_t version;
+    uint8_t address_size;
+    CU_TYPE type;
+    MODE mode;
+} CU_HEADER;
+
+typedef union DIE_DATA {
+    uintptr_t address; // DW_FORM_ADDR,
+    // these are indexes into debug_addr, with a base of DW_AT_addr_base in CU
+    uint64_t address_x; // indirect address DW_FORM_ADDRX/1/2/3/4
+    // uint64_t addrptr; // indirect address DW_FORM_sec_offset
+    DW_BLOCK block;
+    uint64_t constant_m64_u; // constant max 64 bits
+    int64_t constant_m64_s;
+    uint8_t constant_m128_u[16]; // constant max 128 bits
+    int8_t constant_m128_s[16];
+    DW_EXPR exprloc;
+    uint8_t flag;
+    uint64_t offset; // any form of DW_FORM_sec_offset
+    // uint64_t lineptr; // offset into debug_line
+    // uint64_t loclist; // offset into debug_loclists DW_FORM_loclistx/DW_FORM_sec_offset
+    // uint64_t macptr; // offset into debug_macro DW_FORM_sec_offset
+    // uint64_t rnglist; // offset into debug_rnglists DW_FORM_rnglistx/DW_FORM_sec_offset
+    uint64_t reference; // references to locations of debugging information, many forms p.235
+    uint64_t typesig; // Section 7.32 on page 245
+    const char* string; // DW_FORM_string
+    uint64_t strp; // string pointer DW_FORM_strp, DW_FORM_line_strp, DW_FORM_strp_sup
+    uint64_t strx; // offset into debug_str_offsets DW_FORM_strx/1/2/3/4
+    // uint64_t stroffsetsptr; // DW_FORM_sec_offset
+} DIE_DATA;
+
+ARRAY_PROTO(DIE_DATA, DIEDATA)
+
+typedef struct DIE_TYPE {
+    const Table* table;
+    size_t abbrev;
+} DIE_TYPE;
+
+typedef struct DIE {
+    DIE_TYPE type;
+    uint8_t nesting;
+    DIEDATAArray data;
+} DIE;
+
+ARRAY_PROTO(DIE, DIE)
+
+DIE_DATA raa_die_data(uint8_t** start, DW_FORM form, const CU_HEADER* cu);
 
 #endif //BALIN_H

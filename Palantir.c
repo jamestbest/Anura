@@ -50,6 +50,7 @@ int tui_setup() {
  */
 
 #define NO_DATA (ACTION_DATA){.NO_DATA= 0}
+#define MATCH_STR(str) (strncmp(buff, str, sizeof(str) - 1) == 0)
 
 int tui_loop() {
     while (true) {
@@ -60,7 +61,7 @@ int tui_loop() {
         if (!fgets(buff, sizeof(buff), stdin))
             break;
 
-        if (strncmp(buff, "set", sizeof("set") - 1) == 0) {
+        if (MATCH_STR("set")) {
             sscanf(buff, "set %d", &line);
             LineAddrRes res= line2startaddr(line);
             if (!res.succ) {
@@ -80,7 +81,7 @@ int tui_loop() {
                     }
                 )
             );
-        } else if (strncmp(buff, "cont", sizeof("cont") - 1) == 0) {
+        } else if (MATCH_STR("cont")) {
             printf("tui Continuing process\n");
             errno= 0;
             queueb_push_blocking(
@@ -90,7 +91,7 @@ int tui_loop() {
                     NO_DATA
                 )
             );
-        } else if (strncmp(buff, "astep", sizeof("astep") - 1) == 0) {
+        } else if (MATCH_STR("astep")) {
             printf("Assembly level single step\n");
             queueb_push_blocking(
                 &action_q,
@@ -99,7 +100,7 @@ int tui_loop() {
                     (ACTION_DATA){.CF_SINGLE_STEP= {.assembly_level= true}}
                 )
             );
-        } else if (strncmp(buff, "exit", sizeof("exit") - 1) == 0) {
+        } else if (MATCH_STR("exit")) {
             printf("Exiting process\n");
             queueb_push_blocking(
                 &action_q,
@@ -110,7 +111,7 @@ int tui_loop() {
             );
             target.target_interrupt();
             break;
-        } else if (strncmp(buff, "into", sizeof("into") - 1) == 0) {
+        } else if (MATCH_STR("into")) {
             printf("Stepping into\n");
             queueb_push_blocking(
                 &action_q,
@@ -119,7 +120,18 @@ int tui_loop() {
                     NO_DATA
                 )
             );
-        }else {
+        } else if (MATCH_STR("over")) {
+            printf("Stepping over\n");
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_CF_STEP_OVER,
+                    NO_DATA
+                )
+            );
+        } else if (MATCH_STR("list")) {
+            print_breakpoints();
+        } else {
             printf("Unable to match command `%s`\n", buff);
         }
     }

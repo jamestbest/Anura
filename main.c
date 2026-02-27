@@ -120,13 +120,17 @@ ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 
 BPAddressInfoArray bp_info;
 
-BPAddressInfo* get_or_add_bp_address_info(void* address) {
+BPAddressInfo* get_or_add_bp_address_info(void* address, BPInfo info_if_none) {
     BPAddressInfo* info= BPAddressInfo_arr_search_ie(&bp_info, address);
-    if (info) return info;
+    if (info) {
+        info->user_bp_count++;
+        return info;
+    }
 
     BPAddressInfo* addr_info= BPAddressInfo_arr_add_i(&bp_info);
     addr_info->address= address;
-    addr_info->bps= BPInfo_arr_construct(1);
+    addr_info->user_bp_count= 1;
+    addr_info->canonical_bp= info_if_none;
 
     return addr_info;
 }
@@ -201,27 +205,24 @@ void print_breakpoints() {
     for (int j = 0; j < bp_info.pos; ++j) {
         BPAddressInfo* addr_info= BPAddressInfo_arr_ptr(&bp_info, j);
 
-        printf("  - Addr: %p contains %zu breakpoint(s): \n", addr_info->address, addr_info->bps.pos);
+        printf("  - Addr: %p contains %zu breakpoint(s): \n", addr_info->address, addr_info->user_bp_count);
 
-        for (int k = 0; k < addr_info->bps.pos; ++k) {
-            BPInfo* bp= BPInfo_arr_ptr(&addr_info->bps, k);
+        const BPInfo* bp= &addr_info->canonical_bp;
 
-            printf("    + BP of Type %s with data ", BP_TYPE_STRS[bp->type]);
+        printf("    + Canonical BP of Type %s with data ", BP_TYPE_STRS[bp->type]);
 
-            switch (bp->type) {
-                case BP_HARDWARE:
-                    printf("BP No. %u", bp->data.bp);
-                    break;
-                case BP_SOFTWARE:
-                    printf("SHADOW 0x%x", bp->data.shadow);
-                    break;
-                case BP_SOURCE_SINGLE_STEP_TRAP:
-                    printf("No data");
-                    break;
-            }
-
-            printf("\n");
+        switch (bp->type) {
+            case BP_HARDWARE:
+                printf("BP No. %u", bp->data.bp);
+                break;
+            case BP_SOFTWARE:
+                printf("SHADOW 0x%x", bp->data.shadow);
+                break;
+            case BP_SOURCE_SINGLE_STEP_TRAP:
+                printf("No data");
+                break;
         }
+        printf(" on line %u\n", bp->line);
     }
 }
 

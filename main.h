@@ -46,8 +46,8 @@ ARRAY_PROTO(BPInfo, BPInfo)
 
 typedef struct BPAddressInfo {
     void* address;
-
-    BPInfoArray bps;
+    BPInfo canonical_bp;
+    uint64_t user_bp_count;
 } BPAddressInfo;
 
 int compare_bp_addr_info(void* bpa, void* bpb);
@@ -55,7 +55,7 @@ ARRAY_PROTO_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 
 extern BPAddressInfoArray bp_info;
 
-BPAddressInfo* get_or_add_bp_address_info(void* address);
+BPAddressInfo* get_or_add_bp_address_info(void* address, BPInfo info_if_none);
 
 typedef enum ACTION_GTYPE {
     ACTION_GTYPE_BREAK_POINT,
@@ -103,4 +103,5 @@ void vlog(bool is_t, const char* message, va_list args);
 void tlog(const char* message, ...);
 void hlog(const char* message, ...);
 int breakpoint_program(const char* program);
+void print_breakpoints();
 #endif //MAIN_H

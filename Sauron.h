@@ -11,6 +11,25 @@
 
 int decode(FILE* elf);
 
+typedef struct Section {
+    Elf64_Shdr* header;
+    uint8_t* data;
+} Section;
+
+typedef struct SectionMap {
+    Section text;
+    Section data;
+
+    Section debug_abbrev;
+    Section debug_info;
+    Section debug_str;
+    Section debug_line_str;
+    Section debug_str_offsets;
+    Section debug_line;
+    Section eh_frame;
+    Section eh_frame_hdr;
+} SectionMap;
+
 typedef struct ELF64 {
     Elf64_Ehdr header;
     struct ProgHeader {
@@ -25,6 +44,7 @@ typedef struct ELF64 {
     } ProgHeader;
 
     Elf64_Shdr* sections;
+    SectionMap section_map;
 
     struct {
         void* text;
@@ -83,7 +103,6 @@ typedef enum DW_FORM {
     DW_FORM_addrx4,
 } DW_FORM;
 
-extern const char* DW_FORM_STRS[];
-
+const char* form_strs(DW_FORM form);
 
 #endif //ANURA_SAURON_H

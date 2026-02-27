@@ -16,7 +16,7 @@ typedef struct DecodeRet {
     bool end_of_code;
 } DecodeRet;
 
-int decode_lines(uint8_t* start, void* string_data, void* text_data, uint64_t text_off);
+int decode_lines();
 
 typedef struct LC {
     uint32_t line;

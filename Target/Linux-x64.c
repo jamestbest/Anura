@@ -4,22 +4,68 @@
 
 #include "Linux-x64.h"
 
+#include <elf.h>
+
 #include "../main.h"
 #include "../TargetOS/Linux.h"
 
 #include <errno.h>
+#include <math.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/ptrace.h>
 #include <sys/user.h>
+#include <sys/uio.h>
+
+#include "Saruman/Saruman.h"
 
 #define SW_INT_TYPE (unsigned char)
 #define SW_INT_CODE 0xCC
 _Static_assert(SW_INT_TYPE SW_INT_CODE == SW_INT_CODE);
 
 _Static_assert(sizeof SW_INT_TYPE == sizeof ((BPInfo){0}.data.shadow), "The shadow element should encapsulate all data lost from the Software interrupt code");
+
+long long remove_hw_bp(uint8_t bp_register) {
+    long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
+
+    r7 &= 0 << (bp_register << 1); // enable LOCAL BREAKPOINT free_bp
+
+    long long res= 0;
+    res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[7]), r7);
+    if (res != 0) return res;
+
+    res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[bp_register]), (long long)0);
+    return res;
+}
+
+long long remove_sw_bp(BPInfo* info, bool last_at_addr) {
+
+}
+
+long long remove_bp(BPInfo* bp, bool last_at_addr) {
+    switch (bp->type) {
+        case BP_HARDWARE: return remove_hw_bp(bp->data.bp);
+        case BP_SOFTWARE:
+            break;
+        case BP_SOURCE_SINGLE_STEP_TRAP: return 0;
+        case BP_TYPE_COUNT: assert(false);
+    }
+}
+
+long long remove_bps_at_line(uint32_t line) {
+    const LineAddrRes res= line2startaddr(line);
+    if (!res.succ) return -1;
+
+    for (int i = 0; i < bp_info.pos; ++i) {
+        const BPAddressInfo* info= BPAddressInfo_arr_ptr(&bp_info, i);
+        if (info->address != res.addr) continue;
+
+
+    }
+}
 
 long long place_bp(void* address, uint32_t line) {
     long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
@@ -53,13 +99,14 @@ long long place_bp(void* address, uint32_t line) {
         long long res= ptrace(PTRACE_POKETEXT, target.pid, a_addr, data);
         if (res == -1) return errno;
 
-        BPAddressInfo* addr_info= get_or_add_bp_address_info(address);
-        BPInfo_arr_add(&addr_info->bps, (BPInfo){
-            .addr= address,
-            .line= line,
-            .type= BP_SOFTWARE,
-            .data.shadow= shadow
-        });
+        BPAddressInfo* addr_info= get_or_add_bp_address_info(address,
+            (BPInfo){
+                .addr= address,
+                .line= line,
+                .type= BP_SOFTWARE,
+                .data.shadow= shadow
+            }
+        );
 
         return 0;
     }
@@ -74,13 +121,14 @@ long long place_bp(void* address, uint32_t line) {
 
     res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[free_bp]), (long long)address);
 
-    BPAddressInfo* addr_info= get_or_add_bp_address_info(address);
-    BPInfo_arr_add(&addr_info->bps, (BPInfo) {
-        .addr= address,
-        .line= line,
-        .type= BP_HARDWARE,
-        .data.bp= free_bp
-    });
+    BPAddressInfo* addr_info= get_or_add_bp_address_info(address,
+        (BPInfo) {
+            .addr= address,
+            .line= line,
+            .type= BP_HARDWARE,
+            .data.bp= free_bp
+        }
+    );
 
     return res;
 }
@@ -116,6 +164,332 @@ struct user_regs_struct get_regs(bool* succ) {
     return regs;
 }
 
+typedef enum CPUID_QUERY {
+    CPUID_QUERY_XSAVE_INFO= 0x0D
+} CPUID_QUERY;
+
+typedef enum CPUID_QUERY_LEAF {
+    CPUID_QUERY_XSAVE_LEAF_BASE=0,
+    CPUID_QUERY_XSAVE_LEAF_EXT=1,
+} CPUID_QUERY_LEAF;
+
+typedef struct CPUID_XSaveInfoRes {
+    union {
+        struct {
+            uint32_t x87_state: 1;
+            uint32_t sse_state: 1;
+            uint32_t avx_state: 1;
+            uint32_t mpx_state: 2;
+            uint32_t avx512_state: 3;
+            uint32_t pkru_state: 1;
+        };
+        uint32_t eax;
+    };
+    union {
+        uint32_t max_sz_xcr0;
+        uint32_t ebx;
+    };
+    union {
+        uint32_t max_sz_xsave;
+        uint32_t ecx;
+    };
+    uint32_t edx;
+} CPUID_XSaveInfoRes;
+
+typedef struct CPUID_XSaveExtendedInfoRes {
+    union {
+        struct {
+            uint32_t xsaveopt: 1;
+            uint32_t xsavec: 1;
+            uint32_t xgetbv_ecx1: 1;
+            uint32_t xss: 1;
+            uint32_t xfd: 1;
+        };
+        uint32_t eax;
+    };
+    union {
+        uint32_t max_xsave_size;
+        uint32_t ebx;
+    };
+    union {
+        struct {
+            uint32_t edx;
+            uint32_t ecx;
+        };
+        __uint128_t ia32_xss_bitmap;
+    };
+} CPUID_XSaveExtendedInfoRes;
+
+typedef struct CPUID_XSaveStateInfoRes {
+    uint32_t size;
+    uint32_t offset;
+    union {
+        struct {
+            uint32_t user_supervisor_state: 1;
+            uint32_t alignment_state: 1;
+        };
+        uint32_t ecx;
+    };
+} CPUID_XSaveStateInfoRes;
+
+typedef struct CPUID_BASE_INFO {
+    uint32_t eax;
+    uint32_t ebx;
+    uint32_t ecx;
+    uint32_t edx;
+} CPUID_BASE_INFO;
+
+typedef union CPUID_RESULT {
+    CPUID_BASE_INFO base;
+    CPUID_XSaveInfoRes xsave_info;
+    CPUID_XSaveExtendedInfoRes xsave_ext_info;
+    CPUID_XSaveStateInfoRes xsave_state_info;
+} CPUID_RESULT;
+
+#include <cpuid.h>
+
+CPUID_RESULT cpuid_query(CPUID_QUERY query, CPUID_QUERY_LEAF leaf) {
+    uint32_t eax, ebx, ecx, edx;
+    __cpuid_count(query, leaf, eax, ebx, ecx, edx);
+
+    switch (query) {
+        case CPUID_QUERY_XSAVE_INFO: {
+            if (leaf == CPUID_QUERY_XSAVE_LEAF_BASE) return (CPUID_RESULT) {.xsave_info= (CPUID_XSaveInfoRes) {
+                .eax= eax,
+                .max_sz_xcr0= ebx,
+                .max_sz_xsave= ecx,
+                .edx= edx,
+            }};
+            if (leaf == CPUID_QUERY_XSAVE_LEAF_EXT) return (CPUID_RESULT) {.xsave_ext_info= (CPUID_XSaveExtendedInfoRes) {
+                .eax= eax,
+                .ebx= ebx,
+                .ecx= ecx,
+                .edx= edx,
+            }};
+            return (CPUID_RESULT) {
+                .xsave_state_info= {
+                    .size= eax,
+                    .offset= ebx,
+                    .ecx= ecx,
+                }
+            };
+        }
+    }
+
+    return (CPUID_RESULT) {.base= (CPUID_BASE_INFO) {
+        .eax = eax,
+        .ebx = ebx,
+        .ecx = ecx,
+        .edx = edx
+    }};
+}
+
+#include <xmmintrin.h>
+
+typedef struct MMRegEncoding {
+    uint8_t val[10];
+    uint8_t reserved[6];
+} MMRegEncoding;
+
+typedef struct XSaveLegacyData {
+    uint16_t fcw;
+    uint16_t fsw;
+    uint8_t ftw;
+    uint8_t reserved_00;
+    uint16_t fop;
+    uint32_t fip_31_00;
+    uint16_t fip_47_32_or_fcs;
+    uint16_t fip_63_48_or_reserved;
+    uint32_t fdp;
+    uint16_t fds_or_fdp_47_32;
+    uint16_t fdp_63_48_or_reserved;
+    uint32_t mxcsr;
+    uint32_t mxcsr_mask;
+    MMRegEncoding mm_regs[8];
+    __m128 xmm_regs[16];
+} XSaveLegacyData;
+
+typedef struct XSaveBV {
+    uint64_t x87_state: 1;
+    uint64_t sse_state: 1;
+    uint64_t avx_state: 1;
+    uint64_t mpx_bnd_reg_state: 1;
+    uint64_t mpx_bnd_csr_state: 1;
+    uint64_t avx512_opmask_state: 1;
+    uint64_t avx512_zmm_hi256_state: 1;
+    uint64_t avx512_hi16_zmm_state: 1;
+    uint64_t pt_state: 1;
+    uint64_t pkru_state: 1;
+    uint64_t pasid_state: 1;
+    uint64_t cet_u_state: 1;
+    uint64_t cet_s_state: 1;
+    uint64_t hdc_state: 1;
+    uint64_t uintr_state: 1;
+    uint64_t lbr_state: 1;
+    uint64_t hwp_state: 1;
+    uint64_t amx_tilecfg_state: 1;
+    uint64_t amx_tiledata_state: 1;
+} XSaveBV;
+
+typedef struct XCompBV {
+    uint64_t format: 63;
+    uint64_t is_ext_format: 1;
+} XCompBV;
+
+typedef struct XSaveHeader {
+    XSaveBV xsave_bv;
+    XCompBV xcomp_bv;
+} XSaveHeader;
+
+typedef struct XSaveRegisters {
+    uint8_t has_x87: 1;
+    uint8_t has_sse: 1;
+    uint8_t has_avx: 1;
+    uint8_t has_avx512_opmasks: 1;
+    uint8_t has_avx512_zmmhis : 1;
+    uint8_t has_avx512_hi16_zmms: 1;
+
+    MMRegEncoding mm_regs[8];
+    __m128 xmm_regs[16];
+    __m128 ymm_hi_regs[16];
+    struct {
+        uint8_t val[32];
+    } zmm_hi_regs[16];
+    struct {
+        __m128 val[4];
+    } zmm_hi16_regs[16];
+
+    uint64_t k_regs[8];
+} XSaveRegisters;
+
+// there are currently 19 defined state components Sec. 13.1 XSAVE-SUPPORTED FEATURES AND STATE-COMPONENT BITMAPS
+#define MAX_DEFINED_STATE_COMP 19
+CPUID_XSaveStateInfoRes state_comp_info[MAX_DEFINED_STATE_COMP];
+bool state_comp_info_loaded= false;
+
+void load_state_component_info() {
+    if (state_comp_info_loaded) return;
+
+    // state components 0 & 1 are the x87 and sse which have fixed size information in the legacy section
+    for (int i = 2; i < MAX_DEFINED_STATE_COMP; ++i) {
+        state_comp_info[i]= cpuid_query(CPUID_QUERY_XSAVE_INFO, i).xsave_state_info;
+    }
+
+    state_comp_info_loaded= true;
+}
+
+typedef enum STATE_COMPONENT {
+    SC_X87=0,
+    SC_SSE=1,
+    SC_AVX=2,
+    SC_BNDREGS=3,
+    SC_BNDCSR=4,
+    SC_AVX512_OPMASK=5,
+    SC_AVX512_HI256=6,
+    SC_AVX512_HI16=7,
+} STATE_COMPONENT;
+
+#define BIT_AT(data, idx) ((data >> idx) & 1)
+
+void decode_ext_format(const XSaveHeader* header) {
+    uint8_t last_present_idx= 0;
+    for (int i = 2; i < MAX_DEFINED_STATE_COMP; ++i) {
+        if (BIT_AT(header->xcomp_bv.format, i) == 0) continue;
+
+        if (last_present_idx == 0) {
+            state_comp_info[i].offset= 576;
+            last_present_idx= i;
+        } else {
+            const uint32_t last_offset= state_comp_info[last_present_idx].offset;
+            const uint32_t last_size= state_comp_info[last_present_idx].size;
+
+            const bool align= state_comp_info[i].alignment_state;
+
+            if (align) {
+                state_comp_info[i].offset= (last_offset + last_size + 63) & ~63; // little bit manipulation curtesy of Prof. Bagley
+            } else {
+                state_comp_info[i].offset= last_offset + last_size;
+            }
+        }
+    }
+}
+
+void set_xsave_data(const uint8_t* data, XSaveRegisters* regs) {
+    for (STATE_COMPONENT i = 2; i < MAX_DEFINED_STATE_COMP; ++i) {
+        switch (i) {
+            case SC_X87:
+            case SC_SSE:
+                break;
+
+            case SC_AVX: {
+                // Bytes 127:0 of the AVX-state section are used for YMM0_H–YMM7_H. Bytes 255:128 are used for YMM8_H–YMM15_H
+                memcpy(&regs->ymm_hi_regs, data + state_comp_info[i].offset, state_comp_info[i].size);
+                break;
+            }
+
+            case SC_BNDREGS:
+            case SC_BNDCSR:
+                break;
+
+            case SC_AVX512_OPMASK: {
+                memcpy(&regs->k_regs, data + state_comp_info[i].offset, state_comp_info[i].size);
+                break;
+            }
+            case SC_AVX512_HI256: {
+                memcpy(&regs->zmm_hi_regs, data + state_comp_info[i].offset, state_comp_info[i].size);
+                break;
+            }
+            case SC_AVX512_HI16: {
+                memcpy(&regs->zmm_hi16_regs, data + state_comp_info[i].offset, state_comp_info[i].size);
+                break;
+            }
+            default: break;
+        }
+    }
+}
+
+XSaveRegisters get_all_regs(bool* succ) {
+    // the size of this is slightly dynamic based on the processor features
+    //  an assumption could be avx2, but this should support everything
+    const CPUID_XSaveExtendedInfoRes info= cpuid_query(CPUID_QUERY_XSAVE_INFO, CPUID_QUERY_XSAVE_LEAF_EXT).xsave_ext_info;
+
+    struct iovec iov;
+    iov.iov_len= info.max_xsave_size;
+    iov.iov_base= malloc(iov.iov_len);
+
+    long long res= ptrace(PTRACE_GETREGSET, target.pid, (void*)NT_X86_XSTATE, &iov);
+    // this is in a x64 specific format, and most likely the 'compact' format so need to decode
+    //  based on Sec. 13.4.3 (intel combined)
+
+    /*      LEGACY REGION (512 bytes)
+     *      HEADER (64 bytes)
+     *      EXTENDED REGION (x bytes (based on max_xsave_size))
+     */
+    const XSaveLegacyData data= *(XSaveLegacyData*)iov.iov_base;
+    const XSaveHeader header= *(XSaveHeader*)(iov.iov_base + 512);
+    const uint8_t* extended_data= (uint8_t*)iov.iov_base + 512 + 64;
+
+    XSaveRegisters regs;
+    regs.has_x87= header.xsave_bv.x87_state;
+    regs.has_sse= header.xsave_bv.sse_state;
+    regs.has_avx= header.xsave_bv.avx_state;
+    regs.has_avx512_opmasks= header.xsave_bv.avx512_opmask_state;
+    regs.has_avx512_zmmhis= header.xsave_bv.avx512_zmm_hi256_state;
+    regs.has_avx512_hi16_zmms= header.xsave_bv.avx512_hi16_zmm_state;
+
+    if (regs.has_x87) memcpy(&regs.mm_regs, &data.mm_regs, sizeof(regs.mm_regs));
+    if (regs.has_sse) memcpy(&regs.xmm_regs, &data.xmm_regs, sizeof(regs.xmm_regs));
+
+    // this describes the layout of the extended region
+    load_state_component_info();
+
+    if (header.xcomp_bv.is_ext_format) {
+        decode_ext_format(&header);
+    }
+
+    set_xsave_data(extended_data, &regs);
+}
+
 uintptr_t get_pc() {
     bool succ;
     const struct user_regs_struct regs= get_regs(&succ);
@@ -126,6 +500,94 @@ uintptr_t get_pc() {
 
 long cf_continue() {
     return ptrace(PTRACE_CONT, target.pid, 0, 0);
+}
+
+typedef union RegValue {
+    uint64_t general;
+    __m128 vector[4];
+} RegValue;
+
+typedef enum RegValueType {
+    REGVAL_GENERAL,
+    REGVAL_VECTOR,
+    REGVAL_ERROR
+} RegValueType;
+
+typedef struct Reg {
+    RegValueType type;
+    RegValue value;
+} Reg;
+
+uint64_t get_general_reg_value(const uint16_t register_id, bool* succ) {
+    *succ= true;
+    struct user_regs_struct regs= get_regs(succ);
+    if (!*succ) return -1;
+
+    switch (register_id) {
+        case 0: return regs.rax;
+        case 1: return regs.rdx;
+        case 2: return regs.rcx;
+        case 3: return regs.rbx;
+        case 4: return regs.rsi;
+        case 5: return regs.rdi;
+        case 6: return regs.rbp;
+        case 7: return regs.rsp;
+        case 8: return regs.r8;
+        case 9: return regs.r9;
+        case 10: return regs.r10;
+        case 11: return regs.r11;
+        case 12: return regs.r12;
+        case 13: return regs.r13;
+        case 14: return regs.r14;
+        case 15: return regs.r15;
+        case 16: return target.target_get_return_addr();
+
+        case 49: return regs.eflags;
+        case 50: return regs.es;
+        case 51: return regs.cs;
+        case 52: return regs.ss;
+        case 53: return regs.ds;
+        case 54: return regs.fs;
+        case 55: return regs.gs;
+
+        case 58: return regs.fs_base;
+        case 59: return regs.gs_base;
+        default: *succ=false;
+    }
+}
+
+// this mapping is based on the ABI https://gitlab.com/x86-psABIs/x86-64-ABI
+// for linux-x64 this mapping is dwarf numbers to actual registers
+Reg get_register_value(const uint16_t register_id) {
+    bool succ;
+    uint64_t val= get_general_reg_value(register_id, &succ);
+    if (succ) return (Reg){.type= REGVAL_GENERAL, .value= {.general= val}};
+
+    XSaveRegisters all_regs= get_all_regs(&succ);
+    if (!succ) return (Reg){.type= REGVAL_ERROR};
+
+    Reg res= {.type= REGVAL_VECTOR, .value= {.vector= {0}}};
+
+    // need to collect the different sections of the zmm/ymm registers IF they are present
+    if (register_id >= 17 && register_id <= 32) {
+        memcpy(&res.value.vector, &all_regs.xmm_regs[register_id - 17], sizeof(__m128));
+        if (all_regs.has_avx)
+            memcpy(&res.value.vector[1], &all_regs.ymm_hi_regs[register_id - 17], sizeof(__m128));
+
+        if (all_regs.has_avx512_zmmhis)
+            memcpy(&res.value.vector[2], &all_regs.zmm_hi_regs[register_id - 17], sizeof(__m128) << 1);
+
+        return res;
+    }
+
+    if (register_id >= 67 && register_id <= 82) {
+        if (all_regs.has_avx512_hi16_zmms)
+            memcpy(&res.value.vector, &all_regs.zmm_hi16_regs[register_id - 67], sizeof(__m128) << 2);
+
+        return res;
+    }
+
+    return (Reg) {.type= REGVAL_ERROR};
 }
 
 int linux_x64_init_target(Target* t) {

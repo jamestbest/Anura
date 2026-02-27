@@ -17,8 +17,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void* virtual_to_runtime_addr(void* v_addr);
-static void* runtime_to_virtual_addr(void* r_addr);
+#include "Saruman/FrameInfo.h"
+
+static uintptr_t virtual_to_runtime_addr(uintptr_t v_addr);
+static uintptr_t runtime_to_virtual_addr(uintptr_t r_addr);
 
 static ino_t file_inode;
 
@@ -56,15 +58,22 @@ LineAddrRes get_addr_at_line(uint32_t line) {
     return line2startaddr(line);
 }
 
+long long remove_bp_at_line(uint32_t line) {
+    const LineAddrRes addr= get_addr_at_line(line);
+    if (!addr.succ) return -1;
+
+
+}
+
 long long place_bp_at_line(uint32_t line) {
     const LineAddrRes res= get_addr_at_line(line);
 
     if (!res.succ) return -1;
 
-    void* runtime= virtual_to_runtime_addr(res.addr);
+    uintptr_t runtime= virtual_to_runtime_addr(res.addr);
 
-    printf("Runtime addr is %p\n", runtime);
-    printf("Addr used is %p\n", res.addr + 0x555555554000);
+    printf("Runtime addr is %#lx\n", runtime);
+    printf("Addr used is %#lx\n", res.addr + 0x555555554000);
 
     return target.target_place_bp_at_addr(runtime, line);
 }
@@ -83,8 +92,8 @@ int decode_file(const char* filepath) {
 typedef Elf64_Phdr ProgSeg;
 
 typedef struct ProcMap {
-    void* base;
-    void* end;
+    uintptr_t base;
+    uintptr_t end;
     uint8_t perms;
     uint64_t offset;
     char* device;
@@ -173,8 +182,8 @@ void load_proc_maps() {
         map= (ProcMap) {
             .offset= offset,
             .path= filename,
-            .end=(void*)end,
-            .base=(void*)start,
+            .end=end,
+            .base=start,
             .device= device_str,
             .inode= inode,
             .perms= perms,
@@ -212,7 +221,7 @@ int vaddr_in_segment_range(const void* addrp, const void* segmentp) {
     return 0;
 }
 
-ProgSeg* get_segment_enclosing_vaddr(void* v_addr) {
+ProgSeg* get_segment_enclosing_vaddr(uintptr_t v_addr) {
     ProgSeg* seg= bsearch(
         &v_addr,
         ELF.ProgHeader.program_headers,
@@ -228,7 +237,7 @@ int raddr_in_pt_procmap(const void* r_addrp, const void* procmapp) {
     const uintptr_t addr= *(const uintptr_t*)r_addrp;
     const ProcMap* procMap= procmapp;
 
-    printf("Proc map %p %p\n", procMap->base, procMap->end);
+    printf("Proc map %#lx %#lx\n", procMap->base, procMap->end);
 
     if ((uintptr_t)procMap->base > addr) {
         return -1;
@@ -258,7 +267,7 @@ int vaddr_in_pt_procmap_range(const void* addrp, const void* procmapp) {
     return 0;
 }
 
-ProcMap* get_procmap_at_vaddr(void* vaddr) {
+ProcMap* get_procmap_at_vaddr(uintptr_t vaddr) {
     printf("There are %zu entries\n", pt_load_maps.pos);
     const uint pos= ProcMap_arr_search(&pt_load_maps, &vaddr, vaddr_in_pt_procmap_range);
 
@@ -267,7 +276,7 @@ ProcMap* get_procmap_at_vaddr(void* vaddr) {
     return ProcMap_arr_ptr(&pt_load_maps, pos);
 }
 
-ProcMap* get_procmap_at_raddr(void* raddr) {
+ProcMap* get_procmap_at_raddr(uintptr_t raddr) {
     printf("There are %zu entries\n", pt_load_maps.pos);
     const uint pos= ProcMap_arr_search(&pt_load_maps, &raddr, raddr_in_pt_procmap);
     printf("POSITION RESULT: %u\n", pos);
@@ -277,40 +286,58 @@ ProcMap* get_procmap_at_raddr(void* raddr) {
     return ProcMap_arr_ptr(&pt_load_maps, pos);
 }
 
-void* virtual_to_runtime_addr(void* v_addr) {
+uintptr_t virtual_to_runtime_addr(uintptr_t v_addr) {
     const ProgSeg* segment= get_segment_enclosing_vaddr(v_addr);
 
-    void* s_vaddr= (void*)segment->p_vaddr;
+    uintptr_t s_vaddr= segment->p_vaddr;
 
     const ProcMap* proc_map= get_procmap_at_vaddr(s_vaddr);
 
     if (proc_map == NULL) {
-        return NULL;
+        return 0;
     }
 
-    void* s_paddr= proc_map->base;
+    uintptr_t s_paddr= proc_map->base;
 
     return s_paddr + (v_addr - s_vaddr);
 }
 
-void* runtime_to_virtual_addr(void* r_addr) {
+uintptr_t runtime_to_virtual_addr(uintptr_t r_addr) {
     const ProcMap* proc_map= get_procmap_at_raddr(r_addr);
-    if (proc_map == NULL) return NULL;
+    if (proc_map == NULL) return 0;
 
     ProgSeg* seg= proc_map->seg;
     printf("Segment is %p\n",seg);
-    if (seg == NULL) return NULL;
+    if (seg == NULL) return 0;
 
-    void* s_paddr= (void*)seg->p_vaddr;
-    printf("segment pvaddr: %p\n", s_paddr);
+    uintptr_t s_paddr= seg->p_vaddr;
+    printf("segment pvaddr: %#lx\n", s_paddr);
 
-    void* res= s_paddr + (r_addr - proc_map->base);
-    printf("Res; %p\n", res);
+    uintptr_t res= s_paddr + (r_addr - proc_map->base);
+    printf("Res; %#lx\n", res);
     return res;
 }
 
 long long single_step_assembly() {
     return ptrace(PTRACE_SINGLESTEP, target.pid, 0, NULL);
+}
+
+uint64_t get_cfa() {
+    const uintptr_t pc= target.target_get_pc();
+    const uintptr_t vaddr= target.target_addr_runtime_to_virtual(pc);
+    printf("Getting fde for %#lx\n", vaddr);
+
+    const FDE_Entry* fde= get_fde_for_pc(vaddr);
+    printf("Got fde %p\n", fde);
+
+    create_matrix_of(fde);
+
+}
+
+uintptr_t get_return_addr() {
+    uintptr_t pc= target.target_get_pc();
+
+
 }
 
 void linux_init_target(Target* target) {
@@ -323,8 +350,11 @@ void linux_init_target(Target* target) {
 
     target->target_get_addr_of_line= get_addr_at_line;
     target->target_place_bp_at_line= place_bp_at_line;
+    target->target_remove_bp_at_line= remove_bp_at_line;
 
     target->target_single_step_assembly= single_step_assembly;
 
     target->target_addr_runtime_to_virtual= runtime_to_virtual_addr;
+    target->target_get_return_addr= get_return_addr;
+    target->target_get_cfa= get_cfa;
 }

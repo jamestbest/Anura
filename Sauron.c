@@ -12,9 +12,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "DWARF/Balin.h"
 #include "Saruman/FrameInfo.h"
 
 static void print_program_header(Elf64_Phdr* header);
+static Section make_section(uint8_t* prog_data, int i);
+static bool section_valid(const Section* section);
 
 bool verify_special(const uint8_t* start) {
     return memcmp(start, ELFMAG, SELFMAG) == 0;
@@ -252,6 +255,8 @@ const char* get_et_str(unsigned int id) {
 
 ELF64 ELF;
 
+TableArray abbrev_tables;
+
 int decode_program_headers(FILE* elf_file, unsigned long p_off) {
     fseek(elf_file, p_off, SEEK_SET);
 
@@ -319,6 +324,8 @@ void print_program_header(Elf64_Phdr* header) {
 //    printf()
 }
 
+#define SECTION_NAME_MATCH(str) (strcmp(&sstring_table[section.sh_name], str) == 0)
+
 int decode(FILE* elf) {
     size_t read= fread(&ELF.header, sizeof (uint8_t), sizeof(ELF.header), elf);
 
@@ -352,7 +359,7 @@ int decode(FILE* elf) {
 
     printf("ELF is of OS ABI type %s version %u\n", os_abi, os_abi_version);
 
-    Elf64_Ehdr header= ELF.header;
+    const Elf64_Ehdr header= ELF.header;
     printf(
         "ELF header information:\n"
         "  e_type: %s\n"
@@ -370,11 +377,11 @@ int decode(FILE* elf) {
     fseek(elf, (long)header.e_shoff, SEEK_SET);
 
     size_t sh_bytes= header.e_shentsize * header.e_shnum;
-    Elf64_Shdr* sections= malloc(sh_bytes);
+    ELF.sections= malloc(sh_bytes);
 
-    fread(sections, header.e_shentsize, header.e_shnum, elf);
+    fread(ELF.sections, header.e_shentsize, header.e_shnum, elf);
 
-    Elf64_Shdr h_strs= sections[header.e_shstrndx];
+    const Elf64_Shdr h_strs= ELF.sections[header.e_shstrndx];
 
     printf("hstrs at %p\n", (void*)h_strs.sh_offset);
 
@@ -382,15 +389,8 @@ int decode(FILE* elf) {
     fseek(elf, (long)h_strs.sh_offset, SEEK_SET);
     fread(sstring_table, sizeof (uint8_t), h_strs.sh_size, elf);
 
-    void* dl_data= NULL;
-    void* str_data= NULL;
-    void* text_data= NULL;
-    void* abbrev_data= NULL;
-    void* eh_frame_data= NULL;
-    uint64_t text_off= 0;
-
     for (int i = 0; i < header.e_shnum; ++i) {
-        Elf64_Shdr section= sections[i];
+        const Elf64_Shdr section= ELF.sections[i];
 
         printf(
                 "Section %s with type %u at %ld\n",
@@ -400,39 +400,53 @@ int decode(FILE* elf) {
         );
 
         if (section.sh_type == SHT_PROGBITS) {
-            char* prog_data= malloc(section.sh_size);
+            uint8_t* prog_data= malloc(section.sh_size);
             fseek(elf, section.sh_offset, SEEK_SET);
             fread(prog_data, sizeof (uint8_t), section.sh_size, elf);
 
             for (int j = 0; j < section.sh_size; ++j) {
-                printf("%02X ", (uint8_t)prog_data[j]);
+                printf("%02X ", prog_data[j]);
                 if (j % 16 == 15) putchar('\n');
             }
             putchar('\n');
 
-            if (strcmp(&sstring_table[section.sh_name], ".debug_line") == 0) {
-                dl_data= prog_data;
+            if (SECTION_NAME_MATCH(".debug_line")) {
+                ELF.section_map.debug_line= make_section(prog_data, i);
                 continue;
             }
 
-            if (strcmp(&sstring_table[section.sh_name], ".text") == 0) {
-                text_data= prog_data;
-                text_off= section.sh_offset;
+            if (SECTION_NAME_MATCH(".text")) {
+                ELF.section_map.text= make_section(prog_data, i);
                 continue;
             }
 
-            if (strcmp(&sstring_table[section.sh_name], ".debug_line_str") == 0) {
-                str_data= prog_data;
+            if (SECTION_NAME_MATCH(".debug_line_str")) {
+                ELF.section_map.debug_line_str= make_section(prog_data, i);
                 continue;
             }
 
-            if (strcmp(&sstring_table[section.sh_name], ".eh_frame") == 0) {
-                eh_frame_data= prog_data;
+            if (SECTION_NAME_MATCH(".debug_str")) {
+                ELF.section_map.debug_str= make_section(prog_data, i);
                 continue;
             }
 
-            if (strcmp(&sstring_table[section.sh_name], ".debug_abbrev") == 0) {
-                abbrev_data= prog_data;
+            if (SECTION_NAME_MATCH(".eh_frame")) {
+                ELF.section_map.eh_frame= make_section(prog_data, i);
+                continue;
+            }
+
+            if (SECTION_NAME_MATCH(".eh_frame_hdr")) {
+                ELF.section_map.eh_frame_hdr= make_section(prog_data, i);
+                continue;
+            }
+
+            if (SECTION_NAME_MATCH(".debug_abbrev")) {
+                ELF.section_map.debug_abbrev= make_section(prog_data, i);
+                continue;
+            }
+
+            if (SECTION_NAME_MATCH(".debug_info")) {
+                ELF.section_map.debug_info= make_section(prog_data, i);
                 continue;
             }
 
@@ -440,66 +454,82 @@ int decode(FILE* elf) {
         }
     }
 
-    frame_info_init();
-    uint8_t* frame_parsing= eh_frame_data;
-    read_header((uint8_t**)&frame_parsing, eh_frame_data);
-    // read_header((uint8_t**)&frame_parsing, eh_frame_data);
-    // read_header((uint8_t**)&frame_parsing, eh_frame_data);
+    parse_frame_info(&ELF.section_map.eh_frame, &ELF.section_map.eh_frame_hdr);
 
-    decode_lines(dl_data, str_data, text_data, text_off);
+    const bool abbrev= section_valid(&ELF.section_map.debug_abbrev);
+    const bool info= section_valid(&ELF.section_map.debug_info);
+    if (abbrev) {
+        abbrev_tables= Table_arr_create();
+        parse_abbrev(&ELF.section_map.debug_abbrev, &abbrev_tables);
+    }
+    if (abbrev && info) {
+        parse_info(&ELF.section_map.debug_info, &abbrev_tables);
+    }
 
-    free(sections);
-    free(dl_data);
-    free(str_data);
-    free(text_data);
+    decode_lines();
+
     free(sstring_table);
 
     return 0;
 }
 
-const char* DW_FORM_STRS[]= {
-    [DW_FORM_addr]="addr",
-    [DW_FORM_reserved0]="reserved0",
-    [DW_FORM_block2]="block2",
-    [DW_FORM_block4]="block4",
-    [DW_FORM_data2]="data2",
-    [DW_FORM_data4]="data4",
-    [DW_FORM_data8]="data8",
-    [DW_FORM_string]="string",
-    [DW_FORM_block]="block",
-    [DW_FORM_block1]="block1",
-    [DW_FORM_data1]="data1",
-    [DW_FORM_flag]="flag",
-    [DW_FORM_sdata]="sdata",
-    [DW_FORM_strp]="strp",
-    [DW_FORM_udata]="udata",
-    [DW_FORM_ref_addr]="ref_addr",
-    [DW_FORM_ref1]="ref1",
-    [DW_FORM_ref2]="ref2",
-    [DW_FORM_ref4]="ref4",
-    [DW_FORM_ref8]="ref8",
-    [DW_FORM_ref_udata]="ref_udata",
-    [DW_FORM_indirect]="indirect",
-    [DW_FORM_sec_offset]="sec_offset",
-    [DW_FORM_exprloc]="exprloc",
-    [DW_FORM_flag_present]="flag_present",
-    [DW_FORM_strx]="strx",
-    [DW_FORM_addrx]="addrx",
-    [DW_FORM_ref_sup4]="ref_sup4",
-    [DW_FORM_strp_sup]="strp_sup",
-    [DW_FORM_data16]="data16",
-    [DW_FORM_line_strp]="line_strp",
-    [DW_FORM_ref_sig8]="ref_sig8",
-    [DW_FORM_implicit_const]="implicit_const",
-    [DW_FORM_loclistx]="loclistx",
-    [DW_FORM_rnglistx]="rnglistx",
-    [DW_FORM_ref_sup8]="ref_sup8",
-    [DW_FORM_strx1]="strx1",
-    [DW_FORM_strx2]= "strx2",
-    [DW_FORM_strx3]= "strx3",
-    [DW_FORM_strx4]= "strx4",
-    [DW_FORM_addrx1]= "addrx1",
-    [DW_FORM_addrx2]= "addrx2",
-    [DW_FORM_addrx3]= "addrx3",
-    [DW_FORM_addrx4]= "addrx4"
-};
+Section make_section(uint8_t* prog_data, const int i) {
+    return (Section) {
+        .data= prog_data,
+        .header= &ELF.sections[i]
+    };
+}
+
+bool section_valid(const Section* section) {
+    return section->data && section->header;
+}
+
+const char* form_strs(DW_FORM form) {
+    switch (form) {
+        case DW_FORM_addr: return "addr";
+        case DW_FORM_reserved0: return "reserved0";
+        case DW_FORM_block2: return "block2";
+        case DW_FORM_block4: return "block4";
+        case DW_FORM_data2: return "data2";
+        case DW_FORM_data4: return "data4";
+        case DW_FORM_data8: return "data8";
+        case DW_FORM_string: return "string";
+        case DW_FORM_block: return "block";
+        case DW_FORM_block1: return "block1";
+        case DW_FORM_data1: return "data1";
+        case DW_FORM_flag: return "flag";
+        case DW_FORM_sdata: return "sdata";
+        case DW_FORM_strp: return "strp";
+        case DW_FORM_udata: return "udata";
+        case DW_FORM_ref_addr: return "ref_addr";
+        case DW_FORM_ref1: return "ref1";
+        case DW_FORM_ref2: return "ref2";
+        case DW_FORM_ref4: return "ref4";
+        case DW_FORM_ref8: return "ref8";
+        case DW_FORM_ref_udata: return "ref_udata";
+        case DW_FORM_indirect: return "indirect";
+        case DW_FORM_sec_offset: return "sec_offset";
+        case DW_FORM_exprloc: return "exprloc";
+        case DW_FORM_flag_present: return "flag_present";
+        case DW_FORM_strx: return "strx";
+        case DW_FORM_addrx: return "addrx";
+        case DW_FORM_ref_sup4: return "ref_sup4";
+        case DW_FORM_strp_sup: return "strp_sup";
+        case DW_FORM_data16: return "data16";
+        case DW_FORM_line_strp: return "line_strp";
+        case DW_FORM_ref_sig8: return "ref_sig8";
+        case DW_FORM_implicit_const: return "implicit_const";
+        case DW_FORM_loclistx: return "loclistx";
+        case DW_FORM_rnglistx: return "rnglistx";
+        case DW_FORM_ref_sup8: return "ref_sup8";
+        case DW_FORM_strx1: return "strx1";
+        case DW_FORM_strx2: return  "strx2";
+        case DW_FORM_strx3: return  "strx3";
+        case DW_FORM_strx4: return  "strx4";
+        case DW_FORM_addrx1: return  "addrx1";
+        case DW_FORM_addrx2: return  "addrx2";
+        case DW_FORM_addrx3: return  "addrx3";
+        case DW_FORM_addrx4: return  "addrx4";
+        default: return "Unknown form;";
+    }
+}

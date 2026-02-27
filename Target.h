@@ -12,7 +12,7 @@ typedef uint64_t PROCESS_ID;
 
 typedef struct LineAddrRes {
     bool succ;
-    void* addr;
+    uintptr_t addr;
 } LineAddrRes;
 
 typedef struct AddrLineRes {
@@ -20,11 +20,19 @@ typedef struct AddrLineRes {
     uint64_t line;
 } AddrLineRes;
 
+typedef enum BP_REASON {
+    BP_REASON_STEP_OVER,
+    BP_REASON_USER,
+} BP_REASON;
+
 typedef struct Target {
     PROCESS_ID pid;
 
     long long (*target_place_bp_at_line)(uint32_t line);
-    long long (*target_place_bp_at_addr)(void* addr, uint32_t line);
+    long long (*target_place_bp_at_addr)(uintptr_t addr, uint32_t line);
+    long long (*target_place_temp_bp)(uintptr_t addr, BP_REASON reason);
+
+    long long (*target_remove_bp_at_line)(uint32_t line);
 
     void (*target_breakpoint_hit_cleanup)();
 
@@ -44,7 +52,10 @@ typedef struct Target {
     uintptr_t (*target_get_pc)();
     long (*target_cf_continue)();
 
-    void* (*target_addr_runtime_to_virtual)(void* r_addr);
+    uintptr_t (*target_addr_runtime_to_virtual)(uintptr_t r_addr);
+
+    uintptr_t (*target_get_return_addr)();
+    uint64_t (*target_get_cfa)();
 } Target;
 
 typedef enum TARGETS {
