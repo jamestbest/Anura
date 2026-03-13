@@ -7,6 +7,10 @@ set(CMAKE_BUILD_TYPE Debug)
 #add_compile_options(-fsanitize=address)
 #add_link_options(-fsanitize=address)
 
+add_executable(BreakSimple
+    breakcause/break_cause_simple.c
+)
+
 add_executable(Anura main.c shared/Array.c
         Sauron.c
         Sauron.h
@@ -44,7 +48,10 @@ add_executable(Anura main.c shared/Array.c
         Saruman/eh_header.h
         DWARF/Balin.c
         DWARF/Balin.h
+        break_on_cause.c
+        break_on_cause.h
 
+        Palantir/Palantir.c
 )
 
 add_executable(MtDoom
@@ -100,10 +107,17 @@ target_compile_options(Anura PUBLIC -g)
 add_executable(test Test.c)
 add_executable(Palantir Palantir/Palantir.c Palantir/Palantir.h)
 
-
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK4 REQUIRED gtk4)
+#pkg_check_modules(GTSV REQUIRED gtksourceview-4)
 
 target_include_directories(Palantir PRIVATE ${GTK4_INCLUDE_DIRS})
 target_link_libraries(Palantir PRIVATE ${GTK4_LIBRARIES})
 target_compile_options(Palantir PRIVATE ${GTK4_CFLAGS_OTHER})
+
+target_include_directories(Anura PRIVATE ${GTK4_INCLUDE_DIRS})
+target_link_libraries(Anura PRIVATE ${GTK4_LIBRARIES})
+target_compile_options(Anura PRIVATE ${GTK4_CFLAGS_OTHER})
+
+message(STATUS "GTSV_INCLUDE_DIRS=${GTSV_INCLUDE_DIRS}")
+message(STATUS "GTSV_LIBRARIES=${GTSV_LIBRARIES}")
