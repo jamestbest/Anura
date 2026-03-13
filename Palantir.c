@@ -19,6 +19,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "Helper_File.h"
+
 int tui_setup() {
     target.target_interrupt_handler_setup();
 }
@@ -50,22 +52,25 @@ int tui_setup() {
  */
 
 #define NO_DATA (ACTION_DATA){.NO_DATA= 0}
-#define MATCH_STR(str) (strncmp(buff, str, sizeof(str) - 1) == 0)
-
+#define MATCH_STR(str) (strncmp(buff.data, str, sizeof(str) - 1) == 0)
+#include <fcntl.h>
 int tui_loop() {
-    while (true) {
-        printf("cmd: ");
-        char buff[100];
-        int line= -1;
+    FILE* pipe_file= fdopen(tui_pipe[0], "r");
+    if (!pipe_file) show_err("Unable to open file for tui reading\n");
 
-        if (!fgets(buff, sizeof(buff), stdin))
+    Buffer buff= buffer_create(BUFF_MIN);
+    while (true) {
+        int line= -1;
+        if (!get_line(pipe_file, &buff)) {
+            show_err("Failed to get line ending look");
             break;
+        }
 
         if (MATCH_STR("set")) {
-            sscanf(buff, "set %d", &line);
+            sscanf(buff.data, "set %d", &line);
             LineAddrRes res= line2startaddr(line);
             if (!res.succ) {
-                printf("There is no code on line %d\n", line);
+                show_err("There is no code on line %d\n", line);
                 continue;
             }
 
@@ -82,7 +87,7 @@ int tui_loop() {
                 )
             );
         } else if (MATCH_STR("del")) {
-            sscanf(buff, "set %d", &line);
+            sscanf(buff.data, "set %d", &line);
             LineAddrRes res= line2startaddr(line);
             if (!res.succ) {
                 printf("There is no code on line %d\n", line);
@@ -170,7 +175,7 @@ int tui_loop() {
         } else if (MATCH_STR("list")) {
             print_breakpoints();
         } else {
-            printf("Unable to match command `%s`\n", buff);
+            printf("Unable to match command `%s`\n", buff.data);
         }
     }
 

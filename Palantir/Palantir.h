@@ -7,9 +7,10 @@
 
 #include <gtk/gtk.h>
 
-void* gui_thread_create(void* data);
+int create_gui(int pipe[2]);
 gboolean guiup_main_file(gpointer main_filepath);
 gboolean terminal_log(gpointer data);
+gboolean terminal_newline(gpointer data);
 gboolean terminal_err(gpointer data);
 
 #endif //ANURA_PALANTIR_GUI_H

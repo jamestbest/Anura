@@ -20,7 +20,7 @@ static bool set_buffer_as_file(const char* file, GtkTextBuffer* buff) {
 
         for (int i = 0; lines[i] != NULL; ++i) {
             char* num= malloc(10);
-            snprintf(num, 10, "%4d  ", i);
+            snprintf(num, 10, "%4d  ", i + 1);
             gtk_text_buffer_get_end_iter(buff, &end_iter);
             gtk_text_buffer_insert(buff, &end_iter, num, -1);
             gtk_text_buffer_insert(buff, &end_iter, lines[i], -1);
@@ -161,6 +161,17 @@ gboolean terminal_err(gpointer data) {
     return false;
 }
 
+gboolean terminal_newline(gpointer data) {
+    GtkTextBuffer* buff= gtk_text_view_get_buffer(GTK_TEXT_VIEW(terminal_view));
+
+    GtkTextIter end;
+    gtk_text_buffer_get_end_iter(buff, &end);
+
+    gtk_text_buffer_insert(buff, &end, "\n", -1);
+
+    return false;
+}
+
 gboolean terminal_log(gpointer data) {
     GtkTextBuffer* buff= gtk_text_view_get_buffer(GTK_TEXT_VIEW(terminal_view));
 
@@ -168,11 +179,18 @@ gboolean terminal_log(gpointer data) {
     gtk_text_buffer_get_end_iter(buff, &end);
 
     gtk_text_buffer_insert(buff, &end, data, -1);
-    // free(data);
 
-    const size_t len= strlen(data);
-    if (len == 0 || ((char*)data)[len - 1] != '\n')
-        gtk_text_buffer_insert(buff, &end, "\n", -1);
+    free(data);
+
+    // todo fix
+    gtk_text_view_scroll_to_iter(
+        GTK_TEXT_VIEW(terminal_view),
+        &end,
+        0.0,
+        FALSE,
+        0,
+        0
+    );
 
     return false;
 }
@@ -193,26 +211,63 @@ gboolean output_log(gpointer data) {
     return false;
 }
 
-//todo
-static gboolean read_target_output_cb(GIOChannel *source, GIOCondition condition, gpointer user_data) {
+//todo remove buff overflow
+static gboolean read_target_output_pipe(GIOChannel *source, GIOCondition condition, gpointer user_data) {
     gchar buff[1024];
-    gsize bytes_read;
-    GError* error= NULL;
+    const int fd= g_io_channel_unix_get_fd(source);
 
-    printf("Truing to get output\n");
+    if (condition & (G_IO_HUP | G_IO_ERR)) {
+        fprintf(stderr, "Hangup: %d\n", condition & G_IO_HUP);
+        fprintf(stderr, "IO Err: %d\n", condition & G_IO_ERR);
 
-    const GIOStatus status= g_io_channel_read_chars(source, buff, sizeof(buff) - 1, &bytes_read, &error);
-    if (status == G_IO_STATUS_NORMAL && bytes_read > 0) {
-        buff[bytes_read]= '\0';
-        output_log(buff);
+        fprintf(stderr, "Cannot\n");
+        return FALSE;
     }
 
-    if (status == G_IO_STATUS_ERROR) {
-        g_error("Error reading child stdout: %s", error->message);
-        g_clear_error(&error);
+    fprintf(stderr, "Truing to get output\n");
+
+    const ssize_t bytes_read= read(fd, buff, sizeof(buff) - 1);
+    if (bytes_read > 0) {
+        buff[bytes_read]= '\0';
+        fprintf(stderr,"Got output %s\n", buff);
+        output_log(buff);
+    } else {
+        g_error("Error reading child stdout");
+        return FALSE;
     }
 
     return TRUE;
+}
+
+static void run_button_callback(GtkButton* button, gpointer data) {
+    show_log("Run process request sent\n");
+
+    queueb_push_blocking(&action_q, create_action(ACTION_CF_CONTINUE, (ACTION_DATA){.NO_DATA= 0}));
+}
+
+static void terminal_input_callback(GtkEntry* entry, gpointer data) {
+    const char* input= gtk_editable_get_text(GTK_EDITABLE(entry));
+
+    if (input && input[0] != '\0') {
+        show_log("> %s\n", input);
+
+        ssize_t res= write(tui_pipe[1], input, strlen(input));
+        ssize_t res2= write(tui_pipe[1], "\n", 1);
+
+        show_log("Wrote to file %zu bytes\n", res + res2);
+        gtk_editable_set_text(GTK_EDITABLE(entry), "");
+    }
+}
+
+static GtkWidget* create_terminal_input() {
+    GtkWidget* cmd_input= gtk_entry_new();
+    gtk_widget_set_hexpand(cmd_input, TRUE);
+
+    gtk_entry_set_placeholder_text(GTK_ENTRY(cmd_input), ">");
+
+    g_signal_connect(cmd_input, "activate", G_CALLBACK(terminal_input_callback), NULL);
+
+    return cmd_input;
 }
 
 static void activate(GtkApplication* app, gpointer user_data) {
@@ -230,6 +285,7 @@ static void activate(GtkApplication* app, gpointer user_data) {
 
     GtkWidget* menu_bar= make_menu_bar();
     GtkWidget* run_button= gtk_button_new_with_label("run");
+    g_signal_connect(run_button, "clicked", G_CALLBACK(run_button_callback), NULL);
 
     gtk_box_append(GTK_BOX(top_ui), menu_bar);
     gtk_box_append(GTK_BOX(top_ui), run_button);
@@ -288,10 +344,15 @@ static void activate(GtkApplication* app, gpointer user_data) {
     gtk_box_append(GTK_BOX(code_box), code_scroller);
 
     GtkWidget* terminal_scroller= create_terminal_scroller();
+    GtkWidget* terminal_input= create_terminal_input();
     GtkWidget* output_scroller= create_output_scroller();
+    GtkWidget* terminal= gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_box_append(GTK_BOX(terminal), terminal_scroller);
+    gtk_box_append(GTK_BOX(terminal), terminal_input);
+
     GtkWidget* terminals= gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 
-    gtk_box_append(GTK_BOX(terminals), terminal_scroller);
+    gtk_box_append(GTK_BOX(terminals), terminal);
     gtk_box_append(GTK_BOX(terminals), output_scroller);
 
     gtk_box_append(GTK_BOX(box), code_box);
@@ -301,10 +362,10 @@ static void activate(GtkApplication* app, gpointer user_data) {
     g_signal_connect_object(controller, "key-pressed", G_CALLBACK(event_key_pressed_cb), code_view, G_CONNECT_SWAPPED);
     gtk_widget_add_controller(window, controller);
 
-    terminal_log("Hello world!");
-
-    // GIOChannel* channel = g_io_channel_unix_new(stdio_pipe[0]);
-    // g_io_add_watch(channel, G_IO_IN | G_IO_HUP, read_target_output_cb, NULL);
+    GIOChannel* channel = g_io_channel_unix_new(stdio_pipe[0]);
+    g_io_channel_set_encoding(channel, NULL, NULL);
+    g_io_channel_set_buffered(channel, FALSE);
+    g_io_add_watch(channel, G_IO_IN | G_IO_HUP, read_target_output_pipe, NULL);
 
     gtk_window_maximize(GTK_WINDOW(window));
     gtk_window_present(GTK_WINDOW(window));
@@ -343,7 +404,9 @@ static void create_mappings() {
     create_open_mapping();
 }
 
-int create_gui() {
+int create_gui(int pipe[2]) {
+    stdio_pipe= pipe;
+
     app= gtk_application_new ("org.anura.main", G_APPLICATION_FLAGS_NONE);
     create_mappings();
 
@@ -352,16 +415,6 @@ int create_gui() {
     g_object_unref(app);
 
     return status;
-}
-
-
-void* gui_thread_create(void* data) {
-    printf("The pipe data is %d\n", *(int*)data);
-    stdio_pipe= (int*)data;
-
-    create_gui();
-
-    return NULL;
 }
 
 // int main(const int argc, char **argv) {
