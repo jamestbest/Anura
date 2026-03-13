@@ -8,6 +8,7 @@
 #include "Saruman/Saruman.h"
 #include "Sauron.h"
 #include "Target.h"
+#include "Palantir/Palantir.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -18,7 +19,7 @@
 #include <string.h>
 #include <unistd.h>
 
-int i=0;
+#include <gtk/gtk.h>
 
 #define PCOND_X(cond) (cond ? 'X' : ' ')
 
@@ -111,7 +112,7 @@ int BP_type_is_user(BP_TYPE type) {
     return type == BP_HARDWARE || type == BP_SOFTWARE;
 }
 
-int compare_bp_addr_info(void* bpa, void* bpb) {
+int compare_bp_addr_info(uintptr_t bpa, uintptr_t bpb) {
     return bpa - bpb;
 }
 
@@ -120,23 +121,47 @@ ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 
 BPAddressInfoArray bp_info;
 
-BPAddressInfo* get_or_add_bp_address_info(void* address, BPInfo info_if_none) {
+void increment_by_reason(BPAddressInfo* info, BP_REASON reason) {
+    switch (reason) {
+        case BP_REASON_STEP_OVER:
+            info->temp_bp_count++;
+            break;
+        case BP_REASON_USER:
+            info->user_bp_count++;
+            break;
+    }
+
+    info->bp_count++;
+}
+
+void decrement_by_reason(BPAddressInfo* info, BP_REASON reason) {
+    switch (reason) {
+        case BP_REASON_STEP_OVER:
+            info->temp_bp_count--;
+            break;
+        case BP_REASON_USER:
+            info->user_bp_count--;
+            break;
+    }
+
+    info->bp_count--;
+}
+
+BPAddressInfo* get_or_add_bp_address_info(uintptr_t address, BPInfo info_if_none, BP_REASON reason) {
     BPAddressInfo* info= BPAddressInfo_arr_search_ie(&bp_info, address);
     if (info) {
-        info->user_bp_count++;
+        increment_by_reason(info, reason);
         return info;
     }
 
     BPAddressInfo* addr_info= BPAddressInfo_arr_add_i(&bp_info);
+    *addr_info= (BPAddressInfo){0};
     addr_info->address= address;
-    addr_info->user_bp_count= 1;
     addr_info->canonical_bp= info_if_none;
+    increment_by_reason(addr_info, reason);
 
     return addr_info;
 }
-
-
-PROCESS_ID t_pid;
 
 void vlog(bool is_t, const char* message, va_list args) {
     printf("LOG(%s): ", is_t ? "TARGET" : " HOST ");
@@ -159,7 +184,6 @@ void hlog(const char* message, ...) {
     va_end(args);
 }
 
-#define INT3 (0xCC)
 #include <pthread.h>
 
 ssize_t process_vm_readv(pid_t pid,
@@ -176,8 +200,6 @@ ssize_t process_vm_writev(pid_t pid,
                           unsigned long flags);
 
 int breakpoint_program(const char* program) {
-    hlog("Hello, World!\n");
-
     bp_info= BPAddressInfo_arr_construct(4);
 
     const char* args[]= {
@@ -186,12 +208,10 @@ int breakpoint_program(const char* program) {
         NULL
     };
 
-    PROCESS_ID pid= target.target_launch_process(program, sizeof(args), args);
+    const PROCESS_ID pid= target.target_launch_process(program, sizeof(args), args);
     target.pid= pid;
 
-    t_pid= pid;
-
-    long long res= target.target_attach_process(target.pid);
+    const long long res= target.target_attach_process(target.pid);
     hlog("The attach result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
     printf("Set the t_pid to %lu\n", pid);
 
@@ -205,7 +225,7 @@ void print_breakpoints() {
     for (int j = 0; j < bp_info.pos; ++j) {
         BPAddressInfo* addr_info= BPAddressInfo_arr_ptr(&bp_info, j);
 
-        printf("  - Addr: %p contains %zu breakpoint(s): \n", addr_info->address, addr_info->user_bp_count);
+        printf("  - Addr: %#lx contains %u breakpoint(s) (%u USER and %u TEMP): \n", addr_info->address, addr_info->bp_count, addr_info->user_bp_count, addr_info->temp_bp_count);
 
         const BPInfo* bp= &addr_info->canonical_bp;
 
@@ -259,12 +279,59 @@ Action* create_action(ACTION_TYPE type, ACTION_DATA data) {
 
     return action;
 }
+Re
+void open_program(const char* filepath) {
+    target.target_decode_file(filepath);
+
+    queueb_push_blocking(&action_q, create_action(ACTION_AT_ATTACH, (ACTION_DATA) {
+        .AT_ATTACH.filepath= filepath
+    }));
+
+    g_idle_add(guiup_main_file, (gpointer)target.target_info_main_file_path());
+}
+
+char* va_to_string(const char* message, va_list args) {
+    va_list arg_copy;
+    va_copy(arg_copy, args);
+
+    int size= vsnprintf(NULL, 0, message, arg_copy);
+    va_end(arg_copy);
+
+    size++;
+    char* buffer= malloc(size);
+    if (!buffer) return NULL;
+
+    vsnprintf(buffer, size, message, args);
+
+    return buffer;
+}
+
+void show_err(const char* message, ...) {
+    va_list args;
+    va_start(args, message);
+    char* buffer= va_to_string(message, args);
+    va_end(args);
+
+    fprintf(stderr, "%s", buffer);
+
+    g_idle_add(terminal_err, buffer);
+}
+
+void show_log(const char* message, ...) {
+    va_list args;
+    va_start(args, message);
+    char* buffer= va_to_string(message, args);
+    va_end(args);
+
+    printf("%s", buffer);
+
+    g_idle_add(terminal_log, buffer);
+}
+
 // talking about step over
 // talking about things that arent' supported but there is information that could be in place by the compiler
 // break point on an if that is
 int main(int argc, char* argv[]) {
-
-//    disassemble_to_str(NULL);
     if (argc <= 1) {
         perror("Usage; expected at least one argument for the program path\n");
         return 1;
@@ -275,10 +342,12 @@ int main(int argc, char* argv[]) {
 
     action_q= queueb_create();
 
-    target.target_decode_file(program);
-
     pthread_t cmd_thread;
-    pthread_create(&cmd_thread, NULL, control_target, (void*)program);
+    pthread_create(&cmd_thread, NULL, control_thread_create, (void*)program);
+
+    pthread_t gui_thread;
+    printf("The stdio pipe before is %d\n", target.stdio_pipe[1]);
+    pthread_create(&gui_thread, NULL, gui_thread_create, target.stdio_pipe);
 
     tui_setup();
     tui_loop();
@@ -286,8 +355,7 @@ int main(int argc, char* argv[]) {
     printf("Waiting for command thread to join\n");
     // here we can assume that the process has died
     pthread_join(cmd_thread, NULL);
-
-    print_breakpoints();
+    pthread_join(gui_thread, NULL);
 
     return 0;
 }
