@@ -62,7 +62,6 @@ int target_func(bool second) {
     tlog("PID: %d\n", getpid());
     tlog("I is at %p\n", &i);
 
-
     while (i < 3) {
         i++;
         tlog("I is: %d\n", i);
