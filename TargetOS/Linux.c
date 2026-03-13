@@ -16,7 +16,10 @@
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
 
+#include "Errors.h"
+#include "DWARF/Balin.h"
 #include "Saruman/FrameInfo.h"
 
 static uintptr_t virtual_to_runtime_addr(uintptr_t v_addr);
@@ -26,25 +29,44 @@ static ino_t file_inode;
 
 PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
     struct stat file_stats;
-    int res= stat(path, &file_stats);
+    const int res= stat(path, &file_stats);
 
     if (res != 0) {
-        perror("Unable to read file stats on process launch\n");
+        show_err("Unable to read file stats on process launch\n");
         return -1;
     }
 
-    printf("The file inode is for %s\n", path);
+    if (pipe(target.stdio_pipe) == -1) {
+        show_err("pipe");
+        return -1;
+    }
+
+    show_log("The file inode is for %s\n", path);
     file_inode= file_stats.st_ino;
 
-    pid_t pid= fork();
+    const pid_t pid= fork();
 
     if (pid == 0) {
         ptrace(PTRACE_TRACEME, getpid(), NULL, 0);
-        printf("Im the sub proc with pid %d about to become %s\n", getpid(), path);
+
+        printf("Making the stdio pipes\n");
+        // close(target.stdio_pipe[0]);
+        // dup2(target.stdio_pipe[1], STDOUT_FILENO);
+        // dup2(target.stdio_pipe[1], STDERR_FILENO);
+        // close(target.stdio_pipe[1]);
+        printf("They are now %d\n", target.stdio_pipe[1]);
+        fflush(stdout);
+
+        show_log("Im the sub proc with pid %d about to become %s\n", getpid(), path);
         // we're the sub proc
         int ret= execvp(path, (char* const*)argv);
-        perror("Sub process failed to execv\n");
+        show_err("Sub process failed to execv\n");
         exit(127);
+    } else {
+        // close(target.stdio_pipe[1]);
+
+        const int flags= fcntl(target.stdio_pipe[0], F_GETFL, 0);
+        fcntl(target.stdio_pipe[0], F_SETFL, flags | O_NONBLOCK);
     }
 
     return pid;
@@ -58,11 +80,11 @@ LineAddrRes get_addr_at_line(uint32_t line) {
     return line2startaddr(line);
 }
 
-long long remove_bp_at_line(uint32_t line) {
-    const LineAddrRes addr= get_addr_at_line(line);
-    if (!addr.succ) return -1;
+long long remove_bp_at_line(uint32_t line, BP_REASON reason) {
+    const LineAddrRes res= line2startaddr(line);
+    if (!res.succ) return -1;
 
-
+    return target.target_remove_bp_at_addr(res.addr, reason);
 }
 
 long long place_bp_at_line(uint32_t line) {
@@ -72,17 +94,17 @@ long long place_bp_at_line(uint32_t line) {
 
     uintptr_t runtime= virtual_to_runtime_addr(res.addr);
 
-    printf("Runtime addr is %#lx\n", runtime);
-    printf("Addr used is %#lx\n", res.addr + 0x555555554000);
+    show_log("Runtime addr is %#lx\n", runtime);
+    show_log("Addr used is %#lx\n", res.addr + 0x555555554000);
 
-    return target.target_place_bp_at_addr(runtime, line);
+    return target.target_place_bp_at_addr(runtime, line, BP_REASON_USER);
 }
 
 int decode_file(const char* filepath) {
     FILE* elf= fopen(filepath, "r");
 
     if (!elf) {
-        printf("Cannot open filepath %s with errno %d %s\n", filepath, errno, strerror(errno));
+        show_log("Cannot open filepath %s with errno %d %s\n", filepath, errno, strerror(errno));
         return -1;
     }
 
@@ -191,9 +213,9 @@ void load_proc_maps() {
         };
 
         if (map.inode == file_inode) {
-            printf("GOt matching indoe\n");
+            show_log("GOt matching indoe\n");
             ProcMap_arr_add(&pt_load_maps, map);
-        } else printf("Mismatch inode map %ld file %ld\n", map.inode, file_inode);
+        } else show_log("Mismatch inode map %ld file %ld\n", map.inode, file_inode);
 
         ProcMap_arr_add(&proc_maps, map);
     }
@@ -237,7 +259,7 @@ int raddr_in_pt_procmap(const void* r_addrp, const void* procmapp) {
     const uintptr_t addr= *(const uintptr_t*)r_addrp;
     const ProcMap* procMap= procmapp;
 
-    printf("Proc map %#lx %#lx\n", procMap->base, procMap->end);
+    show_log("Proc map %#lx %#lx\n", procMap->base, procMap->end);
 
     if ((uintptr_t)procMap->base > addr) {
         return -1;
@@ -254,8 +276,8 @@ int vaddr_in_pt_procmap_range(const void* addrp, const void* procmapp) {
     const ProcMap* procMap= procmapp;
 
     const size_t map_size= procMap->end - procMap->base;
-    printf("Proc map %p %p\n", procMap->base, procMap->end);
-    printf("Got addr %lx checking against %lx-%lx\n", addr, procMap->offset, procMap->offset + map_size);
+    show_log("Proc map %p %p\n", procMap->base, procMap->end);
+    show_log("Got addr %lx checking against %lx-%lx\n", addr, procMap->offset, procMap->offset + map_size);
 
     if (procMap->offset > addr) {
         return -1;
@@ -268,7 +290,7 @@ int vaddr_in_pt_procmap_range(const void* addrp, const void* procmapp) {
 }
 
 ProcMap* get_procmap_at_vaddr(uintptr_t vaddr) {
-    printf("There are %zu entries\n", pt_load_maps.pos);
+    show_log("There are %zu entries\n", pt_load_maps.pos);
     const uint pos= ProcMap_arr_search(&pt_load_maps, &vaddr, vaddr_in_pt_procmap_range);
 
     if (pos == (uint)-1) return NULL;
@@ -277,9 +299,9 @@ ProcMap* get_procmap_at_vaddr(uintptr_t vaddr) {
 }
 
 ProcMap* get_procmap_at_raddr(uintptr_t raddr) {
-    printf("There are %zu entries\n", pt_load_maps.pos);
+    show_log("There are %zu entries\n", pt_load_maps.pos);
     const uint pos= ProcMap_arr_search(&pt_load_maps, &raddr, raddr_in_pt_procmap);
-    printf("POSITION RESULT: %u\n", pos);
+    show_log("POSITION RESULT: %u\n", pos);
 
     if (pos == (uint)-1) return NULL;
 
@@ -307,37 +329,96 @@ uintptr_t runtime_to_virtual_addr(uintptr_t r_addr) {
     if (proc_map == NULL) return 0;
 
     ProgSeg* seg= proc_map->seg;
-    printf("Segment is %p\n",seg);
+    show_log("Segment is %p\n",seg);
     if (seg == NULL) return 0;
 
     uintptr_t s_paddr= seg->p_vaddr;
-    printf("segment pvaddr: %#lx\n", s_paddr);
+    show_log("segment pvaddr: %#lx\n", s_paddr);
 
     uintptr_t res= s_paddr + (r_addr - proc_map->base);
-    printf("Res; %#lx\n", res);
+    show_log("Res; %#lx\n", res);
     return res;
 }
 
-long long single_step_assembly() {
+long long unsafe_single_step() {
     return ptrace(PTRACE_SINGLESTEP, target.pid, 0, NULL);
 }
 
-uint64_t get_cfa() {
+long long cf_single_step_assembly() {
+    return target.target_cf_main(false);
+}
+
+uint64_t get_cfa(bool* succ) {
     const uintptr_t pc= target.target_get_pc();
     const uintptr_t vaddr= target.target_addr_runtime_to_virtual(pc);
-    printf("Getting fde for %#lx\n", vaddr);
 
-    const FDE_Entry* fde= get_fde_for_pc(vaddr);
-    printf("Got fde %p\n", fde);
-
-    create_matrix_of(fde);
-
+    return cfa_value_at(vaddr, succ);
 }
 
 uintptr_t get_return_addr() {
-    uintptr_t pc= target.target_get_pc();
+    const uintptr_t pc= target.target_get_pc();
+    const uintptr_t vaddr= target.target_addr_runtime_to_virtual(pc);
 
+    const FDE_Entry* fde= get_fde_for_pc(vaddr);
+    const CIE_Entry* cie= fde->cie_entry;
 
+    bool succ;
+    return reg_value_at(vaddr, &succ, cie->return_address_register);
+}
+
+#include <sys/uio.h>
+ssize_t process_vm_readv(pid_t pid,
+                         const struct iovec *local_iov,
+                         unsigned long liovcnt,
+                         const struct iovec *remote_iov,
+                         unsigned long riovcnt,
+                         unsigned long flags);
+
+ssize_t process_vm_writev(pid_t pid,
+                          const struct iovec *local_iov,
+                          unsigned long liovcnt,
+                          const struct iovec *remote_iov,
+                          unsigned long riovcnt,
+                          unsigned long flags);
+
+Data get_data_runtime(runtime_addr addr, uint32_t bytes) {
+    char* buff= malloc(bytes);
+    struct iovec l;
+    l.iov_base= buff;
+    l.iov_len= bytes;
+    struct iovec r;
+    r.iov_base= (void*)addr;
+    r.iov_len= bytes;
+
+    const ssize_t read= process_vm_readv(target.pid, &l, 1, &r, 1, 0);
+    if (read != bytes) {
+        perror("Cannot read vm readv\n");
+    }
+    hlog("Read %zu byte from target\n", read);
+    for (int j = 0; j < bytes; ++j) {
+        show_log("%02hhX ", buff[j]);
+    }
+    putchar('\n');
+
+    return (Data) {
+        .raw_data= l.iov_base,
+        .data_size= bytes,
+    };
+}
+
+Data get_data_virtual(virtual_addr addr, uint32_t bytes) {
+    const runtime_addr raddr= target.target_addr_runtime_to_virtual(addr);
+
+    return get_data_runtime(raddr, bytes);
+}
+
+const char* info_main_file_path() {
+    const DIE* main_cu= get_main_cu();
+    show_log("Got the main cu as %p\n", main_cu);
+
+    if (main_cu == NULL) return NULL;
+
+    return cu_get_filename(main_cu);
 }
 
 void linux_init_target(Target* target) {
@@ -352,9 +433,16 @@ void linux_init_target(Target* target) {
     target->target_place_bp_at_line= place_bp_at_line;
     target->target_remove_bp_at_line= remove_bp_at_line;
 
-    target->target_single_step_assembly= single_step_assembly;
+    target->target_cf_single_step_assembly= cf_single_step_assembly;
+    target->target_unsafe_single_step= unsafe_single_step;
 
     target->target_addr_runtime_to_virtual= runtime_to_virtual_addr;
+    target->target_addr_virtual_to_runtime= virtual_to_runtime_addr;
     target->target_get_return_addr= get_return_addr;
     target->target_get_cfa= get_cfa;
+
+    target->target_get_data_runtime= get_data_runtime;
+    target->target_get_data_virtual= get_data_virtual;
+
+    target->target_info_main_file_path= info_main_file_path;
 }
