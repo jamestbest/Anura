@@ -81,6 +81,26 @@ int tui_loop() {
                     }
                 )
             );
+        } else if (MATCH_STR("del")) {
+            sscanf(buff, "set %d", &line);
+            LineAddrRes res= line2startaddr(line);
+            if (!res.succ) {
+                printf("There is no code on line %d\n", line);
+                continue;
+            }
+
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_BP_REMOVE,
+                    (ACTION_DATA){
+                        .BP_REMOVE= {
+                            .addr= res.addr,
+                            .line= line
+                        }
+                    }
+                )
+            );
         } else if (MATCH_STR("cont")) {
             printf("tui Continuing process\n");
             errno= 0;
@@ -129,6 +149,24 @@ int tui_loop() {
                     NO_DATA
                 )
             );
+        } else if (MATCH_STR("out")) {
+            printf("Stepping out\n");
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_CF_STEP_OUT,
+                    NO_DATA
+                )
+            );
+        } else if (MATCH_STR("regs")) {
+            printf("Sending request for registers\n");
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_DS_REGS,
+                    NO_DATA
+                )
+            );
         } else if (MATCH_STR("list")) {
             print_breakpoints();
         } else {
@@ -138,3 +176,14 @@ int tui_loop() {
 
     return 0;
 }
+
+void display_labelled_regs(LabelledRegs lregs) {
+    printf("Regs: \n");
+    for (size_t i = 0; i < lregs.regs.pos; ++i) {
+        const LabelledReg* reg= LabelledReg_arr_ptr(&lregs.regs, i);
+
+        printf("\t%s (%u): %#lx\n", reg->name, reg->reg_num, reg->reg.value.general);
+    }
+    newline();
+}
+
