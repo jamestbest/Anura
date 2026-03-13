@@ -20,6 +20,7 @@
 #include <sys/user.h>
 #include <sys/uio.h>
 
+#include "Errors.h"
 #include "Saruman/Saruman.h"
 
 #define SW_INT_TYPE (unsigned char)
@@ -28,46 +29,105 @@ _Static_assert(SW_INT_TYPE SW_INT_CODE == SW_INT_CODE);
 
 _Static_assert(sizeof SW_INT_TYPE == sizeof ((BPInfo){0}.data.shadow), "The shadow element should encapsulate all data lost from the Software interrupt code");
 
+long long aligned_write(uintptr_t address, uint8_t value, uint8_t* existing_value);
+
 long long remove_hw_bp(uint8_t bp_register) {
     long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
 
-    r7 &= 0 << (bp_register << 1); // enable LOCAL BREAKPOINT free_bp
+    r7 &= 0 << (bp_register << 1); // disable LOCAL BREAKPOINT
 
     long long res= 0;
     res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[7]), r7);
     if (res != 0) return res;
 
     res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[bp_register]), (long long)0);
+    printf("Removed hw bp in register %u\n", bp_register);
     return res;
 }
 
-long long remove_sw_bp(BPInfo* info, bool last_at_addr) {
+long long remove_sw_bp(BPInfo* info) {
+    const uintptr_t address= info->addr;
+    const long long res= aligned_write(address, info->data.shadow, NULL);
+    if (res != 0) return res;
 
+    printf("Removed sw bp @%#lx with shadow %u\n", info->addr, info->data.shadow);
+
+    return SUCCESS;
 }
 
-long long remove_bp(BPInfo* bp, bool last_at_addr) {
+long long remove_bp(BPInfo* bp) {
     switch (bp->type) {
         case BP_HARDWARE: return remove_hw_bp(bp->data.bp);
-        case BP_SOFTWARE:
-            break;
-        case BP_SOURCE_SINGLE_STEP_TRAP: return 0;
-        case BP_TYPE_COUNT: assert(false);
+        case BP_SOFTWARE: return remove_sw_bp(bp);
+
+        case BP_SOURCE_SINGLE_STEP_TRAP:
+        case BP_TYPE_COUNT:
+        default:
+            assert(false);
     }
 }
 
-long long remove_bps_at_line(uint32_t line) {
-    const LineAddrRes res= line2startaddr(line);
-    if (!res.succ) return -1;
+long long remove_bp_at_addr(uintptr_t addr, BP_REASON reason);
 
-    for (int i = 0; i < bp_info.pos; ++i) {
-        const BPAddressInfo* info= BPAddressInfo_arr_ptr(&bp_info, i);
-        if (info->address != res.addr) continue;
+long long remove_bp_at_addr(uintptr_t addr, BP_REASON reason) {
+    const size_t i= BPAddressInfo_arr_search_i(&bp_info, addr);
+    BPAddressInfo* info= BPAddressInfo_arr_ptr(&bp_info, i);
+    if (!info) return FAIL;
 
+    decrement_by_reason(info, reason);
 
+    if (info->bp_count == 0) {
+        const long long res= remove_bp(&info->canonical_bp);
+        if (res == SUCCESS) {
+            BPAddressInfo_arr_remove(&bp_info, i);
+        }
+        return res;
     }
+
+    return SUCCESS;
 }
 
-long long place_bp(void* address, uint32_t line) {
+long long aligned_write(uintptr_t address, uint8_t value, uint8_t* existing_value) {
+    // we want to read just 1 byte of data for the shadow, but this might not be an aligned read
+    // so we'll find the nearest 8 aligned boundry which includes the address and then shift out the rest
+    //  save this alignment offset for later writing the shadow back
+    const uintptr_t a_addr= ((long long)address & ~0b111);
+    unsigned int offset= address - a_addr;
+
+    errno= 0;
+    uint64_t data= ptrace(PTRACE_PEEKDATA, target.pid, a_addr, a_addr);
+
+    if (data == -1 && errno) {
+        return errno;
+    }
+
+    offset <<= 3; // * 8 to get the number of bits
+    if (existing_value)
+        *existing_value= ((data >> offset) & 0xFFUL);
+    data= ((long long)value << offset) | (data & ~(0xFFL << offset));
+
+    return ptrace(PTRACE_POKETEXT, target.pid, a_addr, data);
+}
+
+long long readd_sw_bp(BPInfo* bp) {
+    printf("Readding sw bp @%#lx\n", bp->addr);
+    if (bp->type != BP_SOFTWARE) return FAIL;
+
+    target.target_get_data_runtime(bp->addr, 16);
+    long long res= aligned_write(bp->addr, SW_INT_CODE, &bp->data.shadow);
+    target.target_get_data_runtime(bp->addr, 16);
+
+    target.target_get_data_runtime(target.target_get_pc(), 16);
+
+    return res;
+}
+
+long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason);
+long long place_temp_bp(uintptr_t address, BP_REASON reason) {
+    return place_bp(address, -1, reason);
+}
+
+long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
     long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
 
     bool bp_used[4]= {0};
@@ -78,26 +138,15 @@ long long place_bp(void* address, uint32_t line) {
         if (!used && (free_bp == (unsigned int)-1)) free_bp= j;
     }
     // if there is a local or global breakpoint enabled for all bps then we cannot create a hardware breakpoint
-    if (free_bp == -1) {
-        // we want to read just 1 byte of data for the shadow, but this might not be an aligned read
-        // so we'll find the nearest 8 aligned boundry which includes the address and then shift out the rest
-        //  save this alignment offset for later writing the shadow back
-        void* a_addr= (void*)((long long)address & ~0b111);
-        unsigned int offset= address - a_addr;
+    if (free_bp == -1 || true) {
+        uint8_t shadow;
 
-        errno= 0;
-        long long data= ptrace(PTRACE_PEEKDATA, target.pid, a_addr, a_addr);
+        target.target_get_data_runtime(address - 8, 16);
 
-        if (data == -1 && errno) {
-            return errno;
-        }
+        const long long res= aligned_write(address, SW_INT_CODE, &shadow);
+        if (res != 0) return res;
 
-        offset <<= 3; // * 8 to get the number of bits
-        char shadow= ((data >> offset) & 0xFFUL);
-        data= ((long long)SW_INT_CODE << offset) | (data & ~(0xFFL << offset));
-
-        long long res= ptrace(PTRACE_POKETEXT, target.pid, a_addr, data);
-        if (res == -1) return errno;
+        target.target_get_data_runtime(address - 8, 16);
 
         BPAddressInfo* addr_info= get_or_add_bp_address_info(address,
             (BPInfo){
@@ -105,7 +154,8 @@ long long place_bp(void* address, uint32_t line) {
                 .line= line,
                 .type= BP_SOFTWARE,
                 .data.shadow= shadow
-            }
+            },
+            reason
         );
 
         return 0;
@@ -127,7 +177,8 @@ long long place_bp(void* address, uint32_t line) {
             .line= line,
             .type= BP_HARDWARE,
             .data.bp= free_bp
-        }
+        },
+        reason
     );
 
     return res;
@@ -157,8 +208,9 @@ void interrupt_handler_setup() {
 struct user_regs_struct get_regs(bool* succ) {
     struct user_regs_struct regs;
 
+    errno= 0;
     const long res= ptrace(PTRACE_GETREGS, target.pid, NULL, &regs);
-    if (res) *succ=false;
+    if (res != -1 && errno == 0) *succ=false;
 
     *succ= true;
     return regs;
@@ -488,6 +540,8 @@ XSaveRegisters get_all_regs(bool* succ) {
     }
 
     set_xsave_data(extended_data, &regs);
+
+    return regs;
 }
 
 uintptr_t get_pc() {
@@ -498,25 +552,65 @@ uintptr_t get_pc() {
     return -1;
 }
 
-long cf_continue() {
+long long cf_main(bool is_continue) {
+    // each time cf moves forward it could be that we're sitting on a sw bp
+    // in which case we need to replace the shadow then single step
+    // then replace the shadow again and either continue or stop based on the cf movement
+    printf("Checking sw bp\n");
+    const uintptr_t pc = target.target_get_pc();
+    const BPAddressInfo* bp= BPAddressInfo_arr_search_ie(&bp_info, pc);
+
+    if (!bp || bp->canonical_bp.type != BP_SOFTWARE) {
+        printf("There is no sw bp here\n");
+        if (is_continue) return target.target_unsafe_continue();
+        return target.target_unsafe_single_step();
+    }
+
+    printf("There is a sw bp here\n");
+
+    const uint8_t shadow= bp->canonical_bp.data.shadow;
+    const uintptr_t addr= pc;
+
+    target.target_get_data_runtime(addr - 8, 16);
+
+    const long long res= aligned_write(addr, shadow, NULL);
+    if (res != SUCCESS) return res;
+
+    target.target_get_data_runtime(addr - 8, 16);
+
+    target.sw_bp_to_readd_addr= bp->canonical_bp.addr;
+    target.sw_bp_should_continue= is_continue;
+
+    target.target_unsafe_single_step();
+
+    return SUCCESS;
+}
+
+long long cf_continue() {
+    return target.target_cf_main(true);
+}
+
+long long unsafe_continue() {
     return ptrace(PTRACE_CONT, target.pid, 0, 0);
 }
 
-typedef union RegValue {
-    uint64_t general;
-    __m128 vector[4];
-} RegValue;
-
-typedef enum RegValueType {
-    REGVAL_GENERAL,
-    REGVAL_VECTOR,
-    REGVAL_ERROR
-} RegValueType;
-
-typedef struct Reg {
-    RegValueType type;
-    RegValue value;
-} Reg;
+#define DW_REG_ENC_RAX 0
+#define DW_REG_ENC_RDX 1
+#define DW_REG_ENC_RCX 2
+#define DW_REG_ENC_RBX 3
+#define DW_REG_ENC_RSI 4
+#define DW_REG_ENC_RDI 5
+#define DW_REG_ENC_RBP 6
+#define DW_REG_ENC_RSP 7
+#define DW_REG_ENC_R8 8
+#define DW_REG_ENC_R9 9
+#define DW_REG_ENC_R10 10
+#define DW_REG_ENC_R11 11
+#define DW_REG_ENC_R12 12
+#define DW_REG_ENC_R13 13
+#define DW_REG_ENC_R14 14
+#define DW_REG_ENC_R15 15
+#define DW_REG_ENC_RIP 16
 
 uint64_t get_general_reg_value(const uint16_t register_id, bool* succ) {
     *succ= true;
@@ -524,23 +618,23 @@ uint64_t get_general_reg_value(const uint16_t register_id, bool* succ) {
     if (!*succ) return -1;
 
     switch (register_id) {
-        case 0: return regs.rax;
-        case 1: return regs.rdx;
-        case 2: return regs.rcx;
-        case 3: return regs.rbx;
-        case 4: return regs.rsi;
-        case 5: return regs.rdi;
-        case 6: return regs.rbp;
-        case 7: return regs.rsp;
-        case 8: return regs.r8;
-        case 9: return regs.r9;
-        case 10: return regs.r10;
-        case 11: return regs.r11;
-        case 12: return regs.r12;
-        case 13: return regs.r13;
-        case 14: return regs.r14;
-        case 15: return regs.r15;
-        case 16: return target.target_get_return_addr();
+        case DW_REG_ENC_RAX: return regs.rax;
+        case DW_REG_ENC_RDX: return regs.rdx;
+        case DW_REG_ENC_RCX: return regs.rcx;
+        case DW_REG_ENC_RBX: return regs.rbx;
+        case DW_REG_ENC_RSI: return regs.rsi;
+        case DW_REG_ENC_RDI: return regs.rdi;
+        case DW_REG_ENC_RBP: return regs.rbp;
+        case DW_REG_ENC_RSP: return regs.rsp;
+        case DW_REG_ENC_R8: return regs.r8;
+        case DW_REG_ENC_R9: return regs.r9;
+        case DW_REG_ENC_R10: return regs.r10;
+        case DW_REG_ENC_R11: return regs.r11;
+        case DW_REG_ENC_R12: return regs.r12;
+        case DW_REG_ENC_R13: return regs.r13;
+        case DW_REG_ENC_R14: return regs.r14;
+        case DW_REG_ENC_R15: return regs.r15;
+        case DW_REG_ENC_RIP: return regs.rip;
 
         case 49: return regs.eflags;
         case 50: return regs.es;
@@ -554,6 +648,7 @@ uint64_t get_general_reg_value(const uint16_t register_id, bool* succ) {
         case 59: return regs.gs_base;
         default: *succ=false;
     }
+    return -1;
 }
 
 // this mapping is based on the ABI https://gitlab.com/x86-psABIs/x86-64-ABI
@@ -590,15 +685,73 @@ Reg get_register_value(const uint16_t register_id) {
     return (Reg) {.type= REGVAL_ERROR};
 }
 
+uint64_t get_general_reg_at(const uintptr_t addr) {
+    return ptrace(PTRACE_PEEKDATA, target.pid, addr, 0);
+}
+
+#define REG_COUNT 17
+
+LabelledRegs get_labelled_regs() {
+    LabelledRegs lregs= (LabelledRegs) {
+        .string_buff= buffer_create(BUFF_MIN),
+        .regs= LabelledReg_arr_construct(REG_COUNT)
+    };
+
+    for (int i = 0; i < REG_COUNT; ++i) {
+        const char* name= "Unknown register";
+        switch (i) {
+            case DW_REG_ENC_RAX: name= "RAX"; break;
+            case DW_REG_ENC_RDX: name= "RDX"; break;
+            case DW_REG_ENC_RCX: name= "RCX"; break;
+            case DW_REG_ENC_RBX: name= "RBX"; break;
+            case DW_REG_ENC_RSI: name= "RSI"; break;
+            case DW_REG_ENC_RDI: name= "RDI"; break;
+            case DW_REG_ENC_RBP: name= "RBP"; break;
+            case DW_REG_ENC_RSP: name= "RSP"; break;
+            case DW_REG_ENC_R8: name= "R8"; break;
+            case DW_REG_ENC_R9: name= "R9"; break;
+            case DW_REG_ENC_R10: name= "R10"; break;
+            case DW_REG_ENC_R11: name= "R11"; break;
+            case DW_REG_ENC_R12: name= "R12"; break;
+            case DW_REG_ENC_R13: name= "R13"; break;
+            case DW_REG_ENC_R14: name= "R14"; break;
+            case DW_REG_ENC_R15: name= "R15"; break;
+            case DW_REG_ENC_RIP: name= "RIP"; break;
+            default: break;
+        }
+
+        const Reg reg= target.target_get_reg(i);
+        LabelledReg_arr_add(&lregs.regs, (LabelledReg) {
+            .name= name,
+            .reg_num= i,
+            .reg= reg
+        });
+    }
+
+    return lregs;
+};
+
 int linux_x64_init_target(Target* t) {
     linux_init_target(t);
 
     t->target_place_bp_at_addr= place_bp;
+    t->target_remove_bp_at_addr= remove_bp_at_addr;
     t->target_breakpoint_hit_cleanup= breakpoint_hit_cleanup;
     t->target_interrupt= interrupt;
     t->target_interrupt_handler_setup= interrupt_handler_setup;
     t->target_cf_continue= cf_continue;
+    t->target_unsafe_continue= unsafe_continue;
     t->target_get_pc= get_pc;
+
+    t->target_get_reg= get_register_value;
+    t->target_get_general_reg_at= get_general_reg_at;
+    t->target_get_labelled_regs= get_labelled_regs;
+
+    t->target_place_temp_bp= place_temp_bp;
+    t->target_aligned_write= aligned_write;
+    t->target_readd_sw_bp= readd_sw_bp;
+
+    t->target_cf_main= cf_main;
 
     return 0;
 }
