@@ -36,11 +36,6 @@ PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
         return -1;
     }
 
-    if (pipe(target.stdio_pipe) == -1) {
-        show_err("pipe");
-        return -1;
-    }
-
     show_log("The file inode is for %s\n", path);
     file_inode= file_stats.st_ino;
 
@@ -49,24 +44,24 @@ PROCESS_ID launch_process(const char* path, uint32_t argc, const char* argv[]) {
     if (pid == 0) {
         ptrace(PTRACE_TRACEME, getpid(), NULL, 0);
 
-        printf("Making the stdio pipes\n");
-        // close(target.stdio_pipe[0]);
-        // dup2(target.stdio_pipe[1], STDOUT_FILENO);
-        // dup2(target.stdio_pipe[1], STDERR_FILENO);
-        // close(target.stdio_pipe[1]);
-        printf("They are now %d\n", target.stdio_pipe[1]);
+        printf("Making the stdio pipes!\n");
         fflush(stdout);
+        close(target.target_io_pipe[0]);
+        dup2(target.target_io_pipe[1], STDOUT_FILENO);
+        // dup2(target.stdio_pipe[1], STDERR_FILENO);
+        close(target.target_io_pipe[1]);
 
-        show_log("Im the sub proc with pid %d about to become %s\n", getpid(), path);
+        printf("Im the sub proc with pid %d about to become %s\n", getpid(), path);
+
         // we're the sub proc
         int ret= execvp(path, (char* const*)argv);
         show_err("Sub process failed to execv\n");
         exit(127);
     } else {
-        // close(target.stdio_pipe[1]);
+        close(target.target_io_pipe[1]);
 
-        const int flags= fcntl(target.stdio_pipe[0], F_GETFL, 0);
-        fcntl(target.stdio_pipe[0], F_SETFL, flags | O_NONBLOCK);
+        const int flags= fcntl(target.target_io_pipe[0], F_GETFL, 0);
+        fcntl(target.target_io_pipe[0], F_SETFL, flags | O_NONBLOCK);
     }
 
     return pid;
@@ -394,11 +389,12 @@ Data get_data_runtime(runtime_addr addr, uint32_t bytes) {
     if (read != bytes) {
         perror("Cannot read vm readv\n");
     }
+
     hlog("Read %zu byte from target\n", read);
     for (int j = 0; j < bytes; ++j) {
         show_log("%02hhX ", buff[j]);
     }
-    putchar('\n');
+    show_log("\n");
 
     return (Data) {
         .raw_data= l.iov_base,
