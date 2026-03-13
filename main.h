@@ -149,6 +149,8 @@ typedef struct LabelledRegs {
     LabelledRegArray regs;
 } LabelledRegs;
 
+extern int tui_pipe[2];
+
 void vlog(bool is_t, const char* message, va_list args);
 void tlog(const char* message, ...);
 void hlog(const char* message, ...);
@@ -157,6 +159,8 @@ void print_breakpoints();
 void display_labelled_regs(LabelledRegs lregs);
 
 void show_log(const char* message, ...);
+void vshow_log(const char* message, va_list args, const char* prefix);
+void show_newline();
 void show_err(const char* message, ...);
 
 void open_program(const char* filepath);

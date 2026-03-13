@@ -121,6 +121,8 @@ ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 
 BPAddressInfoArray bp_info;
 
+int tui_pipe[2];
+
 void increment_by_reason(BPAddressInfo* info, BP_REASON reason) {
     switch (reason) {
         case BP_REASON_STEP_OVER:
@@ -180,7 +182,7 @@ void tlog(const char* message, ...) {
 void hlog(const char* message, ...) {
     va_list args;
     va_start(args, message);
-    vlog(false, message, args);
+    vshow_log(message, args, "LOG(HOST): ");
     va_end(args);
 }
 
@@ -219,30 +221,30 @@ int breakpoint_program(const char* program) {
 }
 
 void print_breakpoints() {
-    printf("-----BREAKPOINTS-----\n");
-    printf("There are %zu locations with breakpoints\n", bp_info.pos);
+    show_log("-----BREAKPOINTS-----\n");
+    show_log("There are %zu locations with breakpoints\n", bp_info.pos);
 
     for (int j = 0; j < bp_info.pos; ++j) {
-        BPAddressInfo* addr_info= BPAddressInfo_arr_ptr(&bp_info, j);
+        const BPAddressInfo* addr_info= BPAddressInfo_arr_ptr(&bp_info, j);
 
-        printf("  - Addr: %#lx contains %u breakpoint(s) (%u USER and %u TEMP): \n", addr_info->address, addr_info->bp_count, addr_info->user_bp_count, addr_info->temp_bp_count);
+        show_log("  - Addr: %#lx contains %u breakpoint(s) (%u USER and %u TEMP): \n", addr_info->address, addr_info->bp_count, addr_info->user_bp_count, addr_info->temp_bp_count);
 
         const BPInfo* bp= &addr_info->canonical_bp;
 
-        printf("    + Canonical BP of Type %s with data ", BP_TYPE_STRS[bp->type]);
+        show_log("    + Canonical BP of Type %s with data ", BP_TYPE_STRS[bp->type]);
 
         switch (bp->type) {
             case BP_HARDWARE:
-                printf("BP No. %u", bp->data.bp);
+                show_log("BP No. %u", bp->data.bp);
                 break;
             case BP_SOFTWARE:
-                printf("SHADOW 0x%x", bp->data.shadow);
+                show_log("SHADOW 0x%x", bp->data.shadow);
                 break;
             case BP_SOURCE_SINGLE_STEP_TRAP:
-                printf("No data");
+                show_log("No data");
                 break;
         }
-        printf(" on line %u\n", bp->line);
+        show_log(" on line %u\n", bp->line);
     }
 }
 
@@ -279,7 +281,7 @@ Action* create_action(ACTION_TYPE type, ACTION_DATA data) {
 
     return action;
 }
-Re
+
 void open_program(const char* filepath) {
     target.target_decode_file(filepath);
 
@@ -328,6 +330,29 @@ void show_log(const char* message, ...) {
     g_idle_add(terminal_log, buffer);
 }
 
+void vshow_log(const char* message, va_list args, const char* prefix) {
+    char* buffer= va_to_string(message, args);
+    const ssize_t len= strlen(buffer) + strlen(prefix) + 1;
+    char* big_buff= malloc(len);
+    snprintf(big_buff, len, "%s%s", prefix, buffer);
+    free(buffer);
+
+    printf("%s", big_buff);
+
+    g_idle_add(terminal_log, big_buff);
+}
+
+void show_newline() {
+    g_idle_add(terminal_newline, NULL);
+}
+
+void* tui_thread_create(void* data) {
+    tui_setup();
+    tui_loop();
+
+    return NULL;
+}
+
 // talking about step over
 // talking about things that arent' supported but there is information that could be in place by the compiler
 // break point on an if that is
@@ -342,20 +367,21 @@ int main(int argc, char* argv[]) {
 
     action_q= queueb_create();
 
+    pipe(target.target_io_pipe);
+    pipe(tui_pipe);
+
     pthread_t cmd_thread;
     pthread_create(&cmd_thread, NULL, control_thread_create, (void*)program);
 
-    pthread_t gui_thread;
-    printf("The stdio pipe before is %d\n", target.stdio_pipe[1]);
-    pthread_create(&gui_thread, NULL, gui_thread_create, target.stdio_pipe);
+    pthread_t tui_thread;
+    printf("The stdio pipe before is %d\n", target.target_io_pipe[1]);
+    pthread_create(&tui_thread, NULL, tui_thread_create, NULL);
 
-    tui_setup();
-    tui_loop();
+    create_gui(target.target_io_pipe);
 
     printf("Waiting for command thread to join\n");
     // here we can assume that the process has died
     pthread_join(cmd_thread, NULL);
-    pthread_join(gui_thread, NULL);
 
     return 0;
 }
