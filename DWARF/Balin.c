@@ -152,7 +152,12 @@ ARRAY_PROTO(uint64_t, u64)
 ARRAY_ADD(uint64_t, u64)
 ARRAY_ADD(DIE_DATA, DIEDATA)
 
+static DIEArray dies;
+static DIEArray cus;
 int parse_info(Section* section, TableArray* abbrev_tables) {
+    dies= DIE_arr_create();
+    cus= DIE_arr_create();
+
     uint8_t* section_start= section->data;
     const uint8_t* section_end= section_start + section->header->sh_size;
 
@@ -169,8 +174,42 @@ int parse_info(Section* section, TableArray* abbrev_tables) {
     return SUCCESS;
 }
 
+DIE* get_main_cu() {
+    if (cus.pos == 0) return NULL;
+
+    return DIE_arr_ptr(&cus, 0);
+}
+
+const char* die_data_get_str(const DIE_DATA* data, const DW_FORM form) {
+    switch (form) {
+        case DW_FORM_string: return data->string;
+        case DW_FORM_strp: return (char*)&ELF.section_map.debug_str.data[data->offset];
+        case DW_FORM_line_strp: return (char*)&ELF.section_map.debug_line_str.data[data->offset];
+
+        default: return NULL;
+    }
+}
+
+const char* cu_get_filename(const DIE* die) {
+    const Table* abbrev= die->type.table;
+    const TagData* tag= TagData_arr_ptr(&abbrev->abbrevs, die->type.abbrev);
+
+    printf("Looking for main filename");
+    if (tag->tag != DW_TAG_compile_unit) return NULL;
+
+    for (int i = 0; i < tag->attributes.pos; ++i) {
+        const ATData* attr= ATData_arr_ptr(&tag->attributes, i);
+
+        if (attr->attr == DW_AT_name) {
+            const DIE_DATA* data= DIEDATA_arr_ptr(&die->data, i);
+            return die_data_get_str(data, attr->form);
+        }
+    }
+
+    return NULL;
+}
+
 int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header, TableArray* abbrev_tables) {
-    DIEArray dies= DIE_arr_create();
     uint32_t depth= 0;
 
     const Table* table= find_table(abbrev_tables, header->abbrev_offset);
@@ -194,6 +233,7 @@ int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header,
 
         const TagData* tag= TagData_arr_ptr(&table->abbrevs, abbrev_code);
 
+        const bool is_cu= tag->tag == DW_TAG_compile_unit;
         DIE die= (DIE) {
             .type= (DIE_TYPE){.abbrev= abbrev_code, .table= table},
             .nesting= depth,
@@ -207,6 +247,8 @@ int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header,
         }
 
         DIE_arr_add(&dies, die);
+        if (is_cu) DIE_arr_add(&cus, die);
+
         print_die(&die);
         if (tag->has_children) depth++;
     }

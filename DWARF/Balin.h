@@ -300,5 +300,7 @@ typedef struct DIE {
 ARRAY_PROTO(DIE, DIE)
 
 DIE_DATA raa_die_data(uint8_t** start, DW_FORM form, const CU_HEADER* cu);
+DIE* get_main_cu();
+const char* cu_get_filename(const DIE* die);
 
 #endif //BALIN_H
