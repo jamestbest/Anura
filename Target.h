@@ -8,7 +8,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef uint64_t PROCESS_ID;
+#include "Buffer.h"
+#include "main.h"
 
 typedef struct LineAddrRes {
     bool succ;
@@ -20,19 +21,28 @@ typedef struct AddrLineRes {
     uint64_t line;
 } AddrLineRes;
 
-typedef enum BP_REASON {
-    BP_REASON_STEP_OVER,
-    BP_REASON_USER,
-} BP_REASON;
+typedef uintptr_t runtime_addr;
+typedef uintptr_t virtual_addr;
+
+typedef struct Data {
+    uint8_t* raw_data;
+    uint32_t data_size;
+} Data;
 
 typedef struct Target {
     PROCESS_ID pid;
 
+    int stdio_pipe[2];
+
+    uintptr_t sw_bp_to_readd_addr;
+    bool sw_bp_should_continue;
+
     long long (*target_place_bp_at_line)(uint32_t line);
-    long long (*target_place_bp_at_addr)(uintptr_t addr, uint32_t line);
+    long long (*target_place_bp_at_addr)(uintptr_t addr, uint32_t line, BP_REASON reason);
     long long (*target_place_temp_bp)(uintptr_t addr, BP_REASON reason);
 
-    long long (*target_remove_bp_at_line)(uint32_t line);
+    long long (*target_remove_bp_at_addr)(uintptr_t addr, BP_REASON reason);
+    long long (*target_remove_bp_at_line)(uint32_t line, BP_REASON reason);
 
     void (*target_breakpoint_hit_cleanup)();
 
@@ -44,18 +54,36 @@ typedef struct Target {
     long long (*target_attach_process)(PROCESS_ID pid);
     int (*target_decode_file)(const char* filepath);
 
-    long long (*target_single_step_assembly)();
+    long long (*target_unsafe_single_step)();
+    long long (*target_unsafe_continue)();
+
+    long long (*target_cf_single_step_assembly)();
+    long long (*target_cf_continue)();
+    long long (*target_cf_main)(bool is_continue);
 
     void (*target_interrupt)();
     void (*target_interrupt_handler_setup)();
 
     uintptr_t (*target_get_pc)();
-    long (*target_cf_continue)();
 
     uintptr_t (*target_addr_runtime_to_virtual)(uintptr_t r_addr);
+    uintptr_t (*target_addr_virtual_to_runtime)(uintptr_t v_addr);
 
     uintptr_t (*target_get_return_addr)();
-    uint64_t (*target_get_cfa)();
+    uint64_t (*target_get_cfa)(bool* succ);
+
+    Reg (*target_get_reg)(uint16_t register_id);
+    uint64_t (*target_get_general_reg_at)(uintptr_t addr);
+
+    long long (*target_aligned_write)(uintptr_t address, uint8_t value, uint8_t* existing_value);
+    long long (*target_readd_sw_bp)(BPInfo* bp);
+
+    LabelledRegs (*target_get_labelled_regs)();
+
+    Data (*target_get_data_runtime)(runtime_addr runtime_addr, uint32_t bytes);
+    Data (*target_get_data_virtual)(virtual_addr virtual_addr, uint32_t bytes);
+
+    const char* (*target_info_main_file_path)();
 } Target;
 
 typedef enum TARGETS {

@@ -508,8 +508,10 @@ ARange line2addr(uint32_t line) {
             // todo this misses dis-joint lines
             //  to link them though would be n^2
             //  so more likely is a linear bucket putter-er
-            while (next= MRow_arr_ptr(&matrix, ++j), next->line == line) {}
-            end=next;
+            while (next= MRow_arr_ptr(&matrix, ++j), next) {
+                end=next;
+                if (next->line != line) break;
+            }
 
             return (ARange){
                 .s= row->pc,
@@ -609,7 +611,7 @@ void print_header() {
 
 const LineAddrRes LINE_ADDR_RES_FAIL= (LineAddrRes) {
     .succ= false,
-    .addr= NULL
+    .addr= (uintptr_t)NULL
 };
 
 LineAddrRes line2startaddr(uint32_t l) {
@@ -619,11 +621,11 @@ LineAddrRes line2startaddr(uint32_t l) {
     if (off == -1) return LINE_ADDR_RES_FAIL;
 
     LNEntry* entry= (LNEntry*)&LN_info.entries[off];
-    LNData* data= (LNData*)entry + 1; // we only need the first instance as address is increasing from the LN program
+    const LNData* data= (LNData*)entry + 1; // we only need the first instance as address is increasing from the LN program
 
     return (LineAddrRes) {
         .succ= true,
-        .addr= (void*)data->start_offset
+        .addr= data->start_offset
     };
 }
 
