@@ -5,6 +5,6 @@
 #ifndef ISILDURSBANE_H
 #define ISILDURSBANE_H
 
-void* control_target(void* UNUSED);
+void* control_thread_create(void* data);
 
 #endif //ISILDURSBANE_H
