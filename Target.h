@@ -32,7 +32,7 @@ typedef struct Data {
 typedef struct Target {
     PROCESS_ID pid;
 
-    int stdio_pipe[2];
+    int target_io_pipe[2];
 
     uintptr_t sw_bp_to_readd_addr;
     bool sw_bp_should_continue;
