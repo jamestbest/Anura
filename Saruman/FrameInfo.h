@@ -126,6 +126,7 @@ typedef struct FDE_Entry {
 
 int parse_frame_info(Section* section, Section* hdr);
 FDE_Entry* get_fde_for_pc(uintptr_t pc);
-void create_matrix_of(const FDE_Entry* fde);
+uint64_t cfa_value_at(uintptr_t pc, bool* succ);
+uint64_t reg_value_at(uint64_t pc, bool* succ, uint16_t register_id);
 
 #endif //FRAMEINFO_H

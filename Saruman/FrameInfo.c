@@ -19,6 +19,7 @@
 #include "Errors.h"
 #include "Helper_String.h"
 #include "Sauron.h"
+#include "Target.h"
 
 static CIEOArray CIEs;
 static FDEArray FDEs;
@@ -812,15 +813,31 @@ void decode_and_execute_op(uint8_t** start, const CIE_Entry* cie) {
     execute_op(instr, cie);
 }
 
+void decode_and_execute_ops_until(uint8_t* base, uint64_t size, const CIE_Entry* cie, uintptr_t pc) {
+    const uint8_t* end= base + size;
+    while (base < end) {
+        printf("Checking matrix %#lx address against pc %#lx\n",
+            FrameRow_arr_peek(&matrix)->address,
+            pc
+        );
+
+        if (matrix.pos && FrameRow_arr_peek(&matrix)->address > pc) {
+            FrameRow_arr_pop(&matrix);
+            break;
+        }
+        decode_and_execute_op(&base, cie);
+    }
+}
+
 void decode_and_execute_ops(uint8_t* base, uint64_t size, const CIE_Entry* cie) {
     const uint8_t* end= base + size;
     while (base < end) {
         decode_and_execute_op(&base, cie);
     }
-
-    return;
 }
 
+
+//todo undo push
 void create_matrix_of(const FDE_Entry* fde) {
     create_matrix();
 
@@ -830,8 +847,92 @@ void create_matrix_of(const FDE_Entry* fde) {
     decode_and_execute_ops(fde->instructions, fde->instructions_size, fde->cie_entry);
 }
 
-uint64_t cfa_value_at(uintptr_t pc) {
-    
+uint64_t eval_cfa_rule(const CFARule rule) {
+    switch (rule.type) {
+        case CFA_DT_EXPRESSION:
+            assert(false);
+            break;
+        case CFA_DT_REG_OFF: {
+            const uint16_t reg= rule.data.reg_off.register_id;
+            const int64_t offset= rule.data.reg_off.offset;
+
+            const Reg value= target.target_get_reg(reg);
+
+            return value.value.general + offset;
+        }
+        default:
+            assert(false);
+    }
+}
+
+FrameRow* get_frame_row_at(uint64_t pc, bool* succ) {
+    create_matrix();
+
+    const FDE_Entry* fde= get_fde_for_pc(pc);
+    if (!fde) {
+        *succ= false;
+        return 0;
+    }
+
+    decode_and_execute_ops(fde->cie_entry->initial_instructions, fde->cie_entry->instructions_size, fde->cie_entry);
+    FrameRow* first= FrameRow_arr_ptr(&matrix, 0);
+    first->address= fde->initial_location.value;
+    decode_and_execute_ops_until(fde->instructions, fde->instructions_size, fde->cie_entry, pc);
+    FrameRow* last= FrameRow_arr_peek(&matrix);
+    if (!last) {
+        *succ= false;
+        return NULL;
+    }
+
+    *succ= true;
+    return last;
+}
+
+uint64_t eval_register_rule(const RegisterRule* rule, const uint16_t register_id, const uint64_t cfa) {
+    switch (rule->op) {
+        case DW_CFA_undefined:
+            return 0x12345678;
+        case DW_CFA_same_value:
+            return target.target_get_reg(register_id).value.general;
+        case DW_CFA_offset:
+        case DW_CFA_offset_extended:
+        case DW_CFA_offset_extended_sf:
+            return target.target_get_general_reg_at(cfa + rule->data.offset);
+        case DW_CFA_val_offset:
+        case DW_CFA_val_offset_sf:
+            return cfa + rule->data.offset;
+        case DW_CFA_register:
+            return target.target_get_reg(rule->data.reg).value.general;
+        case DW_CFA_expression:
+            // return target.target_get_general_reg_at(eval_expression(&rule->data.expr));
+        case DW_CFA_val_expression:
+            // return eval_expression(&rule->data.expr);
+        default: assert(false);
+    }
+}
+
+uint64_t reg_value_at(uint64_t pc, bool* succ, uint16_t register_id) {
+    const FrameRow* frame= get_frame_row_at(pc, succ);
+    if (!*succ) return 0;
+
+    const uint64_t cfa= eval_cfa_rule(frame->cfa_rule);
+
+    for (int i = 0; i < frame->register_rules.pos; ++i) {
+        const RegisterData* rd= RegisterData_arr_ptr(&frame->register_rules, i);
+        if (rd->register_id == register_id) {
+            return eval_register_rule(&rd->rule, register_id, cfa);
+        }
+    }
+
+    return target.target_get_reg(register_id).value.general;
+}
+
+
+uint64_t cfa_value_at(uintptr_t pc, bool* succ) {
+    const FrameRow* last= get_frame_row_at(pc, succ);
+    if (!*succ) return 0;
+
+    return eval_cfa_rule(last->cfa_rule);
 }
 
 FDE_Entry* get_fde_for_pc(const uintptr_t pc) {
@@ -841,7 +942,7 @@ FDE_Entry* get_fde_for_pc(const uintptr_t pc) {
 
     for (int i = 0; i < FDEs.pos; ++i) {
         FDE_Entry* fde= FDE_arr_ptr(&FDEs, i);
-        if (fde->initial_location.value <= pc && fde->initial_location.value + fde->address_range.value <= pc) {
+        if (fde->initial_location.value <= pc && fde->initial_location.value + fde->address_range.value >= pc) {
             return fde;
         }
     }
