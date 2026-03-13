@@ -315,13 +315,13 @@ const char* get_program_header_type_string(unsigned int id) {
 }
 
 void print_program_header(Elf64_Phdr* header) {
-    printf("Program header (%s)\n", get_program_header_type_string(header->p_type));
-    printf("\t%c%c%c ",
+    show_log("Program header (%s)\n", get_program_header_type_string(header->p_type));
+    show_log("\t%c%c%c ",
         header->p_flags & PF_R ? 'R' : ' ',
         header->p_flags & PF_W ? 'W' : ' ',
         header->p_flags & PF_X ? 'X' : ' '
     );
-//    printf()
+//    show_log()
 }
 
 #define SECTION_NAME_MATCH(str) (strcmp(&sstring_table[section.sh_name], str) == 0)
@@ -343,24 +343,24 @@ int decode(FILE* elf) {
     uint8_t class_id= ident[EI_CLASS];
     const char* class= EI_CLASS_STR[class_id % ELFCLASSNUM];
 
-    printf("ELF is of class %s\n", class);
+    show_log("ELF is of class %s\n", class);
 
     uint8_t data_id= ident[EI_DATA];
     const char* data= EI_DATA_STR[data_id % ELFDATANUM];
 
-    printf("ELF is of data encoding %s\n", data);
+    show_log("ELF is of data encoding %s\n", data);
 
     uint8_t version= ident[EI_VERSION];
-    printf("ELF is of version %u\n", version);
+    show_log("ELF is of version %u\n", version);
 
     uint8_t os_abi_id= ident[EI_OSABI];
     const char* os_abi= get_osabi_str(os_abi_id);
     uint8_t os_abi_version= ident[EI_ABIVERSION];
 
-    printf("ELF is of OS ABI type %s version %u\n", os_abi, os_abi_version);
+    show_log("ELF is of OS ABI type %s version %u\n", os_abi, os_abi_version);
 
     const Elf64_Ehdr header= ELF.header;
-    printf(
+    show_log(
         "ELF header information:\n"
         "  e_type: %s\n"
         "  e_machine: %s\n"
@@ -383,7 +383,7 @@ int decode(FILE* elf) {
 
     const Elf64_Shdr h_strs= ELF.sections[header.e_shstrndx];
 
-    printf("hstrs at %p\n", (void*)h_strs.sh_offset);
+    show_log("hstrs at %p\n", (void*)h_strs.sh_offset);
 
     char* sstring_table= malloc(h_strs.sh_size);
     fseek(elf, (long)h_strs.sh_offset, SEEK_SET);
@@ -392,7 +392,7 @@ int decode(FILE* elf) {
     for (int i = 0; i < header.e_shnum; ++i) {
         const Elf64_Shdr section= ELF.sections[i];
 
-        printf(
+        show_log(
                 "Section %s with type %u at %ld\n",
                 &sstring_table[section.sh_name],
                 section.sh_type,
@@ -405,10 +405,10 @@ int decode(FILE* elf) {
             fread(prog_data, sizeof (uint8_t), section.sh_size, elf);
 
             for (int j = 0; j < section.sh_size; ++j) {
-                printf("%02X ", prog_data[j]);
-                if (j % 16 == 15) putchar('\n');
+                show_log("%02X ", prog_data[j]);
+                if (j % 16 == 15) show_newline();
             }
-            putchar('\n');
+            show_newline();
 
             if (SECTION_NAME_MATCH(".debug_line")) {
                 ELF.section_map.debug_line= make_section(prog_data, i);

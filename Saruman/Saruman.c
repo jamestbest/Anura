@@ -167,10 +167,10 @@ static MRowArray matrix;
 
 void peek_text_at_addr(uintptr_t addr, uint16_t amount) {
     for (int j = 0; j < amount; ++j) {
-        printf("%02X ", text_data[j + addr - text_off]);
-        if (j % 16 == 15) putchar('\n');
+        show_log("%02X ", text_data[j + addr - text_off]);
+        if (j % 16 == 15) show_newline();
     }
-    putchar('\n');
+    show_newline();
 }
 
 FrameRow last_row= {0};
@@ -186,7 +186,7 @@ void new_row() {
     // 3. Append a row to the matrix using the current values of the state machine
     //   registers.
     // [[TODO]]
-    printf("MATRIX ROW line: %u  Col: %u  PC: %p  Discrim: %u\n",
+    show_log("MATRIX ROW line: %u  Col: %u  PC: %p  Discrim: %u\n",
         line, col, (void*)pc, discrim);
 
     last_row= row;
@@ -371,7 +371,7 @@ static int read_header(uint8_t* start, char* string_data) {
     base= read_initial_length(base, &info.hl_64, &mode);
 
     bc_start= (void*)(base + info.hl_64);
-    printf("ByteCode starts at addr %p from base of %p\n", bc_start, start);
+    show_log("ByteCode starts at addr %p from base of %p\n", bc_start, start);
 
     RAA(info.min_instr_length);
     if (info.version >= 4) {
@@ -394,12 +394,12 @@ static int read_header(uint8_t* start, char* string_data) {
         ubyte_arr_add(&info.opcode_lengths, res.v);
     }
 
-    printf("There are %zu standard op codes\n", info.opcode_lengths.pos);
+    show_log("There are %zu standard op codes\n", info.opcode_lengths.pos);
     for (size_t i= 0; i < info.opcode_lengths.pos; ++i) {
         uint8_t size= ubyte_arr_get(&info.opcode_lengths, i);
 
         // opcode names start at 1
-        printf(" Op %s %.2zu has %u operand(s)\n",
+        show_log(" Op %s %.2zu has %u operand(s)\n",
             DW_LNS_STRS[i + 1], i + 1, size);
     }
 
@@ -415,15 +415,15 @@ static int read_header(uint8_t* start, char* string_data) {
 
     for (int i= 26; i < 50; ++i) {
         ARange addr_r= line2addr(i);
-        printf("line[%d] is addr: %p-%p %s\n", i, (void*)addr_r.s, (void*)addr_r.e, addr_r.s == -1 ? "(NO LINE)" : "\nWith peek: ");
+        show_log("line[%d] is addr: %p-%p %s\n", i, (void*)addr_r.s, (void*)addr_r.e, addr_r.s == -1 ? "(NO LINE)" : "\nWith peek: ");
         if (addr_r.s != -1) peek_text_at_addr(addr_r.s, addr_r.e - addr_r.s);
     }
 
-    printf("CONVERSIONS: \n");
+    show_log("CONVERSIONS: \n");
     for (uintptr_t i = 0X145E; i < 0X14C6; ++i) {
         const AddrLineRes res= addr2line(i);
-        if (!res.succ) printf("Failed to convert %#lX to line\n", i);
-        else printf("Addr %#lX is line %lu\n", i, res.line);
+        if (!res.succ) show_log("Failed to convert %#lX to line\n", i);
+        else show_log("Addr %#lX is line %lu\n", i, res.line);
     }
 
     if (info.version < 5) {
@@ -439,17 +439,17 @@ static int read_header(uint8_t* start, char* string_data) {
         ULEB128 r= read_uleb128(base);
         base += r.size;
 
-        printf("Dir entries contain %s as a %s\n", DW_LNCT_STRS[l.v], form_strs(r.v));
+        show_log("Dir entries contain %s as a %s\n", DW_LNCT_STRS[l.v], form_strs(r.v));
     }
 
     ULEB128 dfc= read_uleb128(base);
     base += dfc.size;
 
-    printf("There are %lu directories.\n", dfc.v);
+    show_log("There are %lu directories.\n", dfc.v);
     for (size_t i= 0; i < dfc.v; ++i) {
         uint32_t off; // todo this offset can be uint64_t (bit64 mode)
         RAA(off);
-        printf("[%zu] is called %s\n", i, &string_data[off]);
+        show_log("[%zu] is called %s\n", i, &string_data[off]);
     }
     return 0;
 
@@ -579,8 +579,8 @@ void create_header() {
 }
 
 void print_header() {
-    printf("---HEADER INFO---\n");
-    printf("The header contains %u lines\n", LN_info.header.max_line);
+    show_log("---HEADER INFO---\n");
+    show_log("The header contains %u lines\n", LN_info.header.max_line);
     uint64_t zc= 0;
     uint64_t zs= 0;
     for (int i = 0; i < LN_info.header.max_line - 1; ++i) {
@@ -588,14 +588,14 @@ void print_header() {
 
         if (offset != -1) {
             if (zc != 0) {
-                printf("Lines [%lu-%lu] contain no code\n", zs, zs + zc - 1);
+                show_log("Lines [%lu-%lu] contain no code\n", zs, zs + zc - 1);
                 zc= 0;
             }
             LNEntry* entry= (LNEntry*)&LN_info.entries[offset];
-            printf("Line %u contains %u ranges\n", i, entry->cc);
+            show_log("Line %u contains %u ranges\n", i, entry->cc);
             for (int j = 0; j < entry->cc; ++j) {
                 LNData* child= ((LNData*)(entry + 1)) + j;
-                printf("  - %x:%x\n", child->start_offset, child->start_offset + child->size);
+                show_log("  - %x:%x\n", child->start_offset, child->start_offset + child->size);
             }
 
         } else {
@@ -652,7 +652,7 @@ LineRange* furthest_range_containing_addr(uintptr_t addr) {
 }
 
 AddrLineRes addr2line(uintptr_t addr) {
-    printf("Attempting to find line for addr %lX\n", addr);
+    show_log("Attempting to find line for addr %lX\n", addr);
     const LineRange* res= furthest_range_containing_addr(addr);
 
     if (res == NULL) {
@@ -713,7 +713,7 @@ void on_new_row_header() {
             LNData* child= &((LNData*)(entry + 1))[entry->cc - 1];
             child->size= row.pc - child->start_offset;
 
-            printf("Consecutive row %u found and updated with new size\n", row.line);
+            show_log("Consecutive row %u found and updated with new size\n", row.line);
         } else {
             // here we are not contigous
             //  and so we either add a new entry
@@ -798,5 +798,5 @@ void on_new_row_header() {
 }
 
 void print_line_range(LineRange* lr) {
-    printf("Line range: [%#lX, %#lX): %lu", lr->start_inclusive, lr->end_exclusive, lr->line);
+    show_log("Line range: [%#lX, %#lX): %lu", lr->start_inclusive, lr->end_exclusive, lr->line);
 }
