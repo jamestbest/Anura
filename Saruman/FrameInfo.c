@@ -19,21 +19,14 @@
 #include "Errors.h"
 #include "Helper_String.h"
 #include "Sauron.h"
-#include "Target.h"
 
 static CIEOArray CIEs;
 static FDEArray FDEs;
 
 static void print_fde(const FDE_Entry* entry);
 static void print_cie(const CIE_Entry* entry);
-static void decode_and_execute_ops(uint8_t* base, uint64_t size, const CIE_Entry* cie);
 
 static int read_header(uint8_t** start, uint8_t* section_start);
-
-static void add_row(uint64_t address);
-static void create_matrix();
-
-static void print_matrix();
 
 CIE_Entry* get_cie_entry_from_offset(uint64_t offset) {
     CIEAndOffset* res= CIEO_arr_search_ie(&CIEs, offset);
@@ -50,8 +43,6 @@ void add_cie_entry(CIE_Entry* entry, uint64_t offset) {
 void frame_info_init() {
     CIEs= CIEO_arr_create();
     FDEs= FDE_arr_create();
-
-    create_matrix();
 }
 
 void frame_info_destroy() {
@@ -161,6 +152,18 @@ int read_header(uint8_t** start, uint8_t* section_start) {
     *start= header_end;
 
     return res;
+}
+
+RegisterRule get_rule_for(const FrameRow* row, uint16_t register_id, bool* succ) {
+    for (int i = 0; i < row->register_rules.pos; ++i) {
+        const RegisterData data= RegisterData_arr_get(&row->register_rules, i);
+        if (data.register_id == register_id) {
+            *succ= true;
+            return data.rule;
+        }
+    }
+    *succ= false;
+    return (RegisterRule){0};
 }
 
 // https://refspecs.linuxbase.org/LSB_3.1.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html
@@ -294,77 +297,44 @@ uint64_t read_address(uint8_t** base_ptr, CIE_Entry* cie) {
     return raa_uint(base_ptr, addr_size);
 }
 
-typedef union RRData {
-    int64_t offset;
-    uint8_t reg;
-    DW_EXPR expr;
-} RRData;
-
-typedef struct RegisterRule {
-    FI_OPCODE op;
-    RRData data;
-} RegisterRule;
-
-typedef struct RegisterData {
-    uint8_t register_id;
-    RegisterRule rule;
-} RegisterData;
-
-static void add_register(uint8_t register_id, FI_OPCODE op, RRData data);
-
-ARRAY_PROTO(RegisterData, RegisterData)
 ARRAY_ADD(RegisterData, RegisterData)
-
-typedef union CFAData {
-    DW_EXPR expr;
-    struct {
-        uint8_t register_id;
-        int64_t offset;
-    } reg_off;
-} CFAData;
-
-typedef enum CFADataType {
-    CFA_DT_EXPRESSION,
-    CFA_DT_REG_OFF
-} CFADataType;
-
-typedef struct CFARule {
-    CFADataType type;
-    CFAData data;
-} CFARule;
-
-typedef struct MRow {
-    uint64_t address;
-    CFARule cfa_rule;
-    RegisterDataArray register_rules;
-} FrameRow;
 
 ARRAY_PROTO(FrameRow, FrameRow)
 ARRAY_ADD(FrameRow, FrameRow)
 
 typedef FrameRowArray Matrix;
 
-static Matrix matrix;
 static FrameRowArray row_stack;
 
-void create_matrix() {
-    if (matrix.arr) FrameRow_arr_destroy(&matrix);
-    matrix= FrameRow_arr_create();
-    add_row(0);
+static void print_matrix(Matrix* m);
+static Matrix create_matrix();
+static void add_row(Matrix* matrix, uint64_t address);
+static void add_register(Matrix* matrix, uint8_t register_id, FI_OPCODE op, RRData data);
+static void execute_op(Matrix* matrix, Instruction instr, const CIE_Entry* cie);
+static void decode_and_execute_op(Matrix* matrix, uint8_t** start, const CIE_Entry* cie);
+static void decode_and_execute_ops(Matrix* matrix, uint8_t* base, uint64_t size, const CIE_Entry* cie);
+
+Matrix create_matrix() {
+    if (row_stack.arr) FrameRow_arr_destroy(&row_stack);
+
+    Matrix res= FrameRow_arr_create();
+    add_row(&res, 0);
     row_stack= FrameRow_arr_create();
+
+    return res;
 }
 
-void add_row(uint64_t address) {
-    FrameRow row= (FrameRow) {
+void add_row(Matrix* matrix, uint64_t address) {
+    const FrameRow row= (FrameRow) {
         .address= address,
         .register_rules= RegisterData_arr_create()
     };
 
-    FrameRow_arr_add(&matrix, row);
+    FrameRow_arr_add(matrix, row);
 }
 
-void add_row_copied(const uintptr_t address) {
-    FrameRow* prev= FrameRow_arr_peek(&matrix);
+void add_row_copied(Matrix* matrix, const uintptr_t address) {
+    FrameRow* prev= FrameRow_arr_peek(matrix);
     if (!prev) assert(false);
 
     FrameRow row= (FrameRow) {
@@ -377,11 +347,11 @@ void add_row_copied(const uintptr_t address) {
         RegisterData_arr_add(&row.register_rules, RegisterData_arr_get(&prev->register_rules, i));
     }
 
-    FrameRow_arr_add(&matrix, row);
+    FrameRow_arr_add(matrix, row);
 }
 
-RegisterData* get_register_data(uint8_t register_id) {
-    FrameRow* c_row= FrameRow_arr_peek(&matrix);
+RegisterData* get_register_data(Matrix* matrix, uint8_t register_id) {
+    const FrameRow* c_row= FrameRow_arr_peek(matrix);
 
     for (int i= 0; i < c_row->register_rules.pos; ++i) {
         RegisterData* data= RegisterData_arr_ptr(&c_row->register_rules, i);
@@ -399,18 +369,18 @@ void set_register_data(RegisterData* rd, FI_OPCODE op, RRData data) {
     };
 }
 
-void set_register(uint8_t register_id, FI_OPCODE op, RRData data) {
-    RegisterData* existing= get_register_data(register_id);
+void set_register(Matrix* matrix, uint8_t register_id, FI_OPCODE op, RRData data) {
+    RegisterData* existing= get_register_data(matrix, register_id);
 
     if (existing) {
         set_register_data(existing, op, data);
     } else {
-        add_register(register_id, op, data);
+        add_register(matrix, register_id, op, data);
     }
 }
 
-void add_register(uint8_t register_id, FI_OPCODE op, RRData data) {
-    FrameRow* c_row= FrameRow_arr_peek(&matrix);
+void add_register(Matrix* matrix, uint8_t register_id, FI_OPCODE op, RRData data) {
+    FrameRow* c_row= FrameRow_arr_peek(matrix);
 
     RegisterData rd= (RegisterData) {
         .register_id= register_id,
@@ -423,7 +393,7 @@ void add_register(uint8_t register_id, FI_OPCODE op, RRData data) {
     RegisterData_arr_add(&c_row->register_rules, rd);
 }
 
-void execute_initial_instr_for(uint8_t register_id, CIE_Entry* cie) {
+void execute_initial_instr_for(Matrix* matrix, uint8_t register_id, const CIE_Entry* cie) {
     // the cie contains a list of initial instructions
     // usually just looks like
     //   0 DW_CFA_def_cfa r7 8
@@ -438,8 +408,8 @@ void execute_initial_instr_for(uint8_t register_id, CIE_Entry* cie) {
     uint8_t* op= cie->initial_instructions;
 
     while (op < cie->initial_instructions + cie->instructions_size) {
-        Instruction instr= decode_op(&op, cie);
-        uint8_t reg= instr.data.register_id;
+        const Instruction instr= decode_op(&op, cie);
+        const uint8_t reg= instr.data.register_id;
 
         if (reg == (uint8_t)-1) {
             // this is an instruction that does not contain register information
@@ -448,7 +418,7 @@ void execute_initial_instr_for(uint8_t register_id, CIE_Entry* cie) {
 
         if (reg == register_id) {
             // this is a matching instruction and so we should execute it
-            execute_op(instr, cie);
+            execute_op(matrix, instr, cie);
             break;
         }
     }
@@ -645,10 +615,10 @@ Instruction decode_op(uint8_t** start, const CIE_Entry* cie) {
     return instr;
 }
 
-void execute_op(Instruction instr, const CIE_Entry* cie) {
+void execute_op(Matrix* matrix, Instruction instr, const CIE_Entry* cie) {
     switch (instr.opcode) {
         case DW_CFA_set_loc: {
-            add_row_copied(instr.data.d_addr);
+            add_row_copied(matrix, instr.data.d_addr);
             break;
         }
 
@@ -656,16 +626,16 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
         case DW_CFA_advance_loc1:
         case DW_CFA_advance_loc2:
         case DW_CFA_advance_loc4: {
-            const FrameRow* c_row= FrameRow_arr_peek(&matrix);
+            const FrameRow* c_row= FrameRow_arr_peek(matrix);
             const uint64_t n_addr= instr.data.d_delta + c_row->address;
-            add_row_copied(n_addr);
+            add_row_copied(matrix, n_addr);
 
             break;
         }
 
         case DW_CFA_def_cfa:
         case DW_CFA_def_cfa_sf: {
-            FrameRow* c_row= FrameRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(matrix);
 
             c_row->cfa_rule= (CFARule) {
                 .type= CFA_DT_REG_OFF,
@@ -679,7 +649,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
         }
 
         case DW_CFA_def_cfa_register: {
-            FrameRow* c_row= FrameRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(matrix);
 
             if (c_row->cfa_rule.type != CFA_DT_REG_OFF) {
                 log("Decoding DWARF frame info provided invalid decoded instructions. DW_CFA_def_cfa_register expects cfa data type `reg-off` got `expression`\n");
@@ -691,7 +661,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
 
         case DW_CFA_def_cfa_offset:
         case DW_CFA_def_cfa_offset_sf: {
-            FrameRow* c_row= FrameRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(matrix);
 
             if (c_row->cfa_rule.type != CFA_DT_REG_OFF) {
                 log("Decoding DWARF frame info provided invalid decoded instructions. DW_CFA_def_cfa_offset.* expects cfa data type `reg-off` got `expression`\n");
@@ -702,7 +672,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
         }
 
         case DW_CFA_def_cfa_expression: {
-            FrameRow* c_row= FrameRow_arr_peek(&matrix);
+            FrameRow* c_row= FrameRow_arr_peek(matrix);
 
             c_row->cfa_rule= (CFARule) {
                 .type= CFA_DT_EXPRESSION,
@@ -713,6 +683,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
 
         case DW_CFA_undefined: {
             set_register(
+                matrix,
                 instr.data.register_id,
                 DW_CFA_undefined,
                 (RRData){0}
@@ -723,6 +694,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
 
         case DW_CFA_same_value: {
             set_register(
+                matrix,
                 instr.data.register_id,
                 DW_CFA_same_value,
                 (RRData){0}
@@ -735,6 +707,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
         case DW_CFA_offset_extended:
         case DW_CFA_offset_extended_sf: {
             set_register(
+                matrix,
                 instr.data.register_id,
                 DW_CFA_offset,
                 (RRData){.offset= instr.data.d_offset}
@@ -746,6 +719,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
         case DW_CFA_val_offset:
         case DW_CFA_val_offset_sf: {
             set_register(
+                matrix,
                 instr.data.register_id,
                 DW_CFA_val_offset,
                 (RRData){.offset= instr.data.d_offset}
@@ -756,6 +730,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
 
         case DW_CFA_register: {
             set_register(
+                matrix,
                 instr.data.register_id,
                 DW_CFA_register,
                 (RRData){.reg= instr.data.d_register}
@@ -770,6 +745,7 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
             //  the DWARF evaluation stack prior to execution of the DWARF expression.
 
             set_register(
+                matrix,
                 instr.data.register_id,
                 instr.opcode,
                 (RRData){.expr= instr.data.d_expr}
@@ -780,20 +756,20 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
 
         case DW_CFA_restore:
         case DW_CFA_restore_extended: {
-            execute_initial_instr_for(instr.data.register_id, cie);
+            execute_initial_instr_for(matrix, instr.data.register_id, cie);
 
             break;
         }
 
         case DW_CFA_remember_state: {
-            FrameRow_arr_add(&row_stack, *FrameRow_arr_peek(&matrix));
+            FrameRow_arr_add(&row_stack, *FrameRow_arr_peek(matrix));
 
             break;
         }
         case DW_CFA_restore_state: {
-            FrameRow popped= FrameRow_arr_pop(&row_stack);
-            FrameRow* c_row= FrameRow_arr_peek(&matrix);
-            uint64_t c_addr= c_row->address;
+            const FrameRow popped= FrameRow_arr_pop(&row_stack);
+            FrameRow* c_row= FrameRow_arr_peek(matrix);
+            const uint64_t c_addr= c_row->address;
 
             *c_row= (FrameRow) {
                 .address= c_addr,
@@ -808,46 +784,46 @@ void execute_op(Instruction instr, const CIE_Entry* cie) {
     }
 }
 
-void decode_and_execute_op(uint8_t** start, const CIE_Entry* cie) {
+void decode_and_execute_op(Matrix* matrix, uint8_t** start, const CIE_Entry* cie) {
     const Instruction instr= decode_op(start, cie);
-    execute_op(instr, cie);
+    execute_op(matrix, instr, cie);
 }
 
-void decode_and_execute_ops_until(uint8_t* base, uint64_t size, const CIE_Entry* cie, uintptr_t pc) {
+void decode_and_execute_ops_until(Matrix* matrix, uint8_t* base, uint64_t size, const CIE_Entry* cie, uintptr_t pc) {
     const uint8_t* end= base + size;
     while (base < end) {
         printf("Checking matrix %#lx address against pc %#lx\n",
-            FrameRow_arr_peek(&matrix)->address,
+            FrameRow_arr_peek(matrix)->address,
             pc
         );
 
-        if (matrix.pos && FrameRow_arr_peek(&matrix)->address > pc) {
-            FrameRow_arr_pop(&matrix);
+        if (matrix->pos && FrameRow_arr_peek(matrix)->address > pc) {
+            FrameRow_arr_pop(matrix);
             break;
         }
-        decode_and_execute_op(&base, cie);
+        decode_and_execute_op(matrix, &base, cie);
     }
 }
 
-void decode_and_execute_ops(uint8_t* base, uint64_t size, const CIE_Entry* cie) {
+void decode_and_execute_ops(Matrix* matrix, uint8_t* base, uint64_t size, const CIE_Entry* cie) {
     const uint8_t* end= base + size;
     while (base < end) {
-        decode_and_execute_op(&base, cie);
+        decode_and_execute_op(matrix, &base, cie);
     }
 }
 
+Matrix create_matrix_of(const FDE_Entry* fde) {
+    Matrix matrix= create_matrix();
 
-//todo undo push
-void create_matrix_of(const FDE_Entry* fde) {
-    create_matrix();
-
-    decode_and_execute_ops(fde->cie_entry->initial_instructions, fde->cie_entry->instructions_size, fde->cie_entry);
+    decode_and_execute_ops(&matrix, fde->cie_entry->initial_instructions, fde->cie_entry->instructions_size, fde->cie_entry);
     FrameRow* first= FrameRow_arr_ptr(&matrix, 0);
     first->address= fde->initial_location.ptr_s;
-    decode_and_execute_ops(fde->instructions, fde->instructions_size, fde->cie_entry);
+    decode_and_execute_ops(&matrix, fde->instructions, fde->instructions_size, fde->cie_entry);
+
+    return matrix;
 }
 
-uint64_t eval_cfa_rule(const CFARule rule) {
+uint64_t eval_cfa_rule_using(const CFARule rule, GeneralRegs* regs) {
     switch (rule.type) {
         case CFA_DT_EXPRESSION:
             assert(false);
@@ -855,45 +831,72 @@ uint64_t eval_cfa_rule(const CFARule rule) {
         case CFA_DT_REG_OFF: {
             const uint16_t reg= rule.data.reg_off.register_id;
             const int64_t offset= rule.data.reg_off.offset;
+            bool succ;
 
-            const Reg value= target.target_get_reg(reg);
+            const uint64_t value= target.target_get_general_reg_using(reg, regs, &succ);
+            if (!succ) return 0x12345678;
 
-            return value.value.general + offset;
+            return value + offset;
         }
         default:
             assert(false);
     }
 }
 
-FrameRow* get_frame_row_at(uint64_t pc, bool* succ) {
-    create_matrix();
+uint64_t eval_cfa_rule(const CFARule rule) {
+    bool succ;
+    GeneralRegs regs= target.target_get_general_regs(&succ);
+    if (!succ) return 0x12345678;
 
-    const FDE_Entry* fde= get_fde_for_pc(pc);
+    return eval_cfa_rule_using(rule, &regs);
+}
+
+FrameRow get_frame_row_at(uint64_t pc, bool* succ) {
+    Matrix matrix= create_matrix();
+
+    const FDE_Entry* fde= get_fde_for_virtual_pc(pc);
     if (!fde) {
         *succ= false;
-        return 0;
+        return (FrameRow){0};
     }
 
-    decode_and_execute_ops(fde->cie_entry->initial_instructions, fde->cie_entry->instructions_size, fde->cie_entry);
+    decode_and_execute_ops(&matrix, fde->cie_entry->initial_instructions, fde->cie_entry->instructions_size, fde->cie_entry);
     FrameRow* first= FrameRow_arr_ptr(&matrix, 0);
     first->address= fde->initial_location.value;
-    decode_and_execute_ops_until(fde->instructions, fde->instructions_size, fde->cie_entry, pc);
-    FrameRow* last= FrameRow_arr_peek(&matrix);
-    if (!last) {
+    decode_and_execute_ops_until(&matrix, fde->instructions, fde->instructions_size, fde->cie_entry, pc);
+    if (matrix.pos == 0) {
         *succ= false;
-        return NULL;
+        FrameRow_arr_destroy(&matrix);
+        return (FrameRow){0};
     }
 
     *succ= true;
-    return last;
+    return FrameRow_arr_get(&matrix, matrix.pos - 1);
 }
 
-uint64_t eval_register_rule(const RegisterRule* rule, const uint16_t register_id, const uint64_t cfa) {
+GeneralRegs restore_regs(const FrameRow* row, const GeneralRegs* initial_regs, uint64_t cfa, uint16_t return_addr_reg_id) {
+    GeneralRegs output= *initial_regs;
+
+    // target.target_set_reg_struct_value(&output, return_addr_reg_id, cfa);
+
+    for (int i = 0; i < row->register_rules.pos; ++i) {
+        const RegisterData* rule= RegisterData_arr_ptr(&row->register_rules, i);
+        const uint64_t value= eval_register_rule(&rule->rule, rule->register_id, cfa);
+
+        const bool set= target.target_set_reg_struct_value(&output, rule->register_id, value);
+        if (!set) show_err("Unable to set register %u to %lu when restoring registers\n", rule->register_id, value);
+    }
+
+    return output;
+}
+
+uint64_t eval_register_rule_using(const RegisterRule* rule, const uint16_t register_id, const uint64_t cfa, GeneralRegs* regs) {
+    bool succ;
     switch (rule->op) {
         case DW_CFA_undefined:
             return 0x12345678;
         case DW_CFA_same_value:
-            return target.target_get_reg(register_id).value.general;
+            return target.target_get_general_reg_using(register_id, regs, &succ);
         case DW_CFA_offset:
         case DW_CFA_offset_extended:
         case DW_CFA_offset_extended_sf:
@@ -902,7 +905,7 @@ uint64_t eval_register_rule(const RegisterRule* rule, const uint16_t register_id
         case DW_CFA_val_offset_sf:
             return cfa + rule->data.offset;
         case DW_CFA_register:
-            return target.target_get_reg(rule->data.reg).value.general;
+            return target.target_get_general_reg_using(rule->data.reg, regs, &succ);
         case DW_CFA_expression:
             // return target.target_get_general_reg_at(eval_expression(&rule->data.expr));
         case DW_CFA_val_expression:
@@ -911,14 +914,22 @@ uint64_t eval_register_rule(const RegisterRule* rule, const uint16_t register_id
     }
 }
 
-uint64_t reg_value_at(uint64_t pc, bool* succ, uint16_t register_id) {
-    const FrameRow* frame= get_frame_row_at(pc, succ);
+uint64_t eval_register_rule(const RegisterRule* rule, const uint16_t register_id, const uint64_t cfa) {
+    bool succ;
+    GeneralRegs res= target.target_get_general_regs(&succ);
+    if (!succ) return 0x12345678;
+
+    return eval_register_rule_using(rule, register_id, cfa, &res);
+}
+
+uint64_t restore_reg_value_at(uint64_t pc, bool* succ, uint16_t register_id) {
+    const FrameRow frame= get_frame_row_at(pc, succ);
     if (!*succ) return 0;
 
-    const uint64_t cfa= eval_cfa_rule(frame->cfa_rule);
+    const uint64_t cfa= eval_cfa_rule(frame.cfa_rule);
 
-    for (int i = 0; i < frame->register_rules.pos; ++i) {
-        const RegisterData* rd= RegisterData_arr_ptr(&frame->register_rules, i);
+    for (int i = 0; i < frame.register_rules.pos; ++i) {
+        const RegisterData* rd= RegisterData_arr_ptr(&frame.register_rules, i);
         if (rd->register_id == register_id) {
             return eval_register_rule(&rd->rule, register_id, cfa);
         }
@@ -929,13 +940,13 @@ uint64_t reg_value_at(uint64_t pc, bool* succ, uint16_t register_id) {
 
 
 uint64_t cfa_value_at(uintptr_t pc, bool* succ) {
-    const FrameRow* last= get_frame_row_at(pc, succ);
+    const FrameRow last= get_frame_row_at(pc, succ);
     if (!*succ) return 0;
 
-    return eval_cfa_rule(last->cfa_rule);
+    return eval_cfa_rule(last.cfa_rule);
 }
 
-FDE_Entry* get_fde_for_pc(const uintptr_t pc) {
+FDE_Entry* get_fde_for_virtual_pc(const uintptr_t pc) {
     if (!pointer_is_omit(header.table_encoding)) {
         printf("Test\n");
     }
@@ -1107,8 +1118,8 @@ void print_fde(const FDE_Entry* entry) {
     printf(" - Instructions (%u bytes):\n", entry->instructions_size);
     print_instructions("      ", entry->instructions, entry->instructions_size, entry->cie_entry, entry);
 
-    create_matrix_of(entry);
-    print_matrix();
+    Matrix m= create_matrix_of(entry);
+    print_matrix(&m);
 }
 
 void print_cie(const CIE_Entry* entry) {
@@ -1160,9 +1171,9 @@ void print_register_data(const RegisterData* data) {
     }
 }
 
-void print_matrix() {
-    for (int i = 0; i < matrix.pos; ++i) {
-        const FrameRow* row= FrameRow_arr_ptr(&matrix, i);
+void print_matrix(Matrix* m) {
+    for (int i = 0; i < m->pos; ++i) {
+        const FrameRow* row= FrameRow_arr_ptr(m, i);
         printf("@%#lX: ", row->address);
         printf(" <CFA= ");
         print_cfa_rule(&row->cfa_rule);

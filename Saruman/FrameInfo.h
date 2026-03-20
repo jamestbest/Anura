@@ -16,6 +16,8 @@
 #include <elf.h>
 
 #include "Sauron.h"
+#include "shared/Array.h"
+#include "Target.h"
 
 typedef enum FI_OPCODE {
     DW_CFA_set_loc= FI_OP_ENCODING(0, 1),
@@ -124,9 +126,59 @@ typedef struct FDE_Entry {
     uint8_t* padding;
 } FDE_Entry;
 
+
+typedef union RRData {
+    int64_t offset;
+    uint8_t reg;
+    DW_EXPR expr;
+} RRData;
+
+typedef struct RegisterRule {
+    FI_OPCODE op;
+    RRData data;
+} RegisterRule;
+
+typedef struct RegisterData {
+    uint8_t register_id;
+    RegisterRule rule;
+} RegisterData;
+
+ARRAY_PROTO(RegisterData, RegisterData)
+
+typedef union CFAData {
+    DW_EXPR expr;
+    struct {
+        uint8_t register_id;
+        int64_t offset;
+    } reg_off;
+} CFAData;
+
+typedef enum CFADataType {
+    CFA_DT_EXPRESSION,
+    CFA_DT_REG_OFF
+} CFADataType;
+
+typedef struct CFARule {
+    CFADataType type;
+    CFAData data;
+} CFARule;
+
+typedef struct MRow {
+    uint64_t address;
+    CFARule cfa_rule;
+    RegisterDataArray register_rules;
+} FrameRow;
+
 int parse_frame_info(Section* section, Section* hdr);
-FDE_Entry* get_fde_for_pc(uintptr_t pc);
+FDE_Entry* get_fde_for_virtual_pc(uintptr_t pc);
 uint64_t cfa_value_at(uintptr_t pc, bool* succ);
-uint64_t reg_value_at(uint64_t pc, bool* succ, uint16_t register_id);
+uint64_t eval_cfa_rule(CFARule rule);
+uint64_t eval_register_rule(const RegisterRule* rule, uint16_t register_id, uint64_t cfa);
+uint64_t restore_reg_value_at(uint64_t pc, bool* succ, uint16_t register_id);
+FrameRow get_frame_row_at(uint64_t pc, bool* succ);
+RegisterRule get_rule_for(const FrameRow* row, uint16_t register_id, bool* succ);
+GeneralRegs restore_regs(const FrameRow* row, const GeneralRegs* initial_regs, uint64_t cfa, uint16_t return_addr_reg_id);
+uint64_t eval_register_rule_using(const RegisterRule* rule, const uint16_t register_id, const uint64_t cfa, GeneralRegs* regs);
+uint64_t eval_cfa_rule_using(const CFARule rule, GeneralRegs* regs);
 
 #endif //FRAMEINFO_H
