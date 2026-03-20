@@ -73,7 +73,11 @@ typedef struct Target {
     uint64_t (*target_get_cfa)(bool* succ);
 
     Reg (*target_get_reg)(uint16_t register_id);
+    Reg (*target_get_reg_using)(uint16_t register_id, GeneralRegs* regs);
     uint64_t (*target_get_general_reg_at)(uintptr_t addr);
+    bool (*target_set_reg_struct_value)(GeneralRegs* regs, uint16_t register_id, uint64_t value);
+    GeneralRegs (*target_get_general_regs)(bool* succ);
+    uint64_t (*target_get_general_reg_using)(uint16_t register_id, GeneralRegs* regs, bool* succ);
 
     long long (*target_aligned_write)(uintptr_t address, uint8_t value, uint8_t* existing_value);
     long long (*target_readd_sw_bp)(BPInfo* bp);
@@ -84,10 +88,13 @@ typedef struct Target {
     Data (*target_get_data_virtual)(virtual_addr virtual_addr, uint32_t bytes);
 
     const char* (*target_info_main_file_path)();
+
+    void (*target_unwind_stack)();
 } Target;
 
 typedef enum TARGETS {
-    TARGET_LINUX_X64
+    TARGET_NONE= 0,
+    TARGET_LINUX_X64= 1
 } TARGETS;
 
 extern Target target;

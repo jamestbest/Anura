@@ -12,6 +12,7 @@
 Target target;
 
 ARRAY_ADD(LabelledReg, LabelledReg)
+ARRAY_ADD(GeneralRegs, GeneralRegs)
 
 int init_target(TARGETS target_type) {
     target.sw_bp_should_continue= false;
