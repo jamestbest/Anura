@@ -289,6 +289,11 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             display_labelled_regs(lregs);
             return ACTION_HANDLE_CONTINUE;
         }
+        case ACTION_DS_STACK_UNWIND: {
+            target.target_unwind_stack();
+            return ACTION_HANDLE_CONTINUE;
+        }
+        case ACTION_AT_QUIT:
         case ACTION_CF_EXIT:
             ptrace(PTRACE_KILL, target.pid, NULL, 0);
 
