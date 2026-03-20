@@ -302,5 +302,7 @@ ARRAY_PROTO(DIE, DIE)
 DIE_DATA raa_die_data(uint8_t** start, DW_FORM form, const CU_HEADER* cu);
 DIE* get_main_cu();
 const char* cu_get_filename(const DIE* die);
+DIE* get_subprog_at(uintptr_t addr);
+const char* get_subprog_name_at(uintptr_t addr);
 
 #endif //BALIN_H

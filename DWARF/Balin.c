@@ -11,12 +11,14 @@
 #include <stdint.h>
 
 #include "Helper_String.h"
+#include "main.h"
 
 ARRAY_ADD(ATData, ATData)
 ARRAY_ADD(TagData, TagData)
 
 void print_die(const DIE* die);
 static int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header, TableArray* abbrev_tables);
+static const char* die_data_get_str(const DIE_DATA* data, DW_FORM form);
 
 typedef enum ParseRes {
     PARSE_FAIL=-1,
@@ -154,9 +156,12 @@ ARRAY_ADD(DIE_DATA, DIEDATA)
 
 static DIEArray dies;
 static DIEArray cus;
+static DIEArray subprogs;
+
 int parse_info(Section* section, TableArray* abbrev_tables) {
     dies= DIE_arr_create();
     cus= DIE_arr_create();
+    subprogs= DIE_arr_create();
 
     uint8_t* section_start= section->data;
     const uint8_t* section_end= section_start + section->header->sh_size;
@@ -178,6 +183,71 @@ DIE* get_main_cu() {
     if (cus.pos == 0) return NULL;
 
     return DIE_arr_ptr(&cus, 0);
+}
+
+bool has_attr(const TagData* data, const DW_AT attr) {
+    for (int i = 0; i < data->attributes.pos; ++i) {
+        const ATData* a= ATData_arr_ptr(&data->attributes, i);
+
+        if (a->attr == attr) return true;
+    }
+    return false;
+}
+
+int16_t get_attr_pos(const TagData* data, const DW_AT attr) {
+    for (size_t i = 0; i < data->attributes.pos; ++i) {
+        const ATData* a= ATData_arr_ptr(&data->attributes, i);
+
+        if (a->attr == attr) return i;
+    }
+    return -1;
+}
+
+DIE* get_subprog_at(const uintptr_t addr) {
+    // ignoring external functions
+    for (int i = 0; i < subprogs.pos; ++i) {
+        DIE* subprog= DIE_arr_ptr(&subprogs, i);
+
+        const Table* abbrevs= subprog->type.table;
+        const TagData* data= TagData_arr_ptr(&abbrevs->abbrevs, subprog->type.abbrev);
+
+        if (has_attr(data, DW_AT_ranges)) {
+            show_err("Cannot get subprogram at location as it requires DW_AT_ranges\n");
+            return NULL;
+        }
+
+        const int16_t low= get_attr_pos(data, DW_AT_low_pc);
+        if (low == -1) continue;
+
+        const int16_t hi= get_attr_pos(data, DW_AT_high_pc);
+        if (hi == -1) continue;
+
+        const uintptr_t low_pc= DIEDATA_arr_ptr(&subprog->data, low)->address;
+        const uintptr_t hi_pc= low_pc + DIEDATA_arr_ptr(&subprog->data, hi)->constant_m64_u;
+
+        if (addr >= low_pc && addr <= hi_pc) return subprog;
+    }
+
+    return NULL;
+}
+
+const char* get_subprog_name(const DIE* subprog) {
+    const Table* abbrevs= subprog->type.table;
+    const TagData* data= TagData_arr_ptr(&abbrevs->abbrevs, subprog->type.abbrev);
+
+    const int16_t name_pos= get_attr_pos(data, DW_AT_name);
+    if (name_pos == -1) return NULL;
+
+    const DIE_DATA* die_data= DIEDATA_arr_ptr(&subprog->data, name_pos);
+    const DW_FORM data_form= ATData_arr_ptr(&data->attributes, name_pos)->form;
+    return die_data_get_str(die_data, data_form);
+}
+
+const char* get_subprog_name_at(const uintptr_t addr) {
+    DIE* subprog= get_subprog_at(addr);
+    if (!subprog) return NULL;
+
+    return get_subprog_name(subprog);
 }
 
 const char* die_data_get_str(const DIE_DATA* data, const DW_FORM form) {
@@ -234,6 +304,8 @@ int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header,
         const TagData* tag= TagData_arr_ptr(&table->abbrevs, abbrev_code);
 
         const bool is_cu= tag->tag == DW_TAG_compile_unit;
+        const bool is_sub= tag->tag == DW_TAG_subprogram;
+
         DIE die= (DIE) {
             .type= (DIE_TYPE){.abbrev= abbrev_code, .table= table},
             .nesting= depth,
@@ -248,6 +320,7 @@ int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header,
 
         DIE_arr_add(&dies, die);
         if (is_cu) DIE_arr_add(&cus, die);
+        if (is_sub) DIE_arr_add(&subprogs, die);
 
         print_die(&die);
         if (tag->has_children) depth++;
