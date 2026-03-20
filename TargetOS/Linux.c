@@ -354,11 +354,11 @@ uintptr_t get_return_addr() {
     const uintptr_t pc= target.target_get_pc();
     const uintptr_t vaddr= target.target_addr_runtime_to_virtual(pc);
 
-    const FDE_Entry* fde= get_fde_for_pc(vaddr);
+    const FDE_Entry* fde= get_fde_for_virtual_pc(vaddr);
     const CIE_Entry* cie= fde->cie_entry;
 
     bool succ;
-    return reg_value_at(vaddr, &succ, cie->return_address_register);
+    return restore_reg_value_at(vaddr, &succ, cie->return_address_register);
 }
 
 #include <sys/uio.h>
@@ -417,6 +417,93 @@ const char* info_main_file_path() {
     return cu_get_filename(main_cu);
 }
 
+StackFrame create_stack_frame(const uintptr_t pc, const GeneralRegs regs, bool pc_is_return_addr) {
+    const uintptr_t v_addr= target.target_addr_runtime_to_virtual(pc);
+    const char* sub_name= get_subprog_name_at(v_addr);
+
+    AddrLineRes res;
+    if (pc_is_return_addr)
+        res= addr2line(v_addr - 1);
+    else res= addr2line(v_addr);
+
+    return (StackFrame) {
+        .pc= pc,
+        .v_pc= v_addr,
+        .line= res.line,
+        .subprog_name= sub_name,
+        .regs= regs,
+    };
+}
+
+void show_stack(const Stack* stack) {
+    show_log("Stack trace\n");
+    for (int i = 0; i < stack->pos; ++i) {
+        const StackFrame* frame= StackFrame_arr_ptr(stack, i);
+
+        show_log("\tFrame @ %#lx (v: %#lx)\n", frame->pc, frame->v_pc);
+        show_log("\t\tSubroutine: %s:%u\n", frame->subprog_name, frame->line);
+        show_log("\t\tRegs: \n");
+    }
+}
+
+void unwind_stack() {
+    uintptr_t start= target.target_get_pc();
+    uintptr_t v_addr= target.target_addr_runtime_to_virtual(start);
+    FDE_Entry* s_fde= get_fde_for_virtual_pc(v_addr);
+
+    if (!s_fde) {
+        show_err("Unable to unwind stack, no fde for pc %#lx (v: %#lx) found\n", start, v_addr);
+        return;
+    }
+
+    show_log("The stack is currently at addr %#lx (v: %#lx) in function %s\n", start, v_addr, get_subprog_name_at(v_addr));
+
+    bool succ;
+    FrameRow row= get_frame_row_at(v_addr, &succ);
+    if (!succ) {
+        show_err("Unable to get frame row to unwind stack for location %#lx (v: %#lx)\n", start, v_addr);
+        return;
+    }
+
+
+    Stack stack= StackFrame_arr_create();
+
+    GeneralRegs regs= target.target_get_general_regs(&succ);
+    if (!succ) {
+        show_err("Unable to get base regs when unwinding the stack\n");
+        return;
+    }
+
+    StackFrame_arr_add(&stack, create_stack_frame(start, regs, false));
+
+    RegisterRule rule;
+    while (rule= get_rule_for(&row, s_fde->cie_entry->return_address_register, &succ),
+        succ && rule.op != DW_CFA_undefined
+    ) {
+        const uint64_t cfa= eval_cfa_rule_using(row.cfa_rule, &regs);
+        const uintptr_t return_addr= eval_register_rule_using(&rule, s_fde->cie_entry->return_address_register, cfa, &regs);
+        const uintptr_t v_addr= target.target_addr_runtime_to_virtual(return_addr);
+
+        show_log("The stack is currently at addr %#lx (v: %#lx) in function %s\n", return_addr, v_addr, get_subprog_name_at(v_addr));
+
+        s_fde= get_fde_for_virtual_pc(v_addr);
+        if (!s_fde) break; // here we're probably in something like _entry
+
+        row= get_frame_row_at(v_addr, &succ);
+
+        if (!succ) {
+            show_err("Unable to unwind the stack further\n");
+            break;
+        }
+
+        GeneralRegs* old_regs= &StackFrame_arr_peek(&stack)->regs;
+        regs= restore_regs(&row, old_regs, cfa, s_fde->cie_entry->return_address_register);
+        StackFrame_arr_add(&stack, create_stack_frame(return_addr, regs, true));
+    }
+
+    show_stack(&stack);
+}
+
 void linux_init_target(Target* target) {
     target->target_update_after_process_first_stopped= first_stopped;
 
@@ -441,4 +528,6 @@ void linux_init_target(Target* target) {
     target->target_get_data_virtual= get_data_virtual;
 
     target->target_info_main_file_path= info_main_file_path;
+
+    target->target_unwind_stack= unwind_stack;
 }
