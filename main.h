@@ -62,6 +62,7 @@ extern BPAddressInfoArray bp_info;
 typedef enum BP_REASON {
     BP_REASON_STEP_OVER,
     BP_REASON_STEP_OUT,
+    BP_REASON_BREAK_CAUSE,
     BP_REASON_USER,
 } BP_REASON;
 
@@ -90,6 +91,7 @@ typedef enum ACTION_TYPE {
     ACTION_AT_QUIT,
 
     ACTION_DS_REGS, // ACTION_DS is DISPLAY requests
+    ACTION_DS_STACK_UNWIND,
 } ACTION_TYPE;
 
 typedef union ACTION_DATA {
@@ -149,19 +151,48 @@ typedef struct LabelledRegs {
     LabelledRegArray regs;
 } LabelledRegs;
 
+#define ANURA_TARGET TARGET_LINUX_X64
+
+// this is to be filled in by the defining target
+// includes only the registers that fit in the word size of the machine
+//  i.e. for this case 64 bits
+#if ANURA_TARGET == TARGET_LINUX_X64
+#include <sys/user.h>
+typedef struct user_regs_struct GeneralRegs;
+#endif
+
+ARRAY_PROTO(GeneralRegs, GeneralRegs)
+
+typedef struct StackFrame {
+    uintptr_t pc;
+    uintptr_t v_pc;
+    uint32_t line;
+    const char* subprog_name;
+    GeneralRegs regs;
+} StackFrame;
+
+ARRAY_PROTO(StackFrame, StackFrame)
+typedef StackFrameArray Stack;
+
 extern int tui_pipe[2];
 
+#ifdef __GNUC__
+#define PRINTF_LIKE(func) func __attribute__((format(printf, 1, 2)));
+#else
+#define PRINTF_LIKE(f) f;
+#endif
+
 void vlog(bool is_t, const char* message, va_list args);
-void tlog(const char* message, ...);
-void hlog(const char* message, ...);
+PRINTF_LIKE(void tlog(const char* message, ...))
+PRINTF_LIKE(void hlog(const char* message, ...))
 int breakpoint_program(const char* program);
 void print_breakpoints();
 void display_labelled_regs(LabelledRegs lregs);
 
-void show_log(const char* message, ...);
+PRINTF_LIKE(void show_log(const char* message, ...))
 void vshow_log(const char* message, va_list args, const char* prefix);
 void show_newline();
-void show_err(const char* message, ...);
+PRINTF_LIKE(void show_err(const char* message, ...))
 
 void open_program(const char* filepath);
 

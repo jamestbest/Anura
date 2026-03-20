@@ -118,6 +118,7 @@ int compare_bp_addr_info(uintptr_t bpa, uintptr_t bpb) {
 
 ARRAY_ADD(BPInfo, BPInfo)
 ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
+ARRAY_ADD(StackFrame, StackFrame)
 
 BPAddressInfoArray bp_info;
 
@@ -214,7 +215,7 @@ int breakpoint_program(const char* program) {
     target.pid= pid;
 
     const long long res= target.target_attach_process(target.pid);
-    hlog("The attach result is %ld errno is %d with error %s\n", res, errno, strerror(errno));
+    hlog("The attach result is %lld errno is %d with error %s\n", res, errno, strerror(errno));
     printf("Set the t_pid to %lu\n", pid);
 
     return 0;
@@ -363,7 +364,7 @@ int main(int argc, char* argv[]) {
     }
     const char* program= argv[1];
 
-    init_target(TARGET_LINUX_X64);
+    init_target(ANURA_TARGET);
 
     action_q= queueb_create();
 
@@ -379,9 +380,14 @@ int main(int argc, char* argv[]) {
 
     create_gui(target.target_io_pipe);
 
+    queueb_push_blocking(&action_q, create_action(ACTION_AT_QUIT, (ACTION_DATA) {.NO_DATA = 0}));
+    pthread_kill(tui_thread, SIGKILL);
+
     printf("Waiting for command thread to join\n");
+
     // here we can assume that the process has died
     pthread_join(cmd_thread, NULL);
+    pthread_join(tui_thread, NULL);
 
     return 0;
 }
