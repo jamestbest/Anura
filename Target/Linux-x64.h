@@ -5,7 +5,7 @@
 #ifndef LINUX_X64_H
 #define LINUX_X64_H
 
-#include "../Target.h"
+#include "Target.h"
 
 int linux_x64_init_target(Target* target);
 

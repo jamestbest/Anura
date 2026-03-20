@@ -205,8 +205,8 @@ void interrupt_handler_setup() {
     signal(SIGINT, interrupt_handler);
 }
 
-struct user_regs_struct get_regs(bool* succ) {
-    struct user_regs_struct regs;
+GeneralRegs get_regs(bool* succ) {
+    GeneralRegs regs;
 
     errno= 0;
     const long res= ptrace(PTRACE_GETREGS, target.pid, NULL, &regs);
@@ -546,7 +546,7 @@ XSaveRegisters get_all_regs(bool* succ) {
 
 uintptr_t get_pc() {
     bool succ;
-    const struct user_regs_struct regs= get_regs(&succ);
+    const GeneralRegs regs= get_regs(&succ);
 
     if (succ) return regs.rip;
     return -1;
@@ -612,43 +612,49 @@ long long unsafe_continue() {
 #define DW_REG_ENC_R15 15
 #define DW_REG_ENC_RIP 16
 
-uint64_t get_general_reg_value(const uint16_t register_id, bool* succ) {
+uint64_t get_general_reg_value_using(const uint16_t register_id, GeneralRegs* regs, bool* succ) {
     *succ= true;
-    struct user_regs_struct regs= get_regs(succ);
-    if (!*succ) return -1;
 
     switch (register_id) {
-        case DW_REG_ENC_RAX: return regs.rax;
-        case DW_REG_ENC_RDX: return regs.rdx;
-        case DW_REG_ENC_RCX: return regs.rcx;
-        case DW_REG_ENC_RBX: return regs.rbx;
-        case DW_REG_ENC_RSI: return regs.rsi;
-        case DW_REG_ENC_RDI: return regs.rdi;
-        case DW_REG_ENC_RBP: return regs.rbp;
-        case DW_REG_ENC_RSP: return regs.rsp;
-        case DW_REG_ENC_R8: return regs.r8;
-        case DW_REG_ENC_R9: return regs.r9;
-        case DW_REG_ENC_R10: return regs.r10;
-        case DW_REG_ENC_R11: return regs.r11;
-        case DW_REG_ENC_R12: return regs.r12;
-        case DW_REG_ENC_R13: return regs.r13;
-        case DW_REG_ENC_R14: return regs.r14;
-        case DW_REG_ENC_R15: return regs.r15;
-        case DW_REG_ENC_RIP: return regs.rip;
+        case DW_REG_ENC_RAX: return regs->rax;
+        case DW_REG_ENC_RDX: return regs->rdx;
+        case DW_REG_ENC_RCX: return regs->rcx;
+        case DW_REG_ENC_RBX: return regs->rbx;
+        case DW_REG_ENC_RSI: return regs->rsi;
+        case DW_REG_ENC_RDI: return regs->rdi;
+        case DW_REG_ENC_RBP: return regs->rbp;
+        case DW_REG_ENC_RSP: return regs->rsp;
+        case DW_REG_ENC_R8: return regs->r8;
+        case DW_REG_ENC_R9: return regs->r9;
+        case DW_REG_ENC_R10: return regs->r10;
+        case DW_REG_ENC_R11: return regs->r11;
+        case DW_REG_ENC_R12: return regs->r12;
+        case DW_REG_ENC_R13: return regs->r13;
+        case DW_REG_ENC_R14: return regs->r14;
+        case DW_REG_ENC_R15: return regs->r15;
+        case DW_REG_ENC_RIP: return regs->rip;
 
-        case 49: return regs.eflags;
-        case 50: return regs.es;
-        case 51: return regs.cs;
-        case 52: return regs.ss;
-        case 53: return regs.ds;
-        case 54: return regs.fs;
-        case 55: return regs.gs;
+        case 49: return regs->eflags;
+        case 50: return regs->es;
+        case 51: return regs->cs;
+        case 52: return regs->ss;
+        case 53: return regs->ds;
+        case 54: return regs->fs;
+        case 55: return regs->gs;
 
-        case 58: return regs.fs_base;
-        case 59: return regs.gs_base;
+        case 58: return regs->fs_base;
+        case 59: return regs->gs_base;
         default: *succ=false;
     }
-    return -1;
+
+    return 0x12345678;
+}
+
+uint64_t get_general_reg_value(const uint16_t register_id, bool* succ) {
+    GeneralRegs regs= get_regs(succ);
+    if (!*succ) return -1;
+
+    return get_general_reg_value_using(register_id, &regs, succ);
 }
 
 // this mapping is based on the ABI https://gitlab.com/x86-psABIs/x86-64-ABI
@@ -691,6 +697,29 @@ uint64_t get_general_reg_at(const uintptr_t addr) {
 
 #define REG_COUNT 17
 
+const char* get_register_name(uint16_t register_id) {
+    switch (register_id) {
+        case DW_REG_ENC_RAX: return "RAX";
+        case DW_REG_ENC_RDX: return "RDX";
+        case DW_REG_ENC_RCX: return "RCX";
+        case DW_REG_ENC_RBX: return "RBX";
+        case DW_REG_ENC_RSI: return "RSI";
+        case DW_REG_ENC_RDI: return "RDI";
+        case DW_REG_ENC_RBP: return "RBP";
+        case DW_REG_ENC_RSP: return "RSP";
+        case DW_REG_ENC_R8: return "R8";
+        case DW_REG_ENC_R9: return "R9";
+        case DW_REG_ENC_R10: return "R10";
+        case DW_REG_ENC_R11: return "R11";
+        case DW_REG_ENC_R12: return "R12";
+        case DW_REG_ENC_R13: return "R13";
+        case DW_REG_ENC_R14: return "R14";
+        case DW_REG_ENC_R15: return "R15";
+        case DW_REG_ENC_RIP: return "RIP";
+        default: return "Unknown register";
+    }
+}
+
 LabelledRegs get_labelled_regs() {
     LabelledRegs lregs= (LabelledRegs) {
         .string_buff= buffer_create(BUFF_MIN),
@@ -731,6 +760,29 @@ LabelledRegs get_labelled_regs() {
     return lregs;
 };
 
+bool set_reg_struct_value(GeneralRegs* regs, uint16_t register_id, uint64_t value) {
+    switch (register_id) {
+        case DW_REG_ENC_RAX: regs->rax= value; return true;
+        case DW_REG_ENC_RBX: regs->rbx= value; return true;
+        case DW_REG_ENC_RCX: regs->rcx= value; return true;
+        case DW_REG_ENC_RDX: regs->rdx= value; return true;
+        case DW_REG_ENC_R8: regs->r8= value; return true;
+        case DW_REG_ENC_R9: regs->r9= value; return true;
+        case DW_REG_ENC_R10: regs->r10= value; return true;
+        case DW_REG_ENC_R11: regs->r11= value; return true;
+        case DW_REG_ENC_R12: regs->r12= value; return true;
+        case DW_REG_ENC_R13: regs->r13= value; return true;
+        case DW_REG_ENC_R14: regs->r14= value; return true;
+        case DW_REG_ENC_R15: regs->r15= value; return true;
+        case DW_REG_ENC_RIP: regs->rip= value; return true;
+        case DW_REG_ENC_RBP: regs->rbp= value; return true;
+        case DW_REG_ENC_RSP: regs->rsp= value; return true;
+        case DW_REG_ENC_RSI: regs->rsi= value; return true;
+        case DW_REG_ENC_RDI: regs->rdi= value; return true;
+        default: return false;
+    }
+}
+
 int linux_x64_init_target(Target* t) {
     linux_init_target(t);
 
@@ -743,9 +795,12 @@ int linux_x64_init_target(Target* t) {
     t->target_unsafe_continue= unsafe_continue;
     t->target_get_pc= get_pc;
 
+    t->target_get_general_regs= get_regs;
+    t->target_get_general_reg_using= get_general_reg_value_using;
     t->target_get_reg= get_register_value;
     t->target_get_general_reg_at= get_general_reg_at;
     t->target_get_labelled_regs= get_labelled_regs;
+    t->target_set_reg_struct_value= set_reg_struct_value;
 
     t->target_place_temp_bp= place_temp_bp;
     t->target_aligned_write= aligned_write;
