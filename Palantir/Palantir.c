@@ -15,7 +15,7 @@ static bool set_buffer_as_file(const char* file, GtkTextBuffer* buff) {
     if (g_file_get_contents(file, &content, &length, NULL)) {
 
         GtkTextIter end_iter;
-        const char** lines= g_strsplit(content, "\n", -1);
+        char** lines= g_strsplit(content, "\n", -1);
         g_free(content);
 
         for (int i = 0; lines[i] != NULL; ++i) {

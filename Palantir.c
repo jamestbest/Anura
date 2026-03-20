@@ -174,6 +174,14 @@ int tui_loop() {
             );
         } else if (MATCH_STR("list")) {
             print_breakpoints();
+        } else if (MATCH_STR("stack")) {
+            queueb_push_blocking(
+                &action_q,
+                create_action(
+                    ACTION_DS_STACK_UNWIND,
+                    NO_DATA
+                )
+            );
         } else {
             printf("Unable to match command `%s`\n", buff.data);
         }
