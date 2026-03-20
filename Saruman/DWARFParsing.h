@@ -66,7 +66,7 @@ Pointer raa_pointer_value_from_PE(uint8_t** start, PointerEncoding pe, const Sec
 Pointer raa_pointer_value_without_app(uint8_t** start, PointerEncoding pe);
 bool pointer_is_omit(PointerEncoding pe);
 
-void print_expression(DW_EXPR* expression);
+void print_expression(const DW_EXPR* expression);
 void print_pointer(const Pointer* pointer);
 
 #endif //DWARFPARSING_H
