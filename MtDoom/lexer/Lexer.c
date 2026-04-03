@@ -194,6 +194,8 @@ TokenRet lex_token() {
         case '|': return TOK_SUCC(create_binary_op(PIPE));
         case '_': return TOK_SUCC(create_simple_token(UNDERSCORE));
         case '~': return TOK_SUCC(create_simple_token(READINVERT));
+        case '+': return TOK_SUCC(create_binary_op(ADD));
+        case '-': return TOK_SUCC(create_binary_op(SUB));
         case '&': {
             if (current() == '&') {
                 consume();
@@ -368,7 +370,9 @@ const char* BINARY_OP_STRINGS[BINARY_OP_COUNT]= {
     [STAR]= "STAR (*)",
     [POW]= "POW (**)",
     [PIPE]="PIPE (|)",
-    [AND]="AND (&&)"
+    [AND]="AND (&&)",
+    [ADD]= "ADD (+)",
+    [SUB]= "SUB (-)"
 };
 
 const char* UNARY_OP_STRINGS[UNARY_OP_COUNT]= {

@@ -38,6 +38,8 @@ typedef enum BinaryOperator {
     POW,
     PIPE,
     AND,
+    ADD,
+    SUB,
     BINARY_OP_COUNT
 } BinaryOperator;
 
