@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include "Errors.h"
+#include "shared.h"
 
 ByteStream top_stream;
 
@@ -103,7 +104,19 @@ bool read_bit(ByteStream* stream) {
     return bit_from_raw_stream(stream->raw_stream, stream->pointer++);
 }
 
+ENDIANNESS endianness= ENDIAN_LITTLE;
+
 uint64_t read_bits(ByteStream* stream, uint32_t bits) {
+    if (bits % 8 == 0 && bits > 8) {
+        // here endianness comes into play
+        if (endianness == ENDIAN_LITTLE) {
+            uint64_t res= 0;
+            for (int i = 0; i < bits >> 3; ++i) {
+                res |= (read_bits(stream, 8) << (i << 3));
+            }
+            return res;
+        }
+    }
     uint64_t res= 0;
     for (int i = 0; i < bits; ++i) {
         const bool bit= read_bit(stream);
@@ -176,7 +189,7 @@ AVAL to_aval(char* data) {
 }
 
 AVAL data_to_aval(uint64_t value) {
-    return to_aval(data_to_string(value));
+    return to_aval(data_to_string((int64_t)value));
 }
 
 #define HEX_DIGITS(num) log2(num) / 4
@@ -198,9 +211,6 @@ void clear_aval(AVAL* aval) {
     aval->chosen_idx= AVAL_STATUS_NONE;
     aval->chosen_val= NULL;
 
-    for (size_t i = 0; i < aval->choices.pos; i++) {
-        const char* str= vector_get_unsafe(&aval->choices, i);
-        free((void*)str);
-    }
+    aval->choices= vector_construct(0);
     aval->choices.pos= 0;
 }

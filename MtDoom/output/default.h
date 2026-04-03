@@ -66,6 +66,7 @@ typedef struct StrSlice {
 
 bool expect_bits(uint8_t bits, uint64_t bit_pattern, ByteStream* stream);
 int init();
+int disassemble(const char** output);
 
 uint64_t read_bits(ByteStream* stream, uint32_t bits);
 
