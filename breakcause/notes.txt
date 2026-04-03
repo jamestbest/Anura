@@ -1,0 +1,18 @@
+The main part of this is to show how this value was created
+and so we're saving stack frames and stopping as soon as we can
+
+There are a LOT of caveats that make it difficult, 
+ No. 1; args!
+ Global data!
+ Recursion?
+ Conditionals (kind of)
+ Logical operators (sometimes)
+ Arithmetic operators (most times)
+ Expressions with both being non const values, eval one and then the target is that for the other
+  E.g. t1() == t2(), eval t1 as DEAD then go down t2 with eval as target
+The program must be at a point before all causality
+
+If a conditional requires both then have to go down both setting breakpoints
+
+Paths that require others to be fully determined are marked as DEAD meaning you
+ save the stack frames down it but cannot stop

@@ -1,0 +1,73 @@
+Causal list
+
+Functions:
+ t3:
+	t3 -> return 0
+ t2:
+	t2 -> return 1
+ t1:
+	t1 -> return FAIL
+		  	\-- t2() -> t2
+	   |- return SUCCESS
+			\-- t3() -> t3
+	   \- return FAIL
+ main:
+	main -> res
+
+ main::res:
+	res    -> res= SUCCESS
+	       \- res= FAIL
+			  \-- t1() == FAIL -> t1() -> t1
+
+If we want to break on line 34 when res == FAIL
+ look at the entry for main::res
+ for the first we go down the chain until the end and it's a constant so we compare and decide to ignore
+ for the second we go down and find a conditional on a constant, we compare the constant and 
+  realise we need this branch to be true to break, so we follow the conditional with the 
+  branch now being != 0 the next transforms it to t1() == FAIL must be TRUE
+  the right is constant so t1() must be FAIL that depends on the call to t1
+
+formal information
+ mapping of function and local variables to points in the data
+LINDEP: linear dependancy, my value is derived from the value at this point
+SPLDEP: Split dependancy, my value is derived from one of the following points
+CNDDEP: Conditional dependancy, the value of this dependancy may not execute (Condition then value)
+ENDDEP: Sentinal value for end of chain
+EXPR(sym, type): This is an expression in code of sym (e.g. +,==,!=) of type in TYPES
+TYPES: {LEFT, RIGHT, BOTH_R}, the type of expression if left then it only depends on the
+  left value and should be derived by context, same for right
+  if both then it can only stop on the right expression and should save the left's stack frame
+
+t3: LINDEP return 0 (@0x1008) rax
+	LINDEP CONSTANT 0
+t2: LINDEP return 1 (@0x1018) rax
+	LINDEP CONSTANT 1
+t1: SPLDEP 3
+	CNDDEP LEFT
+		LINDEP t2() (@0x1060) rax
+			LINDEP t2
+		LINDEP return FAIL (@0x1080) rax
+			LINDEP CONSTANT 1
+	CNDDEP LEFT
+		LINDEP t3() (@0x1090) rax
+			LINDEP t3
+		LINDEP return SUCCESS (@0x1092) rax
+			LINDEP CONSTANT 0
+	LINDEP return FAIL (@0x1096) rax
+		LINDEP CONSTANT 1
+
+main: LINDEP main::res
+main::res::31: LINDEP res= SUCCESS (@0x1200) rax
+			LINDEP CONSTANT 0
+
+
+
+main::res::34: CNDDEP LEFT
+			EXPRDEP EXPR(==, LEFT) t1() == FAIL (@0x1204) rax
+				LINDEP t1() (@0x1216) rax
+					LINDEP t1
+				LINDEP CONSTANT 1
+			LINDEP res=FAIL (@0x1250) rax
+				LINDEP CONSTANT 1
+		
+		
