@@ -8,6 +8,7 @@
 #include "shared/Array.h"
 #include "Saruman/DWARFParsing.h"
 #include "Sauron.h"
+#include "main.h"
 
 typedef enum TAGS {
     DW_TAG_array_type= 0x01,
@@ -282,9 +283,9 @@ typedef union DIE_DATA {
     uint64_t strp; // string pointer DW_FORM_strp, DW_FORM_line_strp, DW_FORM_strp_sup
     uint64_t strx; // offset into debug_str_offsets DW_FORM_strx/1/2/3/4
     // uint64_t stroffsetsptr; // DW_FORM_sec_offset
-} DIE_DATA;
+} FORM_DATA;
 
-ARRAY_PROTO(DIE_DATA, DIEDATA)
+ARRAY_PROTO(FORM_DATA, DIEDATA)
 
 typedef struct DIE_TYPE {
     const Table* table;
@@ -299,10 +300,12 @@ typedef struct DIE {
 
 ARRAY_PROTO(DIE, DIE)
 
-DIE_DATA raa_die_data(uint8_t** start, DW_FORM form, const CU_HEADER* cu);
+FORM_DATA raa_form_data(uint8_t** start, DW_FORM form, uint8_t addr_size, uint8_t offset_size);
 DIE* get_main_cu();
 const char* cu_get_filename(const DIE* die);
 DIE* get_subprog_at(uintptr_t addr);
 const char* get_subprog_name_at(uintptr_t addr);
+VSub next_sub(SubIter* iter, bool* succ);
+void print_form_data(const FORM_DATA* data, DW_FORM form, uint64_t impl_const);
 
 #endif //BALIN_H
