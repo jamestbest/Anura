@@ -527,18 +527,40 @@ int generate_alias_statement(AliasNode* alias) {
     fprintf(ofile, "bool parse_%s(ByteStream* stream) {\n", alias->identifier);
     fprintf(ofile, "\tParseRet res= parse_%s_(stream);\n", alias->identifier);
     fprintf(ofile, "\tif (!res.success) return res.success;\n"
-                   "\taval_%s= res.aval;\n"
-                   "\treturn res.success;\n"
-                   "}\n\n",
+                   "\taval_%s= res.aval;\n",
                    alias->identifier
+    );
+
+    if (alias->linked_rule) {
+        fprintf(ofile, "\tif (res.aval.chosen_idx == AVAL_STATUS_NONE) {\n"
+                       "\t\taval_%s.chosen_idx= calculate_rule_right_%u();\n"
+                       "\t\taval_%s.chosen_val= vector_get_unsafe(&aval_%s.choices, aval_%s.chosen_idx);\n"
+                       "\t}\n",
+                       alias->identifier,
+                       alias->linked_rule->id,
+                       alias->identifier,
+                       alias->identifier,
+                       alias->identifier
+        );
+    }
+
+    fprintf(ofile,
+        "\treturn res.success;\n"
+        "}\n\n"
     );
 
     fprintf(ofile, "AVAL get_aval_%s() {\n", alias->identifier);
     if (alias->is_flat) {
         fprintf(ofile, "\tparse_%s(&top_stream);\n", alias->identifier);
     }
-    fprintf(ofile, "\treturn aval_%s;\n"
-                   "}\n\n", alias->identifier);
+    if (alias->linked_rule) {
+        fprintf(ofile, "\tint choice= calculate_rule_right_%u();\n", alias->linked_rule->id);
+        fprintf(ofile, "\tchar* data= vector_get_unsafe(&aval_%s.choices, choice);\n", alias->identifier);
+        fprintf(ofile, "\taval_%s.chosen_val= data;\n"
+                       "\taval_%s.chosen_idx= choice;\n", alias->identifier, alias->identifier);
+    }
+    fprintf(ofile, "\treturn aval_%s;\n", alias->identifier);
+    fprintf(ofile, "}\n\n");
 
     return SUCCESS;
 }
@@ -890,6 +912,8 @@ const char* bin_op_to_symbol(BinaryOperator op) {
         case DOT: return ".";
         case STAR: return "*";
         case AND: return "&&";
+        case ADD: return "+";
+        case SUB: return "-";
         case BINARY_OP_COUNT:
         case POW:
         default:
@@ -986,6 +1010,8 @@ int generate_binary(BinNode* node) {
         }
         case STAR:
         case AND:
+        case ADD:
+        case SUB:
             generate_operand(&node->left);
             fprintf(ofile, " %s ", bin_op_to_symbol(node->op));
             generate_operand(&node->right);
@@ -1092,6 +1118,47 @@ int generate_lr_rule(RuleNodeLR* rule, uint8_t depth, AliasNode* alias) {
 int generate_multi(Node* node, AliasNode* alias) {
     switch (node->type) {
         case NT_IDENT: {
+            const IdentNode* ident= (IdentNode*)node;
+
+            switch (ident->link->type) {
+                case NT_ALIAS: {
+                    const AliasNode* r_alias= (AliasNode*)ident->link;
+                    if (!r_alias->linked_rule) {
+                        fprintf(ofile, "vector_destroy(&res.choices);\n");
+                        fprintf(ofile, "res.choices= aval_%s.choices;", r_alias->identifier);
+                    } else {
+                        fprintf(ofile, "vector_add(&res.choices, calculate_rule_right_%u());", r_alias->linked_rule->id);
+                    }
+
+                    break;
+                }
+                default: {
+                    fprintf(ofile, "vector_add(&res.choices, ");
+                    generate_ident_as_value(ident);
+                    fprintf(ofile, ");");
+
+                    break;
+                }
+            }
+
+            break;
+        }
+        case NT_LIT_STRING: {
+            const LitNode* lit= (LitNode*)node;
+            const LitStringData* sd= &lit->data.lit_string;
+
+            fprintf(ofile, "vector_add(&res.choices, ");
+            generate_string_eval(sd);
+            fprintf(ofile, ");\n");
+
+            break;
+        }
+    }
+}
+
+int generate_single_multi(Node* node, AliasNode* alias) {
+    switch (node->type) {
+        case NT_IDENT: {
             fprintf(ofile,
                 "return PARSE_SUCC("
             );
@@ -1144,9 +1211,26 @@ int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias) {
     switch (rule->base->type) {
         case NT_MULTI: {
             MultiNode* multi= (MultiNode*)rule->base;
-            if (multi->multis.pos == 1) return generate_multi(Node_vec_get_unsafe(&multi->multis, 0), alias);
+            if (multi->multis.pos == 1) return generate_single_multi(Node_vec_get_unsafe(&multi->multis, 0), alias);
 
-            if (!alias->linked_rule) return error("Unable to find linked rule for alias with multiple outputs");
+            if (!alias->linked_rule) {
+                fprintf(ofile, "AVAL res= (AVAL) {\n"
+                               "\t.choices= vector_construct(%zu),\n"
+                               "\t.chosen_idx= AVAL_STATUS_NONE,\n"
+                               "\t.chosen_val= NULL\n"
+                               "};\n", multi->multis.pos);
+                for (int i = 0; i < multi->multis.pos; ++i) {
+                    generate_prefix(depth);
+                    generate_multi(Node_vec_get_unsafe(&multi->multis, i), alias);
+                }
+
+                generate_prefix(depth);
+                fprintf(ofile, "return PARSE_SUCC(res);\n");
+
+                return SUCCESS;
+                // return error("Unable to find linked rule for alias with multiple outputs");
+            }
+
             fprintf(ofile,
                 "switch(calculate_rule_right_%u()) {\n", alias->linked_rule->id);
 
@@ -1154,7 +1238,7 @@ int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias) {
                 Node* node= Node_vec_get_unsafe(&multi->multis, i);
                 generate_prefix(depth + 1);
                 fprintf(ofile, "case %u: ", i);
-                generate_multi(node, alias);
+                generate_single_multi(node, alias);
                 fprintf(ofile, "; break;\n");
             }
             generate_prefix(depth);
@@ -1206,13 +1290,12 @@ int generate_right_rules(RightRule* rule, uint8_t depth, AliasNode* alias) {
             }
 
             generate_prefix(depth);
-            fprintf(ofile, "ParseRet res= parse_%s_(&stream);\n", map->destination->identifier);
+            fprintf(ofile, "bool res= parse_%s(&stream);\n", map->destination->identifier);
             generate_prefix(depth);
             fprintf(ofile, "stream_destroy(&stream);\n");
             generate_prefix(depth);
-            fprintf(ofile, "return res;");
-
-            //todo do
+            fprintf(ofile, "return res == 1 ? PARSE_SUCC(aval_%s) : PARSE_FAIL;", map->destination->identifier);
+            // fprintf(ofile, "return aval_%s;", map->destination->identifier);
             break;
         }
         default: assert(false);
