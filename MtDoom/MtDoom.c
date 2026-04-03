@@ -33,6 +33,8 @@ int generate_dissassembler(const char* isdl_file_path, char* output_folder) {
     const char* ofile_path= make_path(output_folder, meta->name, "c");
     const char* hfile_path= make_path(output_folder, meta->name, "h");
 
+    endianness= meta->endianness;
+
     FILE* ofile= fopen(ofile_path, "w");
     FILE* hfile= fopen(hfile_path, "w");
 
@@ -52,11 +54,5 @@ int generate_dissassembler(const char* isdl_file_path, char* output_folder) {
     fclose(hfile);
 
     return gen_res;
-}
-
-const char* disassemble_to_str(const uint8_t* data) {
-    lex("/home/jamestbest/Anura/x64.txt");
-
-    return NULL;
 }
 
