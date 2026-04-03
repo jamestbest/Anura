@@ -116,9 +116,15 @@ int compare_bp_addr_info(uintptr_t bpa, uintptr_t bpb) {
     return bpa - bpb;
 }
 
+int vsub_cmp(const uintptr_t a, const uintptr_t b) {
+    return a - b;
+}
+
 ARRAY_ADD(BPInfo, BPInfo)
 ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 ARRAY_ADD(StackFrame, StackFrame)
+ARRAY_ADD(BP, BP)
+ARRAY_ADD_CMP(VSub, VSub, vsub_cmp, vaddr_start)
 
 BPAddressInfoArray bp_info;
 
@@ -161,6 +167,7 @@ BPAddressInfo* get_or_add_bp_address_info(uintptr_t address, BPInfo info_if_none
     *addr_info= (BPAddressInfo){0};
     addr_info->address= address;
     addr_info->canonical_bp= info_if_none;
+    addr_info->bps= BP_arr_construct(0);
     increment_by_reason(addr_info, reason);
 
     return addr_info;
@@ -291,6 +298,7 @@ void open_program(const char* filepath) {
     }));
 
     g_idle_add(guiup_main_file, (gpointer)target.target_info_main_file_path());
+    g_idle_add(update_target_data, NULL);
 }
 
 char* va_to_string(const char* message, va_list args) {

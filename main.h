@@ -47,24 +47,35 @@ typedef struct BPInfo {
 
 ARRAY_PROTO(BPInfo, BPInfo)
 
-typedef struct BPAddressInfo {
-    uintptr_t address;
-    BPInfo canonical_bp;
-    uint16_t user_bp_count;
-    uint16_t temp_bp_count;
-    uint32_t bp_count;
-} BPAddressInfo;
-
-int compare_bp_addr_info(uintptr_t bpa, uintptr_t bpb);
-ARRAY_PROTO_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
-
-extern BPAddressInfoArray bp_info;
 typedef enum BP_REASON {
     BP_REASON_STEP_OVER,
     BP_REASON_STEP_OUT,
     BP_REASON_BREAK_CAUSE,
     BP_REASON_USER,
 } BP_REASON;
+
+typedef struct BP {
+    BP_REASON reason;
+    uintptr_t cfa;
+    void (*callback)(void* data);
+    void* data;
+} BP;
+
+ARRAY_PROTO(BP, BP)
+
+typedef struct BPAddressInfo {
+    uintptr_t address;
+    BPInfo canonical_bp;
+    uint16_t user_bp_count;
+    uint16_t temp_bp_count;
+    uint32_t bp_count;
+    BPArray bps;
+} BPAddressInfo;
+
+int compare_bp_addr_info(uintptr_t bpa, uintptr_t bpb);
+ARRAY_PROTO_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
+
+extern BPAddressInfoArray bp_info;
 
 BPAddressInfo* get_or_add_bp_address_info(uintptr_t address, BPInfo info_if_none, BP_REASON reason);
 void increment_by_reason(BPAddressInfo* info, BP_REASON reason);
@@ -79,6 +90,7 @@ typedef enum ACTION_TYPE {
     ACTION_BP_ADD,
     ACTION_BP_REMOVE,
     ACTION_BP_LIST,
+    ACTION_BP_CAUSE,
 
     ACTION_CF_EXIT,
     ACTION_CF_SINGLE_STEP,
@@ -124,7 +136,7 @@ typedef struct Action {
 Action* create_action(ACTION_TYPE type, ACTION_DATA data);
 
 typedef union RegValue {
-    uint64_t general;
+    int64_t general;
     __m128 vector[4];
 } RegValue;
 
@@ -159,6 +171,17 @@ typedef struct LabelledRegs {
 #if ANURA_TARGET == TARGET_LINUX_X64
 #include <sys/user.h>
 typedef struct user_regs_struct GeneralRegs;
+typedef enum FLAGS {
+    FLAG_ZERO= 0x40
+} FLAGS;
+typedef enum COMPARISONS {
+    COMPARE_EQ,
+    COMPARE_NEQ,
+    COMPARE_GT,
+    COMPARE_GTE,
+    COMPARE_LESS,
+    COMPARE_LESSEQ
+} COMPARISONS;
 #endif
 
 ARRAY_PROTO(GeneralRegs, GeneralRegs)
@@ -169,10 +192,33 @@ typedef struct StackFrame {
     uint32_t line;
     const char* subprog_name;
     GeneralRegs regs;
+    uintptr_t cfa;
+    uintptr_t end_stack_pointer;
+    uint8_t* data;
 } StackFrame;
 
 ARRAY_PROTO(StackFrame, StackFrame)
 typedef StackFrameArray Stack;
+
+typedef struct VSection {
+    uintptr_t vaddr_start;
+    uintptr_t vaddr_end;
+    size_t size;
+    uint8_t* data;
+} VSection;
+
+typedef struct VSub {
+    uintptr_t vaddr_start;
+    uintptr_t vaddr_end;
+    const char* subprog_name;
+} VSub;
+
+int vsub_cmp(const uintptr_t a, const uintptr_t b);
+ARRAY_PROTO_CMP(VSub, VSub, vsub_cmp, vaddr_start);
+
+typedef struct SubIter {
+    size_t idx;
+} SubIter;
 
 extern int tui_pipe[2];
 
