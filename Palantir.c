@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "break_on_cause.h"
 #include "Helper_File.h"
 
 int tui_setup() {
@@ -87,7 +88,7 @@ int tui_loop() {
                 )
             );
         } else if (MATCH_STR("del")) {
-            sscanf(buff.data, "set %d", &line);
+            sscanf(buff.data, "del %d", &line);
             LineAddrRes res= line2startaddr(line);
             if (!res.succ) {
                 printf("There is no code on line %d\n", line);
@@ -179,6 +180,13 @@ int tui_loop() {
                 &action_q,
                 create_action(
                     ACTION_DS_STACK_UNWIND,
+                    NO_DATA
+                )
+            );
+        } else if (MATCH_STR("cause")) {
+            queueb_push_blocking(
+                &action_q,
+                create_action(ACTION_BP_CAUSE,
                     NO_DATA
                 )
             );
