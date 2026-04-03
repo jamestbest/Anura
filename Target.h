@@ -43,6 +43,7 @@ typedef struct Target {
 
     long long (*target_remove_bp_at_addr)(uintptr_t addr, BP_REASON reason);
     long long (*target_remove_bp_at_line)(uint32_t line, BP_REASON reason);
+    long long (*target_remove_bp_at_addr_cfa)(uintptr_t addr, BP_REASON reason, uintptr_t cfa);
 
     void (*target_breakpoint_hit_cleanup)();
 
@@ -90,6 +91,17 @@ typedef struct Target {
     const char* (*target_info_main_file_path)();
 
     void (*target_unwind_stack)();
+
+    bool (*target_check_comparison)(COMPARISONS comparison);
+
+    long long (*target_place_bp_with_cfa)(uintptr_t addr, uintptr_t cfa, BP_REASON reason, void (*callback)(void* data), void* data);
+
+    VSection (*target_get_text_section)();
+    VSub (*target_get_next_sub)(SubIter* iter, bool* succ);
+    const char* (*target_get_subroutine_name_at)(uintptr_t v_addr);
+
+    LineAddrRes (*target_line_to_addr)(uint32_t line);
+    AddrLineRes (*target_addr_to_line)(uintptr_t addr);
 } Target;
 
 typedef enum TARGETS {
