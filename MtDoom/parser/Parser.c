@@ -347,6 +347,23 @@ ParseRet parse_meta_row(MetaData* md) {
         return PARSE_RET_SUCC;
     }
 
+    if (strcmp(ident->data.identifier, "endianness") == 0) {
+        if (!expect(ASSIGN)) return unexpected("Endianness field of meta data statement, expected `=`", current());
+
+        const Token* endian_tok= expect(LIT_STRING);
+        if (!endian_tok) return unexpected("Endianness field of meta data statement after `=`, expected string (LITTLE, BIG)", current());
+
+        if (strcmp(endian_tok->data.identifier, "LITTLE") == 0) {
+            root.meta->meta.endianness= ENDIAN_LITTLE;
+        } else if (strcmp(endian_tok->data.identifier, "BIG") == 0) {
+            root.meta->meta.endianness= ENDIAN_BIG;
+        } else {
+            return unexpected("Endianness field of meta data statement, expected LITTLE or BIG", current());
+        }
+
+        return PARSE_RET_SUCC;
+    }
+
     return PARSE_RET_FAIL;
 }
 
@@ -1955,6 +1972,7 @@ MetaNode create_meta_node() {
         .base= {.type= NT_META},
         .meta= {
             .name= NULL,
+            .endianness= ENDIAN_LITTLE,
             .parsed= false
         }
     };

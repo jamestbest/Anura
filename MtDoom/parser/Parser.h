@@ -5,6 +5,7 @@
 #ifndef ANURA_PARSER_H
 #define ANURA_PARSER_H
 
+#include "shared.h"
 #include "shared/Vector.h"
 #include "MtDoom/lexer/Lexer.h"
 
@@ -71,6 +72,7 @@ VECTOR_PROTO(Node, Node)
 typedef struct MetaData {
     bool parsed;
     const char* name;
+    ENDIANNESS endianness;
 } MetaData;
 
 struct StructureNode;
