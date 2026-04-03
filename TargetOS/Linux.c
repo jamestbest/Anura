@@ -79,7 +79,8 @@ long long remove_bp_at_line(uint32_t line, BP_REASON reason) {
     const LineAddrRes res= line2startaddr(line);
     if (!res.succ) return -1;
 
-    return target.target_remove_bp_at_addr(res.addr, reason);
+    const uintptr_t r_addr= target.target_addr_virtual_to_runtime(res.addr);
+    return target.target_remove_bp_at_addr(r_addr, reason);
 }
 
 long long place_bp_at_line(uint32_t line) {
@@ -87,10 +88,7 @@ long long place_bp_at_line(uint32_t line) {
 
     if (!res.succ) return -1;
 
-    uintptr_t runtime= virtual_to_runtime_addr(res.addr);
-
-    show_log("Runtime addr is %#lx\n", runtime);
-    show_log("Addr used is %#lx\n", res.addr + 0x555555554000);
+    const uintptr_t runtime= virtual_to_runtime_addr(res.addr);
 
     return target.target_place_bp_at_addr(runtime, line, BP_REASON_USER);
 }
@@ -177,8 +175,8 @@ void load_proc_maps() {
 
         char* filename;
         if (c != '\n') {
-            size_t filename_size= line_buff_size - chars_read + 1;
-            filename= malloc(sizeof(char) * filename_size);
+            size_t filename_size= line_buff_size - chars_read;
+            filename= malloc(sizeof(char) * filename_size + 1);
             memcpy(filename, &line_buff[chars_read], filename_size);
             filename[filename_size - 1]= '\0';
         } else {
@@ -254,7 +252,7 @@ int raddr_in_pt_procmap(const void* r_addrp, const void* procmapp) {
     const uintptr_t addr= *(const uintptr_t*)r_addrp;
     const ProcMap* procMap= procmapp;
 
-    show_log("Proc map %#lx %#lx\n", procMap->base, procMap->end);
+    // show_log("Proc map %#lx %#lx\n", procMap->base, procMap->end);
 
     if ((uintptr_t)procMap->base > addr) {
         return -1;
@@ -271,8 +269,8 @@ int vaddr_in_pt_procmap_range(const void* addrp, const void* procmapp) {
     const ProcMap* procMap= procmapp;
 
     const size_t map_size= procMap->end - procMap->base;
-    show_log("Proc map %p %p\n", procMap->base, procMap->end);
-    show_log("Got addr %lx checking against %lx-%lx\n", addr, procMap->offset, procMap->offset + map_size);
+    // show_log("Proc map %p %p\n", procMap->base, procMap->end);
+    // show_log("Got addr %lx checking against %lx-%lx\n", addr, procMap->offset, procMap->offset + map_size);
 
     if (procMap->offset > addr) {
         return -1;
@@ -285,7 +283,7 @@ int vaddr_in_pt_procmap_range(const void* addrp, const void* procmapp) {
 }
 
 ProcMap* get_procmap_at_vaddr(uintptr_t vaddr) {
-    show_log("There are %zu entries\n", pt_load_maps.pos);
+    // show_log("There are %zu entries\n", pt_load_maps.pos);
     const uint pos= ProcMap_arr_search(&pt_load_maps, &vaddr, vaddr_in_pt_procmap_range);
 
     if (pos == (uint)-1) return NULL;
@@ -294,9 +292,9 @@ ProcMap* get_procmap_at_vaddr(uintptr_t vaddr) {
 }
 
 ProcMap* get_procmap_at_raddr(uintptr_t raddr) {
-    show_log("There are %zu entries\n", pt_load_maps.pos);
+    // show_log("There are %zu entries\n", pt_load_maps.pos);
     const uint pos= ProcMap_arr_search(&pt_load_maps, &raddr, raddr_in_pt_procmap);
-    show_log("POSITION RESULT: %u\n", pos);
+    // show_log("POSITION RESULT: %u\n", pos);
 
     if (pos == (uint)-1) return NULL;
 
@@ -324,14 +322,14 @@ uintptr_t runtime_to_virtual_addr(uintptr_t r_addr) {
     if (proc_map == NULL) return 0;
 
     ProgSeg* seg= proc_map->seg;
-    show_log("Segment is %p\n",seg);
+    // show_log("Segment is %p\n",seg);
     if (seg == NULL) return 0;
 
     uintptr_t s_paddr= seg->p_vaddr;
-    show_log("segment pvaddr: %#lx\n", s_paddr);
+    // show_log("segment pvaddr: %#lx\n", s_paddr);
 
     uintptr_t res= s_paddr + (r_addr - proc_map->base);
-    show_log("Res; %#lx\n", res);
+    // show_log("Res; %#lx\n", res);
     return res;
 }
 
@@ -387,14 +385,8 @@ Data get_data_runtime(runtime_addr addr, uint32_t bytes) {
 
     const ssize_t read= process_vm_readv(target.pid, &l, 1, &r, 1, 0);
     if (read != bytes) {
-        perror("Cannot read vm readv\n");
+        show_err("Cannot read vm readv\n");
     }
-
-    hlog("Read %zu byte from target\n", read);
-    for (int j = 0; j < bytes; ++j) {
-        show_log("%02hhX ", buff[j]);
-    }
-    show_log("\n");
 
     return (Data) {
         .raw_data= l.iov_base,
@@ -403,7 +395,7 @@ Data get_data_runtime(runtime_addr addr, uint32_t bytes) {
 }
 
 Data get_data_virtual(virtual_addr addr, uint32_t bytes) {
-    const runtime_addr raddr= target.target_addr_runtime_to_virtual(addr);
+    const runtime_addr raddr= target.target_addr_virtual_to_runtime(addr);
 
     return get_data_runtime(raddr, bytes);
 }
@@ -504,6 +496,19 @@ void unwind_stack() {
     show_stack(&stack);
 }
 
+VSection get_text_section() {
+    const uintptr_t start= ELF.section_map.text.header->sh_addr;
+    const uintptr_t size= ELF.section_map.text.header->sh_size;
+    const uintptr_t end= start + size;
+
+    return (VSection) {
+        .data= ELF.section_map.text.data,
+        .vaddr_start= start,
+        .vaddr_end= end,
+        .size= size
+    };
+}
+
 void linux_init_target(Target* target) {
     target->target_update_after_process_first_stopped= first_stopped;
 
@@ -530,4 +535,11 @@ void linux_init_target(Target* target) {
     target->target_info_main_file_path= info_main_file_path;
 
     target->target_unwind_stack= unwind_stack;
+
+    target->target_get_text_section= get_text_section;
+    target->target_get_next_sub= next_sub;
+    target->target_get_subroutine_name_at= get_subprog_name_at;
+
+    target->target_line_to_addr= line2startaddr;
+    target->target_addr_to_line= addr2line;
 }
