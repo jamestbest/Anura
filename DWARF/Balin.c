@@ -18,7 +18,7 @@ ARRAY_ADD(TagData, TagData)
 
 void print_die(const DIE* die);
 static int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header, TableArray* abbrev_tables);
-static const char* die_data_get_str(const DIE_DATA* data, DW_FORM form);
+static const char* die_data_get_str(const FORM_DATA* data, DW_FORM form);
 
 typedef enum ParseRes {
     PARSE_FAIL=-1,
@@ -152,16 +152,20 @@ Table* find_table(TableArray* tables, uint64_t offset) {
 ARRAY_ADD(DIE, DIE)
 ARRAY_PROTO(uint64_t, u64)
 ARRAY_ADD(uint64_t, u64)
-ARRAY_ADD(DIE_DATA, DIEDATA)
+ARRAY_ADD(FORM_DATA, DIEDATA)
 
 static DIEArray dies;
 static DIEArray cus;
 static DIEArray subprogs;
+static VSubArray vsubprogs;
+
+const char* get_subprog_name(const DIE* subprog);
 
 int parse_info(Section* section, TableArray* abbrev_tables) {
     dies= DIE_arr_create();
     cus= DIE_arr_create();
     subprogs= DIE_arr_create();
+    vsubprogs= VSub_arr_create();
 
     uint8_t* section_start= section->data;
     const uint8_t* section_end= section_start + section->header->sh_size;
@@ -203,6 +207,48 @@ int16_t get_attr_pos(const TagData* data, const DW_AT attr) {
     return -1;
 }
 
+VSub to_vsub(const DIE* subprog, bool* succ) {
+    const Table* abbrevs= subprog->type.table;
+    const TagData* data= TagData_arr_ptr(&abbrevs->abbrevs, subprog->type.abbrev);
+
+    if (has_attr(data, DW_AT_ranges)) {
+        show_err("Cannot get subprogram at location as it requires DW_AT_ranges\n");
+        goto to_vsub_fail;
+    }
+
+    const int16_t low= get_attr_pos(data, DW_AT_low_pc);
+    if (low == -1) goto to_vsub_fail;
+
+    const int16_t hi= get_attr_pos(data, DW_AT_high_pc);
+    if (hi == -1) goto to_vsub_fail;
+
+    const uintptr_t low_pc= DIEDATA_arr_ptr(&subprog->data, low)->address;
+    const uintptr_t hi_pc= low_pc + DIEDATA_arr_ptr(&subprog->data, hi)->constant_m64_u;
+
+    const char* name= get_subprog_name(subprog);
+
+    *succ= true;
+    return (VSub) {
+        .vaddr_start= low_pc,
+        .vaddr_end= hi_pc,
+        .subprog_name= name
+    };
+
+to_vsub_fail:
+    *succ= false;
+    return (VSub){0};
+}
+
+VSub next_sub(SubIter* iter, bool* succ) {
+    if (iter->idx >= vsubprogs.pos) {
+        *succ= false;
+        return (VSub){0};
+    }
+
+    *succ= true;
+    return VSub_arr_get(&vsubprogs, iter->idx++);
+}
+
 DIE* get_subprog_at(const uintptr_t addr) {
     // ignoring external functions
     for (int i = 0; i < subprogs.pos; ++i) {
@@ -238,7 +284,7 @@ const char* get_subprog_name(const DIE* subprog) {
     const int16_t name_pos= get_attr_pos(data, DW_AT_name);
     if (name_pos == -1) return NULL;
 
-    const DIE_DATA* die_data= DIEDATA_arr_ptr(&subprog->data, name_pos);
+    const FORM_DATA* die_data= DIEDATA_arr_ptr(&subprog->data, name_pos);
     const DW_FORM data_form= ATData_arr_ptr(&data->attributes, name_pos)->form;
     return die_data_get_str(die_data, data_form);
 }
@@ -250,7 +296,7 @@ const char* get_subprog_name_at(const uintptr_t addr) {
     return get_subprog_name(subprog);
 }
 
-const char* die_data_get_str(const DIE_DATA* data, const DW_FORM form) {
+const char* die_data_get_str(const FORM_DATA* data, const DW_FORM form) {
     switch (form) {
         case DW_FORM_string: return data->string;
         case DW_FORM_strp: return (char*)&ELF.section_map.debug_str.data[data->offset];
@@ -271,12 +317,20 @@ const char* cu_get_filename(const DIE* die) {
         const ATData* attr= ATData_arr_ptr(&tag->attributes, i);
 
         if (attr->attr == DW_AT_name) {
-            const DIE_DATA* data= DIEDATA_arr_ptr(&die->data, i);
+            const FORM_DATA* data= DIEDATA_arr_ptr(&die->data, i);
             return die_data_get_str(data, attr->form);
         }
     }
 
     return NULL;
+}
+
+static uint8_t offset_size_from_mode(MODE mode) {
+    switch (mode) {
+        case MODE_32bit: return 4;
+        case MODE_64bit: return 8;
+        default: assert(false);
+    }
 }
 
 int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header, TableArray* abbrev_tables) {
@@ -314,7 +368,7 @@ int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header,
 
         for (int i = 0; i < tag->attributes.pos; ++i) {
             const ATData* attr= ATData_arr_ptr(&tag->attributes, i);
-            const DIE_DATA die_data= raa_die_data(data, attr->form, header);
+            const FORM_DATA die_data= raa_form_data(data, attr->form, header->address_size, offset_size_from_mode(header->mode));
             DIEDATA_arr_add(&die.data, die_data);
         }
 
@@ -326,11 +380,25 @@ int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header,
         if (tag->has_children) depth++;
     }
 
+    bool succ;
+    for (int i = 0; i < subprogs.pos; ++i) {
+        const DIE* sub= DIE_arr_ptr(&subprogs, i);
+        const VSub vsub= to_vsub(sub, &succ);
+        if (!succ) {
+            const char* name= get_subprog_name(sub);
+            show_err("Unable to convert subprogram (%s) into vsub\n", name);
+            continue;
+        }
+        VSub_arr_add(&vsubprogs, vsub);
+    }
+
+    VSub_arr_sort_i(&vsubprogs);
+
     return SUCCESS;
 }
 
-void print_die_data(const DIE_DATA* data, const ATData* attr) {
-    switch (attr->form) {
+void print_form_data(const FORM_DATA* data, DW_FORM form, uint64_t impl_const) {
+    switch (form) {
         case DW_FORM_addr: {
             printf("%#lX", data->address);
             break;
@@ -441,7 +509,7 @@ void print_die_data(const DIE_DATA* data, const ATData* attr) {
         }
 
         case DW_FORM_implicit_const: {
-            printf("%ld", attr->impl_const);
+            printf("%ld", impl_const);
             break;
         }
 
@@ -471,105 +539,105 @@ void print_die(const DIE* die) {
 
         print_nesting(die->nesting + 1);
         printf("%-30s", attribute_str(attr->attr));
-        print_die_data(DIEDATA_arr_ptr(&die->data, i), attr);
+        print_form_data(DIEDATA_arr_ptr(&die->data, i), attr->form, attr->impl_const);
         newline();
     }
 }
 
-DIE_DATA raa_die_data(uint8_t** start, const DW_FORM form, const CU_HEADER* cu) {
+FORM_DATA raa_form_data(uint8_t** start, const DW_FORM form, uint8_t addr_size, uint8_t offset_size) {
     switch (form) {
         case DW_FORM_addr: {
             //  An object of appropriate size to hold an address on the target machine
             //  The size is encoded in the compilation unit header
-            return (DIE_DATA) {.address= raa_uint(start, cu->address_size)};
+            return (FORM_DATA) {.address= raa_uint(start, addr_size)};
         }
-        case DW_FORM_addrx: return (DIE_DATA) {.address_x= raa_uleb128(start).v};
-        case DW_FORM_addrx1: return (DIE_DATA) {.address_x= raa_uint(start, 1)};
-        case DW_FORM_addrx2: return (DIE_DATA) {.address_x= raa_uint(start, 2)};
-        case DW_FORM_addrx3: return (DIE_DATA) {.address_x= raa_uint(start, 3)};
-        case DW_FORM_addrx4: return (DIE_DATA) {.address_x= raa_uint(start, 4)};
+        case DW_FORM_addrx: return (FORM_DATA) {.address_x= raa_uleb128(start).v};
+        case DW_FORM_addrx1: return (FORM_DATA) {.address_x= raa_uint(start, 1)};
+        case DW_FORM_addrx2: return (FORM_DATA) {.address_x= raa_uint(start, 2)};
+        case DW_FORM_addrx3: return (FORM_DATA) {.address_x= raa_uint(start, 3)};
+        case DW_FORM_addrx4: return (FORM_DATA) {.address_x= raa_uint(start, 4)};
 
         case DW_FORM_sec_offset: {
             // Form DW_FORM_sec_offset is a member of more than one class, namely
             // addrptr, lineptr, loclist, loclistsptr, macptr, rnglist, rnglistsptr, and stroffsetsptr;
-            return (DIE_DATA) {.offset= raa_offset_by_mode(start, cu->mode)};
+            return (FORM_DATA) {.offset= raa_uint(start, offset_size)};
         }
-        case DW_FORM_block: return (DIE_DATA) {.block= raa_block(start)};
-        case DW_FORM_block1: return (DIE_DATA) {.block= raa_block_x(start, 1)};
-        case DW_FORM_block2: return (DIE_DATA) {.block= raa_block_x(start, 2)};
-        case DW_FORM_block4: return (DIE_DATA) {.block= raa_block_x(start, 4)};
+        case DW_FORM_block: return (FORM_DATA) {.block= raa_block(start)};
+        case DW_FORM_block1: return (FORM_DATA) {.block= raa_block_x(start, 1)};
+        case DW_FORM_block2: return (FORM_DATA) {.block= raa_block_x(start, 2)};
+        case DW_FORM_block4: return (FORM_DATA) {.block= raa_block_x(start, 4)};
 
-        case DW_FORM_data1: return (DIE_DATA) {.constant_m64_u = raa_uint(start, 1)};
-        case DW_FORM_data2: return (DIE_DATA) {.constant_m64_u = raa_uint(start, 2)};
-        case DW_FORM_data4: return (DIE_DATA) {.constant_m64_u = raa_uint(start, 4)};
-        case DW_FORM_data8: return (DIE_DATA) {.constant_m64_u = raa_uint(start, 8)};
+        case DW_FORM_data1: return (FORM_DATA) {.constant_m64_u = raa_uint(start, 1)};
+        case DW_FORM_data2: return (FORM_DATA) {.constant_m64_u = raa_uint(start, 2)};
+        case DW_FORM_data4: return (FORM_DATA) {.constant_m64_u = raa_uint(start, 4)};
+        case DW_FORM_data8: return (FORM_DATA) {.constant_m64_u = raa_uint(start, 8)};
         case DW_FORM_data16: {
-            DIE_DATA data;
+            FORM_DATA data;
             raa_const_array(start, (uint8_t**)&data.constant_m128_u, 16);
             return data;
         }
 
         case DW_FORM_udata: {
             const ULEB128 value= raa_uleb128(start);
-            return (DIE_DATA) {.constant_m64_u= value.v};
+            return (FORM_DATA) {.constant_m64_u= value.v};
         }
         case DW_FORM_sdata: {
             const LEB128 value= raa_leb128(start);
-            return (DIE_DATA) {.constant_m64_s= value.v};
+            return (FORM_DATA) {.constant_m64_s= value.v};
         }
 
         case DW_FORM_flag: {
             const uint8_t flag= raa_uint(start, 1);
-            return (DIE_DATA) {.flag= flag != 0};
+            return (FORM_DATA) {.flag= flag != 0};
         };
-        case DW_FORM_flag_present: return (DIE_DATA) {.flag= 1};
+        case DW_FORM_flag_present: return (FORM_DATA) {.flag= 1};
 
-        case DW_FORM_ref_addr: return (DIE_DATA) {.reference= raa_offset_by_mode(start, cu->mode)};
+        case DW_FORM_ref_addr: return (FORM_DATA) {.reference= raa_uint(start, offset_size)};
 
-        case DW_FORM_ref1: return (DIE_DATA) {.reference= raa_uint(start, 1)};
-        case DW_FORM_ref2: return (DIE_DATA) {.reference= raa_uint(start, 2)};
-        case DW_FORM_ref4: return (DIE_DATA) {.reference= raa_uint(start, 4)};
-        case DW_FORM_ref8: return (DIE_DATA) {.reference= raa_uint(start, 8)};
+        case DW_FORM_ref1: return (FORM_DATA) {.reference= raa_uint(start, 1)};
+        case DW_FORM_ref2: return (FORM_DATA) {.reference= raa_uint(start, 2)};
+        case DW_FORM_ref4: return (FORM_DATA) {.reference= raa_uint(start, 4)};
+        case DW_FORM_ref8: return (FORM_DATA) {.reference= raa_uint(start, 8)};
 
-        case DW_FORM_ref_udata: return (DIE_DATA) {.reference= raa_uleb128(start).v};
+        case DW_FORM_ref_udata: return (FORM_DATA) {.reference= raa_uleb128(start).v};
 
-        case DW_FORM_ref_sig8: return (DIE_DATA) {.typesig= raa_uint(start, 8)};
-        case DW_FORM_ref_sup4: return (DIE_DATA) {.offset= raa_uint(start, 4)};
-        case DW_FORM_ref_sup8: return (DIE_DATA) {.offset= raa_uint(start, 8)};
+        case DW_FORM_ref_sig8: return (FORM_DATA) {.typesig= raa_uint(start, 8)};
+        case DW_FORM_ref_sup4: return (FORM_DATA) {.offset= raa_uint(start, 4)};
+        case DW_FORM_ref_sup8: return (FORM_DATA) {.offset= raa_uint(start, 8)};
 
-        case DW_FORM_string: return (DIE_DATA) {.string= (char*)raa_null_term_string(start)};
+        case DW_FORM_string: return (FORM_DATA) {.string= (char*)raa_null_term_string(start)};
 
         case DW_FORM_strp:
         case DW_FORM_strp_sup:
         case DW_FORM_line_strp:
-            return (DIE_DATA) {.offset= raa_offset_by_mode(start, cu->mode)};
+            return (FORM_DATA) {.offset= raa_uint(start, offset_size)};
 
-        case DW_FORM_strx: return (DIE_DATA) {.offset= raa_uleb128(start).v};
-        case DW_FORM_strx1: return (DIE_DATA) {.offset= raa_uint(start, 1)};
-        case DW_FORM_strx2: return (DIE_DATA) {.offset= raa_uint(start, 2)};
-        case DW_FORM_strx3: return (DIE_DATA) {.offset= raa_uint(start, 3)};
-        case DW_FORM_strx4: return (DIE_DATA) {.offset= raa_uint(start, 4)};
+        case DW_FORM_strx: return (FORM_DATA) {.offset= raa_uleb128(start).v};
+        case DW_FORM_strx1: return (FORM_DATA) {.offset= raa_uint(start, 1)};
+        case DW_FORM_strx2: return (FORM_DATA) {.offset= raa_uint(start, 2)};
+        case DW_FORM_strx3: return (FORM_DATA) {.offset= raa_uint(start, 3)};
+        case DW_FORM_strx4: return (FORM_DATA) {.offset= raa_uint(start, 4)};
 
-        case DW_FORM_exprloc: return (DIE_DATA){ .exprloc= raa_expr(start)};
+        case DW_FORM_exprloc: return (FORM_DATA){ .exprloc= raa_expr(start)};
 
         case DW_FORM_indirect: {
             // This contains within it the form
             const DW_FORM encoded_form= raa_uleb128(start).v;
-            return raa_die_data(start, encoded_form, cu);
+            return raa_form_data(start, encoded_form, addr_size, offset_size);
         }
 
         case DW_FORM_implicit_const: {
             // there is no value here
-            return (DIE_DATA) {};
+            return (FORM_DATA) {};
         }
 
         case DW_FORM_loclistx:
             //An index into the .debug_loclists section
-            return (DIE_DATA) {.offset= raa_uleb128(start).v};
+            return (FORM_DATA) {.offset= raa_uleb128(start).v};
 
         case DW_FORM_rnglistx:
             //An index into the .debug_rnglists section
-            return (DIE_DATA) {.offset= raa_uleb128(start).v};
+            return (FORM_DATA) {.offset= raa_uleb128(start).v};
         default: assert(false);
     }
 }
