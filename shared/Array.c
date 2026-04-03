@@ -47,6 +47,7 @@ bool arr_is_at_capacity(const Array* array) {
 }
 
 void arr_resize(Array* array) {
+    if (array->capacity == 0) array->capacity= 1;
     const uint new_capacity = array->capacity << 1;
 
     char* new_memory = realloc(array->arr, new_capacity * array->element_size);
@@ -141,7 +142,7 @@ bool arr_remove(Array* array, const uint index) {
     void* dst = &array->arr[index * array->element_size];
     const void* src = &array->arr[(index + 1) * array->element_size];
 
-    memmove(dst, src, elements_right);
+    memmove(dst, src, elements_right * array->element_size);
 
     return true;
 }
