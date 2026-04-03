@@ -19,6 +19,8 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
+#include "break_on_cause.h"
+#include "Palantir/Palantir.h"
 #include "Saruman/Saruman.h"
 
 uintptr_t base;
@@ -135,6 +137,8 @@ ACTION_HANDLE_RES handle_step_over() {
         // todo inform gui
         show_log("Reached newline from step over, original line: %lu, new line %lu\n", step_over_info.line, line.line);
         step_over_cleanup();
+
+        g_idle_add(hit_addr, GUINT_TO_POINTER(c_vaddr));
         return ACTION_HANDLE_CONTINUE;
     }
 
@@ -157,6 +161,8 @@ ACTION_HANDLE_RES handle_step_over() {
             //   as this may also be a tail call
             show_log("Reached caller from step over\n");
             step_over_cleanup();
+
+            g_idle_add(hit_addr, GUINT_TO_POINTER(c_vaddr));
             return ACTION_HANDLE_CONTINUE;
         }
     }
@@ -181,6 +187,8 @@ ACTION_HANDLE_RES handle_step_into_step() {
     if (step_into_line != res.line) {
         state= STATE_NORMAL;
         show_log("Reached new line %lu\n", res.line);
+
+        g_idle_add(hit_addr, GUINT_TO_POINTER(v_addr));
         return ACTION_HANDLE_CONTINUE;
     }
 
@@ -193,6 +201,10 @@ ACTION_HANDLE_RES handle_step_out() {
     // the only option here is that we've reached the return address
     step_out_cleanup();
 
+    const uintptr_t pc= target.target_get_pc();
+    const uintptr_t v_pc= target.target_addr_runtime_to_virtual(pc);
+    g_idle_add(hit_addr, GUINT_TO_POINTER(v_pc));
+
     return ACTION_HANDLE_CONTINUE;
 }
 
@@ -203,13 +215,16 @@ ACTION_HANDLE_RES handle_action(Action* action) {
         }
 
         case ACTION_BP_ADD: {
-            show_log("GETTING DAA IN BP ADD\n");
-            uintptr_t addr= action->data.BP_ADD.addr;
-            uint32_t line= action->data.BP_ADD.line;
-            show_log("GOT DATA\n");
+            const uintptr_t addr= action->data.BP_ADD.addr;
+            const uint32_t line= action->data.BP_ADD.line;
+            long long res;
 
-            //action->data.BP_ADD.line
-            long long res= target.target_place_bp_at_line(line);
+            if (line == -1) {
+                res= target.target_place_bp_at_addr(addr, -1, BP_REASON_USER);
+            } else {
+                res= target.target_place_bp_at_line(line);
+            }
+
             if (res) show_log("Failed to place bp at %d with errno %lld of %s\n", line, res, strerror(res));
             else show_log("Placed bp at line %d on addr 0x%#lx\n", line, addr);
 
@@ -218,11 +233,22 @@ ACTION_HANDLE_RES handle_action(Action* action) {
 
         case ACTION_BP_REMOVE: {
             show_log("Removing breakpoint\n");
-            uint32_t line= action->data.BP_REMOVE.line;
+            const uint32_t line= action->data.BP_REMOVE.line;
+            long long res;
+            if (line == -1) {
+                res= target.target_remove_bp_at_addr(action->data.BP_REMOVE.addr, BP_REASON_USER);
+            } else {
+                res= target.target_remove_bp_at_line(line, BP_REASON_USER);
+            }
 
-            long long res= target.target_remove_bp_at_line(line, BP_REASON_USER);
             if (res) show_log("Failed to place bp at %d with errno %lld of %s\n", line, res, strerror(res));
             else show_log("Removed bp at line %d\n", line);
+
+            return ACTION_HANDLE_CONTINUE;
+        }
+
+        case ACTION_BP_CAUSE: {
+            break_on_cause("res", 34);
 
             return ACTION_HANDLE_CONTINUE;
         }
@@ -298,6 +324,7 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             ptrace(PTRACE_KILL, target.pid, NULL, 0);
 
             return ACTION_HANDLE_EXIT;
+        default: assert(false);
     }
 }
 
@@ -435,15 +462,20 @@ end_q_stat_loop1:;
             break;
         }
 
+        g_idle_add(update_breakpoint_memory, NULL);
+
         const long long r6= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[6]));
 
         long long rip= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, regs.rip));
 
         BPAddressInfo* bp= NULL;
         const int signal= WSTOPSIG(status);
+        bool is_trace= false;
         if (WIFSTOPPED(status) && signal == SIGTRAP) {
             siginfo_t siginfo;
             ptrace(PTRACE_GETSIGINFO, target.pid, 0, &siginfo);
+
+            if (siginfo.si_code == TRAP_TRACE) is_trace= true;
 
             if (siginfo.si_code == TRAP_BRKPT || siginfo.si_code == SI_KERNEL) {
                 bp= BPAddressInfo_arr_search_ie(&bp_info, rip - 1);
@@ -452,26 +484,52 @@ end_q_stat_loop1:;
             }
         }
 
-        if (!(r6 & 0b1111) && bp && bp->canonical_bp.type == BP_SOFTWARE) {
+        if (!is_trace && !(r6 & 0b1111) && bp && bp->canonical_bp.type == BP_SOFTWARE) {
             show_log("Declared as hitting a software breakpoint, reducing rip by 1\n");
             // if we're not hardware i.e. software then we are one ahead
             rip--;
             ptrace(PTRACE_POKEUSER, target.pid, (void*)offsetof(struct user, regs.rip), (void*)rip);
         }
 
+        const uintptr_t c_vaddr= target.target_addr_runtime_to_virtual(rip);
+        if (c_vaddr != -1)
+            g_idle_add(hit_addr, GUINT_TO_POINTER(c_vaddr));
+
         if (!bp || bp->bp_count == 0) {
             hlog("The tracee stopped via a non breakpoint event with rip= %p\n", (void*)rip);
         } else {
-            const AddrLineRes res= addr2line(target.target_addr_runtime_to_virtual(rip));
+            const AddrLineRes res= addr2line(c_vaddr);
             uint32_t line;
             if (!res.succ) line= -1;
             else line= res.line;
-            hlog("The tracee stopped via %s breakpoint at %p which is in line %u, there are %u breakpoints at this location\n",
+            const uintptr_t rip_p= rip;
+            hlog("The tracee stopped via %s breakpoint at %#lx which is in line %u, there are %u breakpoints at this location\n",
                 BP_TYPE_STRS[bp->canonical_bp.type],
-                rip,
+                rip_p,
                 line,
                 bp->bp_count
             );
+        }
+
+        if (bp) {
+            bool succ;
+            const uintptr_t cfa= target.target_get_cfa(&succ);
+            BPArray bp_copy= BP_arr_construct(bp->bps.pos);
+            for (int i = 0; i < bp->bps.pos; i++) {
+                BP_arr_add(&bp_copy, BP_arr_get(&bp->bps, i));
+            }
+
+            for (int i = 0; i < bp_copy.pos; ++i) {
+                const BP* point= BP_arr_ptr(&bp_copy, i);
+
+                if (point->cfa == -1 || point->cfa == cfa) {
+                    if (point->callback) {
+                        point->callback(point->data);
+                    }
+                }
+            }
+
+            printf("test");
         }
 
         target.target_breakpoint_hit_cleanup();
