@@ -11,6 +11,10 @@ add_executable(BreakSimple
     breakcause/break_cause_simple.c
 )
 
+add_executable(BreakExample
+    breakcause/break_cause_example_1.c
+)
+
 add_executable(Anura main.c shared/Array.c
         Sauron.c
         Sauron.h
@@ -52,6 +56,9 @@ add_executable(Anura main.c shared/Array.c
         break_on_cause.h
 
         Palantir/Palantir.c
+
+        x64/x64.c
+        MtDoom/output/default.c
 )
 
 add_executable(MtDoom
@@ -75,12 +82,17 @@ add_executable(MtDoom
         shared/Helper_Math.c
         shared/Buffer.c
         shared/Array.c
+        MtDoom/shared.h
 )
 
 target_link_libraries(MtDoom PRIVATE m)
+target_link_libraries(Anura PRIVATE m)
+
 target_link_options(MtDoom PRIVATE -fsanitize=address)
 target_compile_options(MtDoom PUBLIC -fsanitize=address)
+
 target_include_directories(MtDoom PRIVATE MtDoom/output/)
+target_include_directories(Anura PRIVATE MtDoom/output/)
 
 add_executable(x64Diss
     x64/x64.c
