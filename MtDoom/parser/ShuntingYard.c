@@ -118,6 +118,12 @@ bool check_binary_expression(const BinNode* binary) {
                 default: assert(false);
             }
         }
+        case ADD:
+        case SUB: {
+            if (op1.type != op2.type) return false;
+
+            return (op1.type == TYPE_NUMBER);
+        }
         case STAR:
         case AND:
         case POW: {
