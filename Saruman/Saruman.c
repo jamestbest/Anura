@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "Helper_String.h"
+#include "DWARF/Balin.h"
 
 const LC LC_ERR= {-1, -1};
 const ARange ARange_ERR= {-1, -1};
@@ -344,6 +345,40 @@ DecodeRet decode_op(uint8_t* base) {
     };
 }
 
+typedef struct {
+    DW_LNCT content;
+    DW_FORM form;
+} DirStructure;
+ARRAY_PROTO(DirStructure, DirStructure)
+ARRAY_ADD(DirStructure, DirStructure)
+
+static void raa_directory_entry_format(uint8_t** base) {
+    const uint8_t count= raa_uint(base, 1);
+
+    DirStructureArray structure= DirStructure_arr_construct(count);
+    for (int i = 0; i < count; ++i) {
+        const ULEB128 content_type= raa_uleb128(base);
+        const ULEB128 form= raa_uleb128(base);
+
+        DirStructure_arr_add(&structure, (DirStructure) {
+            .content= content_type.v,
+            .form= form.v
+        });
+    }
+
+    ULEB128 dir_count= raa_uleb128(base);
+    for (int i = 0; i < dir_count.v; ++i) {
+        for (int j = 0; j < structure.pos; ++j) {
+            const DirStructure* entry= DirStructure_arr_ptr(&structure, j);
+
+            FORM_DATA data= raa_form_data(base, entry->form, info.a_size, 4);
+            print_form_data(&data, entry->form, -1);
+        }
+        newline();
+    }
+}
+
+
 static int read_header(uint8_t* start, char* string_data) {
     uint8_t* base= start;
 
@@ -402,6 +437,8 @@ static int read_header(uint8_t* start, char* string_data) {
         show_log(" Op %s %.2zu has %u operand(s)\n",
             DW_LNS_STRS[i + 1], i + 1, size);
     }
+
+    raa_directory_entry_format(&base);
 
     matrix= MRow_arr_create();
     create_header();
@@ -468,7 +505,7 @@ static int read_header(uint8_t* start, char* string_data) {
     info.file_names_count= fnc.v;
 }
 
-void init() {
+static void init() {
     pc= op_idx= 0;
     file= line= 1;
     col= 0;
@@ -615,6 +652,7 @@ const LineAddrRes LINE_ADDR_RES_FAIL= (LineAddrRes) {
 };
 
 LineAddrRes line2startaddr(uint32_t l) {
+    if (LN_info.header.lines == NULL) return LINE_ADDR_RES_FAIL;
     if (l > LN_info.header.max_line) return LINE_ADDR_RES_FAIL;
 
     uint32_t off= LN_info.header.lines[l];
