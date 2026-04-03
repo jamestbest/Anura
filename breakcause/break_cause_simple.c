@@ -12,7 +12,7 @@ int t3() {
 }
 
 int t2() {
-    return 1;
+    return 0;
 }
 
 int t1() {
@@ -26,23 +26,6 @@ int t1() {
 
     return FAIL;
 }
-
-
-// int i= 0;
-// int main() {
-//     b:;
-//     int res= SUCCESS;
-//     if (i == 1) goto a;
-//     i = 1;
-//
-//     if (t1() == FAIL) {
-//         res= FAIL;
-//     }
-//     goto b;
-//     a:
-//
-//     return res;
-// }
 
 int main() {
     int res= SUCCESS;

@@ -29,7 +29,7 @@ static int parse_y();
 static int parse_z();
 static Token* current();
 static Token* consume();
-static Token* expect(const TokenType type);
+static Token* expect(TokenType type);
 static int error(const char* message);
 
 int main() {
@@ -60,7 +60,7 @@ int parse() {
 
     while (t_idx <= max_t_idx) {
         const int res= parse_top_level();
-        if (res != SUCCESS) return res;
+        if (res == FAIL) return res;
     }
 
     return SUCCESS;
@@ -106,7 +106,7 @@ int parse_y() {
 
     x->data.idx= y->data.idx;
 
-    return expect(TYPE_X) == 0 ? FAIL : SUCCESS;
+    return !expect(TYPE_X);
 }
 
 int parse_z() {
@@ -118,7 +118,7 @@ int parse_z() {
     Token* z= expect(TYPE_Z);
     if (!z) return FAIL;
 
-    return expect(TYPE_Z) == 0 ? FAIL : SUCCESS;
+    return !expect(TYPE_Z);
 }
 
 int error(const char* message) {
