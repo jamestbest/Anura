@@ -21,6 +21,7 @@
 #include <sys/uio.h>
 
 #include "Errors.h"
+#include "Palantir/Palantir.h"
 #include "Saruman/Saruman.h"
 
 #define SW_INT_TYPE (unsigned char)
@@ -56,36 +57,55 @@ long long remove_sw_bp(BPInfo* info) {
 }
 
 long long remove_bp(BPInfo* bp) {
+    long long res;
     switch (bp->type) {
-        case BP_HARDWARE: return remove_hw_bp(bp->data.bp);
-        case BP_SOFTWARE: return remove_sw_bp(bp);
+        case BP_HARDWARE: res= remove_hw_bp(bp->data.bp); break;
+        case BP_SOFTWARE: res= remove_sw_bp(bp); break;
 
         case BP_SOURCE_SINGLE_STEP_TRAP:
         case BP_TYPE_COUNT:
         default:
             assert(false);
     }
+
+    return res;
 }
 
-long long remove_bp_at_addr(uintptr_t addr, BP_REASON reason);
 
-long long remove_bp_at_addr(uintptr_t addr, BP_REASON reason) {
+long long remove_bp_at_addr_cfa(uintptr_t addr, BP_REASON reason, uintptr_t cfa) {
     const size_t i= BPAddressInfo_arr_search_i(&bp_info, addr);
     BPAddressInfo* info= BPAddressInfo_arr_ptr(&bp_info, i);
     if (!info) return FAIL;
 
     decrement_by_reason(info, reason);
 
+    if (cfa != -1) {
+        size_t idx=-1;
+        for (int j = 0; j < info->bps.pos; ++j) {
+            BP* bp= BP_arr_ptr(&info->bps, j);
+            if (bp->cfa == cfa) {
+                idx= j;
+            }
+        }
+        BP_arr_remove(&info->bps, idx);
+    }
+
     if (info->bp_count == 0) {
         const long long res= remove_bp(&info->canonical_bp);
         if (res == SUCCESS) {
             BPAddressInfo_arr_remove(&bp_info, i);
         }
-        return res;
     }
+
+    update_breakpoint_displays(NULL);
 
     return SUCCESS;
 }
+
+long long remove_bp_at_addr(uintptr_t addr, BP_REASON reason) {
+    return remove_bp_at_addr_cfa(addr, reason, -1);
+}
+
 
 long long aligned_write(uintptr_t address, uint8_t value, uint8_t* existing_value) {
     // we want to read just 1 byte of data for the shadow, but this might not be an aligned read
@@ -122,12 +142,7 @@ long long readd_sw_bp(BPInfo* bp) {
     return res;
 }
 
-long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason);
-long long place_temp_bp(uintptr_t address, BP_REASON reason) {
-    return place_bp(address, -1, reason);
-}
-
-long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
+long long place_bp_(uintptr_t address, uint32_t line, BP_REASON reason, uintptr_t cfa, void (*callback)(void* data), void* data) {
     long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
 
     bool bp_used[4]= {0};
@@ -137,8 +152,10 @@ long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
         bp_used[j]= used;
         if (!used && (free_bp == (unsigned int)-1)) free_bp= j;
     }
+
+    BPAddressInfo* addr_info;
     // if there is a local or global breakpoint enabled for all bps then we cannot create a hardware breakpoint
-    if (free_bp == -1 || true) {
+    if (free_bp == -1) {
         uint8_t shadow;
 
         target.target_get_data_runtime(address - 8, 16);
@@ -148,7 +165,7 @@ long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
 
         target.target_get_data_runtime(address - 8, 16);
 
-        BPAddressInfo* addr_info= get_or_add_bp_address_info(address,
+        addr_info= get_or_add_bp_address_info(address,
             (BPInfo){
                 .addr= address,
                 .line= line,
@@ -158,7 +175,9 @@ long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
             reason
         );
 
-        return 0;
+        g_idle_add(update_breakpoint_memory, NULL);
+
+        goto place_bp_end;
     }
 
     r7 |= 1 << (free_bp << 1); // enable LOCAL BREAKPOINT free_bp
@@ -170,8 +189,9 @@ long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
     if (res != 0) return res;
 
     res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[free_bp]), (long long)address);
+    if (res != 0) return res;
 
-    BPAddressInfo* addr_info= get_or_add_bp_address_info(address,
+    addr_info= get_or_add_bp_address_info(address,
         (BPInfo) {
             .addr= address,
             .line= line,
@@ -181,7 +201,32 @@ long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
         reason
     );
 
-    return res;
+place_bp_end:
+    if (callback != NULL) {
+        BP_arr_add(&addr_info->bps, (BP) {
+            .reason= reason,
+            .cfa= cfa,
+            .callback= callback,
+            .data= data
+        });
+    }
+
+    update_breakpoint_displays(NULL);
+
+    return SUCCESS;
+}
+
+long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason);
+long long place_temp_bp(uintptr_t address, BP_REASON reason) {
+    return place_bp(address, -1, reason);
+}
+
+long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
+    return place_bp_(address, line, reason, -1, NULL, NULL);
+}
+
+long long place_bp_with_cfa(uintptr_t addr, uintptr_t cfa, BP_REASON reason, void (*callback)(void* data), void* data) {
+    return place_bp_(addr, -1, reason, cfa, callback, data);
 }
 
 void breakpoint_hit_cleanup() {
@@ -210,7 +255,10 @@ GeneralRegs get_regs(bool* succ) {
 
     errno= 0;
     const long res= ptrace(PTRACE_GETREGS, target.pid, NULL, &regs);
-    if (res != -1 && errno == 0) *succ=false;
+    if (res == -1 && errno != 0) {
+        *succ=false;
+        return regs;
+    }
 
     *succ= true;
     return regs;
@@ -650,6 +698,56 @@ uint64_t get_general_reg_value_using(const uint16_t register_id, GeneralRegs* re
     return 0x12345678;
 }
 
+bool get_flag(const FLAGS flag) {
+    bool succ;
+    GeneralRegs regs= get_regs(&succ);
+    assert(succ);
+
+    switch (flag) {
+        case FLAG_ZERO: {
+            return regs.eflags & FLAG_ZERO;
+        }
+        default: assert(false);
+    }
+}
+
+#define EFLAG_ZF 0x0040
+#define EFLAG_SF 0x0080
+#define EFLAG_OF 0x0800
+
+bool check_comparison(const COMPARISONS comparison) {
+    bool succ;
+    const GeneralRegs regs= get_regs(&succ);
+    assert(succ);
+
+    const bool zf= regs.eflags & EFLAG_ZF;
+    const bool sf= regs.eflags & EFLAG_SF;
+    const bool of= regs.eflags & EFLAG_OF;
+
+    switch (comparison) {
+        case COMPARE_EQ: {
+            return zf;
+        }
+        case COMPARE_NEQ: {
+            return !zf;
+        }
+        case COMPARE_GT: {
+            return zf && (sf == of);
+        }
+        case COMPARE_GTE: {
+            return sf == of;
+        }
+        case COMPARE_LESS: {
+            return sf != of;
+        }
+        case COMPARE_LESSEQ: {
+            return zf || sf != of;
+        }
+        default:
+            assert(false);
+    }
+}
+
 uint64_t get_general_reg_value(const uint16_t register_id, bool* succ) {
     GeneralRegs regs= get_regs(succ);
     if (!*succ) return -1;
@@ -788,6 +886,7 @@ int linux_x64_init_target(Target* t) {
 
     t->target_place_bp_at_addr= place_bp;
     t->target_remove_bp_at_addr= remove_bp_at_addr;
+    t->target_remove_bp_at_addr_cfa= remove_bp_at_addr_cfa;
     t->target_breakpoint_hit_cleanup= breakpoint_hit_cleanup;
     t->target_interrupt= interrupt;
     t->target_interrupt_handler_setup= interrupt_handler_setup;
@@ -807,6 +906,8 @@ int linux_x64_init_target(Target* t) {
     t->target_readd_sw_bp= readd_sw_bp;
 
     t->target_cf_main= cf_main;
+
+    t->target_place_bp_with_cfa= place_bp_with_cfa;
 
     return 0;
 }
