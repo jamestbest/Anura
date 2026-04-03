@@ -19,6 +19,7 @@
 //  e.g. 10 reg 001  -- this is one BYTE (assuming reg is a 3 bit ALIAS)
 META= {
     .name= "x64"
+    .endianness= "LITTLE"
 }
 
 // assume we're in long mode
@@ -133,26 +134,9 @@ ALIAS regT 3 BITS= {
 }
 
 ALIAS regO= reg
-ALIAS regM 4 BITS = {
-  0000= "AX", "AL", "AL", "EAX", "RAX"
-  0001= "CX", "CL", "CL", "ECX", "RCX"
-  0010= "DX", "DL", "DL", "EDX", "RDX"
-  0011= "BX", "BL", "BL", "EBX", "RBX"
-  0100= "SP", "AH", "AH", "ESP", "RSP"
-  0101= "BP", "CH", "CH", "EBP", "RBP"
-  0110= "SI", "DH", "DH", "ESI", "RSI"
-  0111= "DI", "BH", "BH", "EDI", "RDI"
-  1000= "R8W", "R8B", "R8B", "R8D", "R8"
-  1001= "R9W", "R9B", "R9B", "R9D", "R9"
-  1010= "R10W", "R10B", "R10B", "R10D", "R10"
-  1011= "R11W", "R11B", "R11B", "R11D", "R11"
-  1100= "R12W", "R12B", "R12B", "R12D", "R12"
-  1101= "R13W", "R13B", "R13B", "R13D", "R13"
-  1110= "R14W", "R14B", "R14B", "R14D", "R14"
-  1111= "R15W", "R15B", "R15B", "R15D", "R15"
-}
+ALIAS regM= reg
 
-RULE RIGHT ON regO, regT, reg {
+RULE RIGHT ON regO, regT {
   CHOOSE 0 if opmode == 16bit
   CHOOSE 1 if opmode == 8bit && REX.w != 1
   CHOOSE 2 if opmode == 8bit
@@ -282,6 +266,34 @@ ALIAS ModRM= {
   Mod regr rm= "{regr}, {rm}"
 }
 
+ALIAS ModRM_7= {
+    Mod 111 rm= rm
+}
+
+ALIAS ModRM_6= {
+    Mod 110 rm= rm
+}
+
+ALIAS ModRM_5= {
+    Mod 101 rm= rm
+}
+
+ALIAS ModRM_4= {
+    Mod 100 rm= rm
+}
+
+ALIAS ModRM_3= {
+    Mod 011 rm= rm
+}
+
+ALIAS ModRM_2= {
+    Mod 010 rm= rm
+}
+
+ALIAS ModRM_0= {
+    Mod 000 rm= rm
+}
+
 CALCULATE opmode= {
   if ow then 8bit
   if REX.w then 64bit
@@ -318,7 +330,7 @@ FLAT ALIAS ModRMS= {
 ALIAS MOV= {
   1000 10 ms ~ow ModRM= "MOV {ModRMS}"
   1100 011 ~ow Mod 000 rm immM32 = "MOV {rm_ptr}, {immM32}"
-  1011 ~ow regO imm= "MOV {regT}, {imm}" //todo fix this regT
+  1011 ~ow regop imm= "MOV {regop}, {imm}" //todo fix this regT
 }
 
 // ALIAS regA= "RAX"
@@ -335,28 +347,116 @@ ALIAS ADC= {
 
 ALIAS PUSH= {
   WITH default_opmode = 64bit {
-    0xFF Mod 110 rm = "PUSH {rm}"
+    0xFF ModRM_6 = "PUSH {ModRM_6}"
     0101 0 regop = "PUSH {regop}"
   }
   0110 10 ow 0 immM32 = "PUSH {immM32}"
+  0x0f 0xA0 = "PUSH FS"
+  0x0f 0xA8 = "PUSH GS"
+}
+
+ALIAS POP= {
+  WITH default_opmode = 64bit {
+    0101 1 regop = "POP {regop}"
+  }
 }
 
 ALIAS CMOV= {
   0100 cc ModRM = "CMOV{cc} {ModRM}"
 }
 
-ALIAS ModRM_5= {
-    Mod 101 rm= rm
-}
-
-ALIAS ModRM_2= {
-    Mod 010 rm= rm
-}
-
 ALIAS SUB= {
   0010 110 ~ow immM32 = "SUB {regA}, {immM32}"
   1000 000 ~ow ModRM_5 immM32 = "SUB {ModRM_5}, {immM32}"
   1000 0011 ModRM_5 imm8 = "SUB {ModRM_5}, {imm8}"
+}
+
+ALIAS XOR= {
+  0011 010 ~ow immM32 = "XOR {regA}, {immM32}"
+  1000 000 ~ow ModRM_6 immM32 = "XOR {ModRM_6}, {immM32}"
+  1000 0011 ModRM_6 imm8 = "XOR {ModRM_6}, {imm8}"
+  0011 00 ms ~ow ModRM = "XOR {ModRMS}"
+}
+
+ALIAS AND= {
+  0010 010 ~ow immM32 = "AND {regA}, {immM32}"
+  1000 000 ~ow ModRM_4 immM32 = "AND {ModRM_4}, {immM32}"
+  1000 0011 ModRM_4 imm8 = "AND {ModRM_4}, {imm8}"
+  0010 00 ms ~ow ModRM = "AND {ModRMS}"
+}
+
+ALIAS LEA= {
+  0x8D ModRM = "LEA {ModRM}"
+}
+
+ALIAS CALL= {
+  0xE8 imm32 = "CALL rip + {imm32+5}"
+  WITH default_opmode = 64bit {
+    0xFF ModRM_2 = "CALL {ModRM_2}"
+  }
+  0xFF ModRM_3 = "CALL FAR {ModRM_3}"
+}
+
+ALIAS CMP= {
+  0011 110 ~ow immM32 = "CMP {regA}, {immM32}"
+  1000 000 ~ow ModRM_7 immM32 = "CMP {ModRM_7}, {immM32}"
+  1000 0011 ModRM_7 imm8 = "CMP {ModRM_7}, {imm8}"
+  0011 10 ms ~ow ModRM = "CMP {ModRMS}"
+}
+
+ALIAS JMP= {
+  0xEB imm8 = "JMP rip+{imm8+2}"
+  0xE9 imm32= "JMP rip+{imm32+2}"
+  0xFF ModRM_4 = "JMP {ModRM_4}"
+  0xFF ModRM_5 = "JMP {ModRM_5}"
+}
+
+ALIAS HALT= {
+  0xF4= "HALT"
+}
+
+ALIAS LEAVE= {
+  0xC9= "LEAVE"
+}
+
+ALIAS RET= {
+  0xC3= "RET"
+}
+
+ALIAS JCC= {
+  0111 cc imm8 = "J{cc} rip+{imm8+2}"
+  0x0F 1000 cc imm32 = "J{cc} rip+{imm32+2}"
+}
+
+ALIAS TEST= {
+  1010 100 ~ow immM32 = "TEST {regA}, {immM32}"
+  1111 011 ~ow ModRM_0 immM32 = "TEST {rm}, {immM32}"
+  1000 010 ~ow ModRM = "TEST {ModRM}"
+}
+
+ALIAS SHIFTS= {
+  1101 000 ~ow = {
+    ModRM_7 = "SAR {rm}, 1"
+    ModRM_4 = "SHL {rm}, 1"
+    ModRM_5 = "SHR {rm}, 1"
+  }
+  1101 001 ~ow = {
+    ModRM_7 = "SAR {rm}, cl"
+    ModRM_4 = "SHL {rm}, cl"
+    ModRM_5 = "SHR {rm}, cl"
+  }
+  1100 000 ~ow = {
+    ModRM_7 imm8 = "SAR {rm}, {imm8}"
+    ModRM_4 imm8 = "SHL {rm}, {imm8}"
+    ModRM_5 imm8 = "SHR {rm}, {imm8}"
+  }
+}
+
+ALIAS ADD= {
+  0000 010 ~ow immM32= "ADD {regA}, {immM32}"
+  1000 000 ~ow ModRM_0 immM32 = "ADD {ModRM_0}, {immM32}"
+  1000 0011 ModRM_0 imm8 = "ADD {ModRM_0}, {imm8}"
+  0000 00 ms ~ow ModRM = "ADD {ModRMS}"
 }
 
 ALIAS op2= {
@@ -370,7 +470,21 @@ ALIAS op= {
   MOV
   // ADC
   PUSH
+  POP
   SUB
+  XOR
+  AND
+  LEA
+  CALL
+  HALT
+  RET
+  CMP
+  LEAVE
+  TEST
+  JMP
+  JCC
+  SHIFTS
+  ADD
 }
 
 STRUCTURE lprefix* prefix? op = op

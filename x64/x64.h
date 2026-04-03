@@ -1,79 +1,180 @@
 #include "default.h"
 
-void eval_string_207_field_0(Buffer* buff);
-void eval_string_207_field_1(Buffer* buff);
+void eval_string_127_field_0(Buffer* buff);
+void eval_string_127_field_1(Buffer* buff);
 
-void eval_string_208_field_0(Buffer* buff);
-void eval_string_208_field_1(Buffer* buff);
+void eval_string_128_field_0(Buffer* buff);
+void eval_string_128_field_1(Buffer* buff);
 
-void eval_string_209_field_0(Buffer* buff);
-void eval_string_209_field_1(Buffer* buff);
+void eval_string_129_field_0(Buffer* buff);
+void eval_string_129_field_1(Buffer* buff);
 
-void eval_string_210_field_0(Buffer* buff);
-void eval_string_210_field_1(Buffer* buff);
+void eval_string_130_field_0(Buffer* buff);
+void eval_string_130_field_1(Buffer* buff);
 
-void eval_string_211_field_0(Buffer* buff);
-void eval_string_211_field_1(Buffer* buff);
+void eval_string_131_field_0(Buffer* buff);
+void eval_string_131_field_1(Buffer* buff);
 
-void eval_string_212_field_0(Buffer* buff);
+void eval_string_132_field_0(Buffer* buff);
 
-void eval_string_213_field_0(Buffer* buff);
-void eval_string_213_field_1(Buffer* buff);
+void eval_string_133_field_0(Buffer* buff);
+void eval_string_133_field_1(Buffer* buff);
 
-void eval_string_214_field_0(Buffer* buff);
-void eval_string_214_field_1(Buffer* buff);
+void eval_string_134_field_0(Buffer* buff);
+void eval_string_134_field_1(Buffer* buff);
 
-void eval_string_215_field_0(Buffer* buff);
+void eval_string_135_field_0(Buffer* buff);
 
-void eval_string_216_field_0(Buffer* buff);
-void eval_string_216_field_1(Buffer* buff);
+void eval_string_136_field_0(Buffer* buff);
+void eval_string_136_field_1(Buffer* buff);
 
-void eval_string_217_field_0(Buffer* buff);
-void eval_string_217_field_1(Buffer* buff);
+void eval_string_137_field_0(Buffer* buff);
+void eval_string_137_field_1(Buffer* buff);
 
-void eval_string_218_field_0(Buffer* buff);
-void eval_string_218_field_1(Buffer* buff);
+void eval_string_138_field_0(Buffer* buff);
+void eval_string_138_field_1(Buffer* buff);
 
-void eval_string_219_field_0(Buffer* buff);
-void eval_string_219_field_1(Buffer* buff);
+void eval_string_139_field_0(Buffer* buff);
+void eval_string_139_field_1(Buffer* buff);
 
-void eval_string_220_field_0(Buffer* buff);
+void eval_string_140_field_0(Buffer* buff);
 
-void eval_string_221_field_0(Buffer* buff);
-void eval_string_221_field_1(Buffer* buff);
+void eval_string_141_field_0(Buffer* buff);
+void eval_string_141_field_1(Buffer* buff);
 
-void eval_string_222_field_0(Buffer* buff);
-void eval_string_222_field_1(Buffer* buff);
+void eval_string_142_field_0(Buffer* buff);
+void eval_string_142_field_1(Buffer* buff);
 
-void eval_string_223_field_0(Buffer* buff);
+void eval_string_143_field_0(Buffer* buff);
 
-void eval_string_224_field_0(Buffer* buff);
-void eval_string_224_field_1(Buffer* buff);
+void eval_string_144_field_0(Buffer* buff);
+void eval_string_144_field_1(Buffer* buff);
 
-void eval_string_225_field_0(Buffer* buff);
-void eval_string_225_field_1(Buffer* buff);
+void eval_string_145_field_0(Buffer* buff);
+void eval_string_145_field_1(Buffer* buff);
 
-void eval_string_226_field_0(Buffer* buff);
+void eval_string_146_field_0(Buffer* buff);
 
-void eval_string_227_field_0(Buffer* buff);
+void eval_string_147_field_0(Buffer* buff);
 
-void eval_string_228_field_0(Buffer* buff);
+void eval_string_148_field_0(Buffer* buff);
 
-void eval_string_229_field_0(Buffer* buff);
+void eval_string_149_field_0(Buffer* buff);
 
-void eval_string_230_field_0(Buffer* buff);
-void eval_string_230_field_1(Buffer* buff);
+void eval_string_152_field_0(Buffer* buff);
 
-void eval_string_231_field_0(Buffer* buff);
-void eval_string_231_field_1(Buffer* buff);
+void eval_string_153_field_0(Buffer* buff);
+void eval_string_153_field_1(Buffer* buff);
 
-void eval_string_232_field_0(Buffer* buff);
-void eval_string_232_field_1(Buffer* buff);
+void eval_string_154_field_0(Buffer* buff);
+void eval_string_154_field_1(Buffer* buff);
 
-void eval_string_233_field_0(Buffer* buff);
-void eval_string_233_field_1(Buffer* buff);
+void eval_string_155_field_0(Buffer* buff);
+void eval_string_155_field_1(Buffer* buff);
+
+void eval_string_156_field_0(Buffer* buff);
+void eval_string_156_field_1(Buffer* buff);
+
+void eval_string_157_field_0(Buffer* buff);
+void eval_string_157_field_1(Buffer* buff);
+
+void eval_string_158_field_0(Buffer* buff);
+void eval_string_158_field_1(Buffer* buff);
+
+void eval_string_159_field_0(Buffer* buff);
+void eval_string_159_field_1(Buffer* buff);
+
+void eval_string_160_field_0(Buffer* buff);
+
+void eval_string_161_field_0(Buffer* buff);
+void eval_string_161_field_1(Buffer* buff);
+
+void eval_string_162_field_0(Buffer* buff);
+void eval_string_162_field_1(Buffer* buff);
+
+void eval_string_163_field_0(Buffer* buff);
+void eval_string_163_field_1(Buffer* buff);
+
+void eval_string_164_field_0(Buffer* buff);
+
+void eval_string_165_field_0(Buffer* buff);
+
+void eval_string_166_field_0(Buffer* buff);
+
+void eval_string_167_field_0(Buffer* buff);
+
+void eval_string_168_field_0(Buffer* buff);
+
+void eval_string_169_field_0(Buffer* buff);
+void eval_string_169_field_1(Buffer* buff);
+
+void eval_string_170_field_0(Buffer* buff);
+void eval_string_170_field_1(Buffer* buff);
+
+void eval_string_171_field_0(Buffer* buff);
+void eval_string_171_field_1(Buffer* buff);
+
+void eval_string_172_field_0(Buffer* buff);
+
+void eval_string_173_field_0(Buffer* buff);
+
+void eval_string_174_field_0(Buffer* buff);
+
+void eval_string_175_field_0(Buffer* buff);
+
+void eval_string_176_field_0(Buffer* buff);
+
+void eval_string_180_field_0(Buffer* buff);
+void eval_string_180_field_1(Buffer* buff);
+
+void eval_string_181_field_0(Buffer* buff);
+void eval_string_181_field_1(Buffer* buff);
+
+void eval_string_182_field_0(Buffer* buff);
+void eval_string_182_field_1(Buffer* buff);
+
+void eval_string_183_field_0(Buffer* buff);
+void eval_string_183_field_1(Buffer* buff);
+
+void eval_string_184_field_0(Buffer* buff);
+
+void eval_string_185_field_0(Buffer* buff);
+
+void eval_string_186_field_0(Buffer* buff);
+
+void eval_string_187_field_0(Buffer* buff);
+
+void eval_string_188_field_0(Buffer* buff);
+
+void eval_string_189_field_0(Buffer* buff);
+
+void eval_string_190_field_0(Buffer* buff);
+
+void eval_string_191_field_0(Buffer* buff);
+void eval_string_191_field_1(Buffer* buff);
+
+void eval_string_192_field_0(Buffer* buff);
+void eval_string_192_field_1(Buffer* buff);
+
+void eval_string_193_field_0(Buffer* buff);
+void eval_string_193_field_1(Buffer* buff);
+
+void eval_string_194_field_0(Buffer* buff);
+void eval_string_194_field_1(Buffer* buff);
+
+void eval_string_195_field_0(Buffer* buff);
+void eval_string_195_field_1(Buffer* buff);
+
+void eval_string_196_field_0(Buffer* buff);
+void eval_string_196_field_1(Buffer* buff);
+
+void eval_string_197_field_0(Buffer* buff);
 
 ParseRet parse_with_0(ByteStream* stream);
+
+ParseRet parse_with_1(ByteStream* stream);
+
+ParseRet parse_with_2(ByteStream* stream);
 
 typedef enum FLAG_MODE{
 	FLAG_MODE_VALUE_64bit,
@@ -326,6 +427,41 @@ AVAL get_aval_ModRM();
 bool parse_ModRM(ByteStream* stream);
 ParseRet parse_ModRM_(ByteStream* stream);
 
+AVAL aval_ModRM_7= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_ModRM_7();
+bool parse_ModRM_7(ByteStream* stream);
+ParseRet parse_ModRM_7_(ByteStream* stream);
+
+AVAL aval_ModRM_6= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_ModRM_6();
+bool parse_ModRM_6(ByteStream* stream);
+ParseRet parse_ModRM_6_(ByteStream* stream);
+
+AVAL aval_ModRM_5= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_ModRM_5();
+bool parse_ModRM_5(ByteStream* stream);
+ParseRet parse_ModRM_5_(ByteStream* stream);
+
+AVAL aval_ModRM_4= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_ModRM_4();
+bool parse_ModRM_4(ByteStream* stream);
+ParseRet parse_ModRM_4_(ByteStream* stream);
+
+AVAL aval_ModRM_3= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_ModRM_3();
+bool parse_ModRM_3(ByteStream* stream);
+ParseRet parse_ModRM_3_(ByteStream* stream);
+
+AVAL aval_ModRM_2= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_ModRM_2();
+bool parse_ModRM_2(ByteStream* stream);
+ParseRet parse_ModRM_2_(ByteStream* stream);
+
+AVAL aval_ModRM_0= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_ModRM_0();
+bool parse_ModRM_0(ByteStream* stream);
+ParseRet parse_ModRM_0_(ByteStream* stream);
+
 void calculate_flag_opmode();AVAL aval_imm= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
 AVAL get_aval_imm();
 bool parse_imm(ByteStream* stream);
@@ -368,25 +504,85 @@ AVAL get_aval_PUSH();
 bool parse_PUSH(ByteStream* stream);
 ParseRet parse_PUSH_(ByteStream* stream);
 
+AVAL aval_POP= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_POP();
+bool parse_POP(ByteStream* stream);
+ParseRet parse_POP_(ByteStream* stream);
+
 AVAL aval_CMOV= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
 AVAL get_aval_CMOV();
 bool parse_CMOV(ByteStream* stream);
 ParseRet parse_CMOV_(ByteStream* stream);
 
-AVAL aval_ModRM_5= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
-AVAL get_aval_ModRM_5();
-bool parse_ModRM_5(ByteStream* stream);
-ParseRet parse_ModRM_5_(ByteStream* stream);
-
-AVAL aval_ModRM_2= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
-AVAL get_aval_ModRM_2();
-bool parse_ModRM_2(ByteStream* stream);
-ParseRet parse_ModRM_2_(ByteStream* stream);
-
 AVAL aval_SUB= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
 AVAL get_aval_SUB();
 bool parse_SUB(ByteStream* stream);
 ParseRet parse_SUB_(ByteStream* stream);
+
+AVAL aval_XOR= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_XOR();
+bool parse_XOR(ByteStream* stream);
+ParseRet parse_XOR_(ByteStream* stream);
+
+AVAL aval_AND= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_AND();
+bool parse_AND(ByteStream* stream);
+ParseRet parse_AND_(ByteStream* stream);
+
+AVAL aval_LEA= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_LEA();
+bool parse_LEA(ByteStream* stream);
+ParseRet parse_LEA_(ByteStream* stream);
+
+AVAL aval_CALL= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_CALL();
+bool parse_CALL(ByteStream* stream);
+ParseRet parse_CALL_(ByteStream* stream);
+
+AVAL aval_CMP= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_CMP();
+bool parse_CMP(ByteStream* stream);
+ParseRet parse_CMP_(ByteStream* stream);
+
+AVAL aval_JMP= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_JMP();
+bool parse_JMP(ByteStream* stream);
+ParseRet parse_JMP_(ByteStream* stream);
+
+AVAL aval_HALT= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_HALT();
+bool parse_HALT(ByteStream* stream);
+ParseRet parse_HALT_(ByteStream* stream);
+
+AVAL aval_LEAVE= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_LEAVE();
+bool parse_LEAVE(ByteStream* stream);
+ParseRet parse_LEAVE_(ByteStream* stream);
+
+AVAL aval_RET= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_RET();
+bool parse_RET(ByteStream* stream);
+ParseRet parse_RET_(ByteStream* stream);
+
+AVAL aval_JCC= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_JCC();
+bool parse_JCC(ByteStream* stream);
+ParseRet parse_JCC_(ByteStream* stream);
+
+AVAL aval_TEST= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_TEST();
+bool parse_TEST(ByteStream* stream);
+ParseRet parse_TEST_(ByteStream* stream);
+
+AVAL aval_SHIFTS= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_SHIFTS();
+bool parse_SHIFTS(ByteStream* stream);
+ParseRet parse_SHIFTS_(ByteStream* stream);
+
+AVAL aval_ADD= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_ADD();
+bool parse_ADD(ByteStream* stream);
+ParseRet parse_ADD_(ByteStream* stream);
 
 AVAL aval_op2= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
 AVAL get_aval_op2();

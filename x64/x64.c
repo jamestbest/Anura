@@ -71,6 +71,13 @@ void reset() {
 	clear_aval(&aval_rm);
 	clear_aval(&aval_rm_ptr);
 	clear_aval(&aval_ModRM);
+	clear_aval(&aval_ModRM_7);
+	clear_aval(&aval_ModRM_6);
+	clear_aval(&aval_ModRM_5);
+	clear_aval(&aval_ModRM_4);
+	clear_aval(&aval_ModRM_3);
+	clear_aval(&aval_ModRM_2);
+	clear_aval(&aval_ModRM_0);
 	clear_aval(&aval_imm);
 	clear_aval(&aval_immM32);
 	data_ms.parsed= false;
@@ -80,212 +87,478 @@ void reset() {
 	clear_aval(&aval_regA);
 	clear_aval(&aval_ADC);
 	clear_aval(&aval_PUSH);
+	clear_aval(&aval_POP);
 	clear_aval(&aval_CMOV);
-	clear_aval(&aval_ModRM_5);
-	clear_aval(&aval_ModRM_2);
 	clear_aval(&aval_SUB);
+	clear_aval(&aval_XOR);
+	clear_aval(&aval_AND);
+	clear_aval(&aval_LEA);
+	clear_aval(&aval_CALL);
+	clear_aval(&aval_CMP);
+	clear_aval(&aval_JMP);
+	clear_aval(&aval_HALT);
+	clear_aval(&aval_LEAVE);
+	clear_aval(&aval_RET);
+	clear_aval(&aval_JCC);
+	clear_aval(&aval_TEST);
+	clear_aval(&aval_SHIFTS);
+	clear_aval(&aval_ADD);
 	clear_aval(&aval_op2);
 	clear_aval(&aval_op);
 }
 
-void eval_string_207_field_0(Buffer* buff) {
+void eval_string_127_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_regi().chosen_val);
 }
 
-void eval_string_207_field_1(Buffer* buff) {
+void eval_string_127_field_1(Buffer* buff) {
 	buffer_concat(buff, data_to_string(pow(0x2, data_sibs._value)));
 }
 
-void eval_string_208_field_0(Buffer* buff) {
+void eval_string_128_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_sibsi().chosen_val);
 }
 
-void eval_string_208_field_1(Buffer* buff) {
+void eval_string_128_field_1(Buffer* buff) {
 	buffer_concat(buff, data_to_string(data_disp32._value));
 }
 
-void eval_string_209_field_0(Buffer* buff) {
+void eval_string_129_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_sibsi().chosen_val);
 }
 
-void eval_string_209_field_1(Buffer* buff) {
+void eval_string_129_field_1(Buffer* buff) {
 	buffer_concat(buff, data_to_string(data_disp8._value));
 }
 
-void eval_string_210_field_0(Buffer* buff) {
+void eval_string_130_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_sibsi().chosen_val);
 }
 
-void eval_string_210_field_1(Buffer* buff) {
+void eval_string_130_field_1(Buffer* buff) {
 	buffer_concat(buff, data_to_string(data_disp32._value));
 }
 
-void eval_string_211_field_0(Buffer* buff) {
+void eval_string_131_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_regb().chosen_val);
 }
 
-void eval_string_211_field_1(Buffer* buff) {
+void eval_string_131_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_sibsi().chosen_val);
 }
 
-void eval_string_212_field_0(Buffer* buff) {
+void eval_string_132_field_0(Buffer* buff) {
 	buffer_concat(buff, data_to_string(data_disp32._value));
 }
 
-void eval_string_213_field_0(Buffer* buff) {
+void eval_string_133_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_regb().chosen_val);
 }
 
-void eval_string_213_field_1(Buffer* buff) {
+void eval_string_133_field_1(Buffer* buff) {
 	buffer_concat(buff, data_to_string(data_disp8._value));
 }
 
-void eval_string_214_field_0(Buffer* buff) {
+void eval_string_134_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_regb().chosen_val);
 }
 
-void eval_string_214_field_1(Buffer* buff) {
+void eval_string_134_field_1(Buffer* buff) {
 	buffer_concat(buff, data_to_string(data_disp32._value));
 }
 
-void eval_string_215_field_0(Buffer* buff) {
+void eval_string_135_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_rm_INT().chosen_val);
 }
 
-void eval_string_216_field_0(Buffer* buff) {
+void eval_string_136_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_addr_ptr().chosen_val);
 }
 
-void eval_string_216_field_1(Buffer* buff) {
+void eval_string_136_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_rm().chosen_val);
 }
 
-void eval_string_217_field_0(Buffer* buff) {
+void eval_string_137_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_regr().chosen_val);
 }
 
-void eval_string_217_field_1(Buffer* buff) {
+void eval_string_137_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_rm().chosen_val);
 }
 
-void eval_string_218_field_0(Buffer* buff) {
+void eval_string_138_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_rm_ptr().chosen_val);
 }
 
-void eval_string_218_field_1(Buffer* buff) {
+void eval_string_138_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_regr().chosen_val);
 }
 
-void eval_string_219_field_0(Buffer* buff) {
+void eval_string_139_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_regr().chosen_val);
 }
 
-void eval_string_219_field_1(Buffer* buff) {
+void eval_string_139_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_rm().chosen_val);
 }
 
-void eval_string_220_field_0(Buffer* buff) {
+void eval_string_140_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_ModRMS().chosen_val);
 }
 
-void eval_string_221_field_0(Buffer* buff) {
+void eval_string_141_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_rm_ptr().chosen_val);
 }
 
-void eval_string_221_field_1(Buffer* buff) {
+void eval_string_141_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_immM32().chosen_val);
 }
 
-void eval_string_222_field_0(Buffer* buff) {
-	buffer_concat(buff, get_aval_regT().chosen_val);
-}
-
-void eval_string_222_field_1(Buffer* buff) {
-	buffer_concat(buff, get_aval_imm().chosen_val);
-}
-
-void eval_string_223_field_0(Buffer* buff) {
-	buffer_concat(buff, get_aval_immM32().chosen_val);
-}
-
-void eval_string_224_field_0(Buffer* buff) {
-	buffer_concat(buff, get_aval_reg().chosen_val);
-}
-
-void eval_string_224_field_1(Buffer* buff) {
-	buffer_concat(buff, get_aval_immM32().chosen_val);
-}
-
-void eval_string_225_field_0(Buffer* buff) {
-	buffer_concat(buff, get_aval_reg().chosen_val);
-}
-
-void eval_string_225_field_1(Buffer* buff) {
-	buffer_concat(buff, data_to_string(data_imm8._value));
-}
-
-void eval_string_226_field_0(Buffer* buff) {
-	buffer_concat(buff, get_aval_ModRMS().chosen_val);
-}
-
-void eval_string_227_field_0(Buffer* buff) {
-	buffer_concat(buff, get_aval_rm().chosen_val);
-}
-
-void eval_string_228_field_0(Buffer* buff) {
+void eval_string_142_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_regop().chosen_val);
 }
 
-void eval_string_229_field_0(Buffer* buff) {
+void eval_string_142_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_imm().chosen_val);
+}
+
+void eval_string_143_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_immM32().chosen_val);
 }
 
-void eval_string_230_field_0(Buffer* buff) {
+void eval_string_144_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_reg().chosen_val);
+}
+
+void eval_string_144_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_145_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_reg().chosen_val);
+}
+
+void eval_string_145_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_146_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRMS().chosen_val);
+}
+
+void eval_string_147_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_6().chosen_val);
+}
+
+void eval_string_148_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_regop().chosen_val);
+}
+
+void eval_string_149_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_152_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_regop().chosen_val);
+}
+
+void eval_string_153_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_cc().chosen_val);
 }
 
-void eval_string_230_field_1(Buffer* buff) {
+void eval_string_153_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_ModRM().chosen_val);
 }
 
-void eval_string_231_field_0(Buffer* buff) {
+void eval_string_154_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_regA().chosen_val);
 }
 
-void eval_string_231_field_1(Buffer* buff) {
+void eval_string_154_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_immM32().chosen_val);
 }
 
-void eval_string_232_field_0(Buffer* buff) {
+void eval_string_155_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_ModRM_5().chosen_val);
 }
 
-void eval_string_232_field_1(Buffer* buff) {
+void eval_string_155_field_1(Buffer* buff) {
 	buffer_concat(buff, get_aval_immM32().chosen_val);
 }
 
-void eval_string_233_field_0(Buffer* buff) {
+void eval_string_156_field_0(Buffer* buff) {
 	buffer_concat(buff, get_aval_ModRM_5().chosen_val);
 }
 
-void eval_string_233_field_1(Buffer* buff) {
+void eval_string_156_field_1(Buffer* buff) {
 	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_157_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_regA().chosen_val);
+}
+
+void eval_string_157_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_158_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_6().chosen_val);
+}
+
+void eval_string_158_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_159_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_6().chosen_val);
+}
+
+void eval_string_159_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_160_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRMS().chosen_val);
+}
+
+void eval_string_161_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_regA().chosen_val);
+}
+
+void eval_string_161_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_162_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_4().chosen_val);
+}
+
+void eval_string_162_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_163_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_4().chosen_val);
+}
+
+void eval_string_163_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_164_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRMS().chosen_val);
+}
+
+void eval_string_165_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM().chosen_val);
+}
+
+void eval_string_166_field_0(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm32._value + 0x5));
+}
+
+void eval_string_167_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_2().chosen_val);
+}
+
+void eval_string_168_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_3().chosen_val);
+}
+
+void eval_string_169_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_regA().chosen_val);
+}
+
+void eval_string_169_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_170_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_7().chosen_val);
+}
+
+void eval_string_170_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_171_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_7().chosen_val);
+}
+
+void eval_string_171_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_172_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRMS().chosen_val);
+}
+
+void eval_string_173_field_0(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value + 0x2));
+}
+
+void eval_string_174_field_0(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm32._value + 0x2));
+}
+
+void eval_string_175_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_4().chosen_val);
+}
+
+void eval_string_176_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_5().chosen_val);
+}
+
+void eval_string_180_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_cc().chosen_val);
+}
+
+void eval_string_180_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value + 0x2));
+}
+
+void eval_string_181_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_cc().chosen_val);
+}
+
+void eval_string_181_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm32._value + 0x2));
+}
+
+void eval_string_182_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_regA().chosen_val);
+}
+
+void eval_string_182_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_183_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_183_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_184_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM().chosen_val);
+}
+
+void eval_string_185_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_186_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_187_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_188_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_189_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_190_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_191_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_191_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_192_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_192_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_193_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_rm().chosen_val);
+}
+
+void eval_string_193_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_194_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_regA().chosen_val);
+}
+
+void eval_string_194_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_195_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_0().chosen_val);
+}
+
+void eval_string_195_field_1(Buffer* buff) {
+	buffer_concat(buff, get_aval_immM32().chosen_val);
+}
+
+void eval_string_196_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRM_0().chosen_val);
+}
+
+void eval_string_196_field_1(Buffer* buff) {
+	buffer_concat(buff, data_to_string(data_imm8._value));
+}
+
+void eval_string_197_field_0(Buffer* buff) {
+	buffer_concat(buff, get_aval_ModRMS().chosen_val);
 }
 
 ParseRet parse_with_0(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
-    if (EXPECT_BYTE(0xff, stream) && parse_Mod(stream) && EXPECT_BITS(0b110, stream) && parse_rm(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("PUSH {rm}", eval_string_227_field_0))); /* PUSH {rm} */
+    if (EXPECT_BYTE(0xff, stream) && parse_ModRM_6(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("PUSH {ModRM_6}", eval_string_147_field_0))); /* PUSH {ModRM_6} */
     }
     stream->pointer= pos_save_0;
 
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BITS(0b0101, stream) && EXPECT_BITS(0b0, stream) && parse_regop(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("PUSH {regop}", eval_string_228_field_0))); /* PUSH {regop} */
+        return PARSE_SUCC(to_aval(evaluate_string("PUSH {regop}", eval_string_148_field_0))); /* PUSH {regop} */
     }
     stream->pointer= pos_save_1;
+
+return PARSE_FAIL;
+}
+
+ParseRet parse_with_1(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BITS(0b0101, stream) && EXPECT_BITS(0b1, stream) && parse_regop(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("POP {regop}", eval_string_152_field_0))); /* POP {regop} */
+    }
+    stream->pointer= pos_save_0;
+
+return PARSE_FAIL;
+}
+
+ParseRet parse_with_2(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BYTE(0xff, stream) && parse_ModRM_2(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("CALL {ModRM_2}", eval_string_167_field_0))); /* CALL {ModRM_2} */
+    }
+    stream->pointer= pos_save_0;
 
 return PARSE_FAIL;
 }
@@ -707,208 +980,288 @@ ParseRet parse_reg_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BITS(0b0000, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("AX"))); /* AX */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("AL"))); /* AL */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("AL"))); /* AL */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EAX"))); /* EAX */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RAX"))); /* RAX */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("AX"));
+        vector_add(&res.choices, evaluate_string("AL"));
+        vector_add(&res.choices, evaluate_string("AL"));
+        vector_add(&res.choices, evaluate_string("EAX"));
+        vector_add(&res.choices, evaluate_string("RAX"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_0;
 
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BITS(0b0001, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("CX"))); /* CX */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("CL"))); /* CL */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("CL"))); /* CL */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("ECX"))); /* ECX */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RCX"))); /* RCX */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("CX"));
+        vector_add(&res.choices, evaluate_string("CL"));
+        vector_add(&res.choices, evaluate_string("CL"));
+        vector_add(&res.choices, evaluate_string("ECX"));
+        vector_add(&res.choices, evaluate_string("RCX"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_1;
 
     size_t pos_save_2= stream->pointer;
 
     if (EXPECT_BITS(0b0010, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("DX"))); /* DX */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("DL"))); /* DL */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("DL"))); /* DL */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EDX"))); /* EDX */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RDX"))); /* RDX */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("DX"));
+        vector_add(&res.choices, evaluate_string("DL"));
+        vector_add(&res.choices, evaluate_string("DL"));
+        vector_add(&res.choices, evaluate_string("EDX"));
+        vector_add(&res.choices, evaluate_string("RDX"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_2;
 
     size_t pos_save_3= stream->pointer;
 
     if (EXPECT_BITS(0b0011, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("BX"))); /* BX */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("BL"))); /* BL */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("BL"))); /* BL */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EBX"))); /* EBX */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RBX"))); /* RBX */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("BX"));
+        vector_add(&res.choices, evaluate_string("BL"));
+        vector_add(&res.choices, evaluate_string("BL"));
+        vector_add(&res.choices, evaluate_string("EBX"));
+        vector_add(&res.choices, evaluate_string("RBX"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_3;
 
     size_t pos_save_4= stream->pointer;
 
     if (EXPECT_BITS(0b0100, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("SP"))); /* SP */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("AH"))); /* AH */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("AH"))); /* AH */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("ESP"))); /* ESP */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RSP"))); /* RSP */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("SP"));
+        vector_add(&res.choices, evaluate_string("AH"));
+        vector_add(&res.choices, evaluate_string("AH"));
+        vector_add(&res.choices, evaluate_string("ESP"));
+        vector_add(&res.choices, evaluate_string("RSP"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_4;
 
     size_t pos_save_5= stream->pointer;
 
     if (EXPECT_BITS(0b0101, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("BP"))); /* BP */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("CH"))); /* CH */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("CH"))); /* CH */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EBP"))); /* EBP */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RBP"))); /* RBP */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("BP"));
+        vector_add(&res.choices, evaluate_string("CH"));
+        vector_add(&res.choices, evaluate_string("CH"));
+        vector_add(&res.choices, evaluate_string("EBP"));
+        vector_add(&res.choices, evaluate_string("RBP"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_5;
 
     size_t pos_save_6= stream->pointer;
 
     if (EXPECT_BITS(0b0110, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("SI"))); /* SI */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("DH"))); /* DH */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("DH"))); /* DH */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("ESI"))); /* ESI */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RSI"))); /* RSI */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("SI"));
+        vector_add(&res.choices, evaluate_string("DH"));
+        vector_add(&res.choices, evaluate_string("DH"));
+        vector_add(&res.choices, evaluate_string("ESI"));
+        vector_add(&res.choices, evaluate_string("RSI"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_6;
 
     size_t pos_save_7= stream->pointer;
 
     if (EXPECT_BITS(0b0111, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("DI"))); /* DI */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("BH"))); /* BH */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("BH"))); /* BH */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EDI"))); /* EDI */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RDI"))); /* RDI */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("DI"));
+        vector_add(&res.choices, evaluate_string("BH"));
+        vector_add(&res.choices, evaluate_string("BH"));
+        vector_add(&res.choices, evaluate_string("EDI"));
+        vector_add(&res.choices, evaluate_string("RDI"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_7;
 
     size_t pos_save_8= stream->pointer;
 
     if (EXPECT_BITS(0b1000, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R8W"))); /* R8W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R8B"))); /* R8B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R8B"))); /* R8B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R8D"))); /* R8D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R8"))); /* R8 */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("R8W"));
+        vector_add(&res.choices, evaluate_string("R8B"));
+        vector_add(&res.choices, evaluate_string("R8B"));
+        vector_add(&res.choices, evaluate_string("R8D"));
+        vector_add(&res.choices, evaluate_string("R8"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_8;
 
     size_t pos_save_9= stream->pointer;
 
     if (EXPECT_BITS(0b1001, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R9W"))); /* R9W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R9B"))); /* R9B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R9B"))); /* R9B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R9D"))); /* R9D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R9"))); /* R9 */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("R9W"));
+        vector_add(&res.choices, evaluate_string("R9B"));
+        vector_add(&res.choices, evaluate_string("R9B"));
+        vector_add(&res.choices, evaluate_string("R9D"));
+        vector_add(&res.choices, evaluate_string("R9"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_9;
 
     size_t pos_save_10= stream->pointer;
 
     if (EXPECT_BITS(0b1010, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R10W"))); /* R10W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R10B"))); /* R10B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R10B"))); /* R10B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R10D"))); /* R10D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R10"))); /* R10 */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("R10W"));
+        vector_add(&res.choices, evaluate_string("R10B"));
+        vector_add(&res.choices, evaluate_string("R10B"));
+        vector_add(&res.choices, evaluate_string("R10D"));
+        vector_add(&res.choices, evaluate_string("R10"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_10;
 
     size_t pos_save_11= stream->pointer;
 
     if (EXPECT_BITS(0b1011, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R11W"))); /* R11W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R11B"))); /* R11B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R11B"))); /* R11B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R11D"))); /* R11D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R11"))); /* R11 */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("R11W"));
+        vector_add(&res.choices, evaluate_string("R11B"));
+        vector_add(&res.choices, evaluate_string("R11B"));
+        vector_add(&res.choices, evaluate_string("R11D"));
+        vector_add(&res.choices, evaluate_string("R11"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_11;
 
     size_t pos_save_12= stream->pointer;
 
     if (EXPECT_BITS(0b1100, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R12W"))); /* R12W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R12B"))); /* R12B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R12B"))); /* R12B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R12D"))); /* R12D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R12"))); /* R12 */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("R12W"));
+        vector_add(&res.choices, evaluate_string("R12B"));
+        vector_add(&res.choices, evaluate_string("R12B"));
+        vector_add(&res.choices, evaluate_string("R12D"));
+        vector_add(&res.choices, evaluate_string("R12"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_12;
 
     size_t pos_save_13= stream->pointer;
 
     if (EXPECT_BITS(0b1101, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R13W"))); /* R13W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R13B"))); /* R13B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R13B"))); /* R13B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R13D"))); /* R13D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R13"))); /* R13 */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("R13W"));
+        vector_add(&res.choices, evaluate_string("R13B"));
+        vector_add(&res.choices, evaluate_string("R13B"));
+        vector_add(&res.choices, evaluate_string("R13D"));
+        vector_add(&res.choices, evaluate_string("R13"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_13;
 
     size_t pos_save_14= stream->pointer;
 
     if (EXPECT_BITS(0b1110, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R14W"))); /* R14W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R14B"))); /* R14B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R14B"))); /* R14B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R14D"))); /* R14D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R14"))); /* R14 */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("R14W"));
+        vector_add(&res.choices, evaluate_string("R14B"));
+        vector_add(&res.choices, evaluate_string("R14B"));
+        vector_add(&res.choices, evaluate_string("R14D"));
+        vector_add(&res.choices, evaluate_string("R14"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_14;
 
     size_t pos_save_15= stream->pointer;
 
     if (EXPECT_BITS(0b1111, stream)){
-        switch(calculate_rule_right_0()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R15W"))); /* R15W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R15B"))); /* R15B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R15B"))); /* R15B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R15D"))); /* R15D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R15"))); /* R15 */; break;
-        }
+        AVAL res= (AVAL) {
+	.choices= vector_construct(5),
+	.chosen_idx= AVAL_STATUS_NONE,
+	.chosen_val= NULL
+};
+        vector_add(&res.choices, evaluate_string("R15W"));
+        vector_add(&res.choices, evaluate_string("R15B"));
+        vector_add(&res.choices, evaluate_string("R15B"));
+        vector_add(&res.choices, evaluate_string("R15D"));
+        vector_add(&res.choices, evaluate_string("R15"));
+        return PARSE_SUCC(res);
+
     }
     stream->pointer= pos_save_15;
 
@@ -973,10 +1326,18 @@ bool parse_regT(ByteStream* stream) {
 	ParseRet res= parse_regT_(stream);
 	if (!res.success) return res.success;
 	aval_regT= res.aval;
+	if (res.aval.chosen_idx == AVAL_STATUS_NONE) {
+		aval_regT.chosen_idx= calculate_rule_right_0();
+		aval_regT.chosen_val= vector_get_unsafe(&aval_regT.choices, aval_regT.chosen_idx);
+	}
 	return res.success;
 }
 
 AVAL get_aval_regT() {
+	int choice= calculate_rule_right_0();
+	char* data= vector_get_unsafe(&aval_regT.choices, choice);
+	aval_regT.chosen_val= data;
+	aval_regT.chosen_idx= choice;
 	return aval_regT;
 }
 
@@ -995,221 +1356,28 @@ bool parse_regO(ByteStream* stream) {
 	ParseRet res= parse_regO_(stream);
 	if (!res.success) return res.success;
 	aval_regO= res.aval;
+	if (res.aval.chosen_idx == AVAL_STATUS_NONE) {
+		aval_regO.chosen_idx= calculate_rule_right_0();
+		aval_regO.chosen_val= vector_get_unsafe(&aval_regO.choices, aval_regO.chosen_idx);
+	}
 	return res.success;
 }
 
 AVAL get_aval_regO() {
+	int choice= calculate_rule_right_0();
+	char* data= vector_get_unsafe(&aval_regO.choices, choice);
+	aval_regO.chosen_val= data;
+	aval_regO.chosen_idx= choice;
 	return aval_regO;
 }
 
 ParseRet parse_regM_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
-    if (EXPECT_BITS(0b0000, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("AX"))); /* AX */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("AL"))); /* AL */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("AL"))); /* AL */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EAX"))); /* EAX */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RAX"))); /* RAX */; break;
-        }
+    if (parse_reg(stream)){
+        return PARSE_SUCC(get_aval_reg());
     }
     stream->pointer= pos_save_0;
-
-    size_t pos_save_1= stream->pointer;
-
-    if (EXPECT_BITS(0b0001, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("CX"))); /* CX */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("CL"))); /* CL */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("CL"))); /* CL */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("ECX"))); /* ECX */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RCX"))); /* RCX */; break;
-        }
-    }
-    stream->pointer= pos_save_1;
-
-    size_t pos_save_2= stream->pointer;
-
-    if (EXPECT_BITS(0b0010, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("DX"))); /* DX */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("DL"))); /* DL */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("DL"))); /* DL */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EDX"))); /* EDX */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RDX"))); /* RDX */; break;
-        }
-    }
-    stream->pointer= pos_save_2;
-
-    size_t pos_save_3= stream->pointer;
-
-    if (EXPECT_BITS(0b0011, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("BX"))); /* BX */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("BL"))); /* BL */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("BL"))); /* BL */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EBX"))); /* EBX */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RBX"))); /* RBX */; break;
-        }
-    }
-    stream->pointer= pos_save_3;
-
-    size_t pos_save_4= stream->pointer;
-
-    if (EXPECT_BITS(0b0100, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("SP"))); /* SP */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("AH"))); /* AH */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("AH"))); /* AH */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("ESP"))); /* ESP */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RSP"))); /* RSP */; break;
-        }
-    }
-    stream->pointer= pos_save_4;
-
-    size_t pos_save_5= stream->pointer;
-
-    if (EXPECT_BITS(0b0101, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("BP"))); /* BP */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("CH"))); /* CH */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("CH"))); /* CH */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EBP"))); /* EBP */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RBP"))); /* RBP */; break;
-        }
-    }
-    stream->pointer= pos_save_5;
-
-    size_t pos_save_6= stream->pointer;
-
-    if (EXPECT_BITS(0b0110, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("SI"))); /* SI */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("DH"))); /* DH */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("DH"))); /* DH */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("ESI"))); /* ESI */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RSI"))); /* RSI */; break;
-        }
-    }
-    stream->pointer= pos_save_6;
-
-    size_t pos_save_7= stream->pointer;
-
-    if (EXPECT_BITS(0b0111, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("DI"))); /* DI */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("BH"))); /* BH */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("BH"))); /* BH */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("EDI"))); /* EDI */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("RDI"))); /* RDI */; break;
-        }
-    }
-    stream->pointer= pos_save_7;
-
-    size_t pos_save_8= stream->pointer;
-
-    if (EXPECT_BITS(0b1000, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R8W"))); /* R8W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R8B"))); /* R8B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R8B"))); /* R8B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R8D"))); /* R8D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R8"))); /* R8 */; break;
-        }
-    }
-    stream->pointer= pos_save_8;
-
-    size_t pos_save_9= stream->pointer;
-
-    if (EXPECT_BITS(0b1001, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R9W"))); /* R9W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R9B"))); /* R9B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R9B"))); /* R9B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R9D"))); /* R9D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R9"))); /* R9 */; break;
-        }
-    }
-    stream->pointer= pos_save_9;
-
-    size_t pos_save_10= stream->pointer;
-
-    if (EXPECT_BITS(0b1010, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R10W"))); /* R10W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R10B"))); /* R10B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R10B"))); /* R10B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R10D"))); /* R10D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R10"))); /* R10 */; break;
-        }
-    }
-    stream->pointer= pos_save_10;
-
-    size_t pos_save_11= stream->pointer;
-
-    if (EXPECT_BITS(0b1011, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R11W"))); /* R11W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R11B"))); /* R11B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R11B"))); /* R11B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R11D"))); /* R11D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R11"))); /* R11 */; break;
-        }
-    }
-    stream->pointer= pos_save_11;
-
-    size_t pos_save_12= stream->pointer;
-
-    if (EXPECT_BITS(0b1100, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R12W"))); /* R12W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R12B"))); /* R12B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R12B"))); /* R12B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R12D"))); /* R12D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R12"))); /* R12 */; break;
-        }
-    }
-    stream->pointer= pos_save_12;
-
-    size_t pos_save_13= stream->pointer;
-
-    if (EXPECT_BITS(0b1101, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R13W"))); /* R13W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R13B"))); /* R13B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R13B"))); /* R13B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R13D"))); /* R13D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R13"))); /* R13 */; break;
-        }
-    }
-    stream->pointer= pos_save_13;
-
-    size_t pos_save_14= stream->pointer;
-
-    if (EXPECT_BITS(0b1110, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R14W"))); /* R14W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R14B"))); /* R14B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R14B"))); /* R14B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R14D"))); /* R14D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R14"))); /* R14 */; break;
-        }
-    }
-    stream->pointer= pos_save_14;
-
-    size_t pos_save_15= stream->pointer;
-
-    if (EXPECT_BITS(0b1111, stream)){
-        switch(calculate_rule_right_1()) {
-            case 0: return PARSE_SUCC(to_aval(evaluate_string("R15W"))); /* R15W */; break;
-            case 1: return PARSE_SUCC(to_aval(evaluate_string("R15B"))); /* R15B */; break;
-            case 2: return PARSE_SUCC(to_aval(evaluate_string("R15B"))); /* R15B */; break;
-            case 3: return PARSE_SUCC(to_aval(evaluate_string("R15D"))); /* R15D */; break;
-            case 4: return PARSE_SUCC(to_aval(evaluate_string("R15"))); /* R15 */; break;
-        }
-    }
-    stream->pointer= pos_save_15;
 
 	return PARSE_FAIL; 
 }
@@ -1218,10 +1386,18 @@ bool parse_regM(ByteStream* stream) {
 	ParseRet res= parse_regM_(stream);
 	if (!res.success) return res.success;
 	aval_regM= res.aval;
+	if (res.aval.chosen_idx == AVAL_STATUS_NONE) {
+		aval_regM.chosen_idx= calculate_rule_right_1();
+		aval_regM.chosen_val= vector_get_unsafe(&aval_regM.choices, aval_regM.chosen_idx);
+	}
 	return res.success;
 }
 
 AVAL get_aval_regM() {
+	int choice= calculate_rule_right_1();
+	char* data= vector_get_unsafe(&aval_regM.choices, choice);
+	aval_regM.chosen_val= data;
+	aval_regM.chosen_idx= choice;
 	return aval_regM;
 }
 
@@ -1381,9 +1557,9 @@ ParseRet parse_regi_(ByteStream* stream) {
         ByteStream stream= stream_create();
         stream_add(&stream, data_REX.x, 1);
         stream_add(&stream, data_regx._value, 3);
-        ParseRet res= parse_regM_(&stream);
+        bool res= parse_regM(&stream);
         stream_destroy(&stream);
-        return res;
+        return res == 1 ? PARSE_SUCC(aval_regM) : PARSE_FAIL;
     }
     stream->pointer= pos_save_0;
 
@@ -1408,9 +1584,9 @@ ParseRet parse_regb_(ByteStream* stream) {
         ByteStream stream= stream_create();
         stream_add(&stream, data_REX.b, 1);
         stream_add(&stream, data_regx._value, 3);
-        ParseRet res= parse_regM_(&stream);
+        bool res= parse_regM(&stream);
         stream_destroy(&stream);
-        return res;
+        return res == 1 ? PARSE_SUCC(aval_regM) : PARSE_FAIL;
     }
     stream->pointer= pos_save_0;
 
@@ -1435,9 +1611,9 @@ ParseRet parse_regop_(ByteStream* stream) {
         ByteStream stream= stream_create();
         stream_add(&stream, data_REX.b, 1);
         stream_add(&stream, data_regx._value, 3);
-        ParseRet res= parse_regO_(&stream);
+        bool res= parse_regO(&stream);
         stream_destroy(&stream);
-        return res;
+        return res == 1 ? PARSE_SUCC(aval_regO) : PARSE_FAIL;
     }
     stream->pointer= pos_save_0;
 
@@ -1462,9 +1638,9 @@ ParseRet parse_regr_(ByteStream* stream) {
         ByteStream stream= stream_create();
         stream_add(&stream, data_REX.r, 1);
         stream_add(&stream, data_regx._value, 3);
-        ParseRet res= parse_regO_(&stream);
+        bool res= parse_regO(&stream);
         stream_destroy(&stream);
-        return res;
+        return res == 1 ? PARSE_SUCC(aval_regO) : PARSE_FAIL;
     }
     stream->pointer= pos_save_0;
 
@@ -1559,7 +1735,7 @@ ParseRet parse_sibsi_(ByteStream* stream) {
     size_t pos_save_1= stream->pointer;
 
     if (parse_sibs(stream) && parse_regi(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("{regi} * {2 ^ sibs}", eval_string_207_field_0, eval_string_207_field_1))); /* {regi} * {2 ^ sibs} */
+        return PARSE_SUCC(to_aval(evaluate_string("{regi} * {2 ^ sibs}", eval_string_127_field_0, eval_string_127_field_1))); /* {regi} * {2 ^ sibs} */
     }
     stream->pointer= pos_save_1;
 
@@ -1587,7 +1763,7 @@ if (data_Mod._value == 0b00) {
                             size_t pos_save_0= stream->pointer;
 
                 if (parse_disp32(stream)){
-                    return PARSE_SUCC(to_aval(evaluate_string("{sibsi} + {disp32}", eval_string_208_field_0, eval_string_208_field_1))); /* {sibsi} + {disp32} */
+                    return PARSE_SUCC(to_aval(evaluate_string("{sibsi} + {disp32}", eval_string_128_field_0, eval_string_128_field_1))); /* {sibsi} + {disp32} */
                 }
                 stream->pointer= pos_save_0;
 
@@ -1602,7 +1778,7 @@ if (data_Mod._value == 0b01) {
                             size_t pos_save_0= stream->pointer;
 
                 if (parse_disp8(stream)){
-                    return PARSE_SUCC(to_aval(evaluate_string("{sibsi} + {disp8} + [EBP]", eval_string_209_field_0, eval_string_209_field_1))); /* {sibsi} + {disp8} + [EBP] */
+                    return PARSE_SUCC(to_aval(evaluate_string("{sibsi} + {disp8} + [EBP]", eval_string_129_field_0, eval_string_129_field_1))); /* {sibsi} + {disp8} + [EBP] */
                 }
                 stream->pointer= pos_save_0;
 
@@ -1617,7 +1793,7 @@ if (data_Mod._value == 0b10) {
                             size_t pos_save_0= stream->pointer;
 
                 if (parse_disp32(stream)){
-                    return PARSE_SUCC(to_aval(evaluate_string("{sibsi} + {disp32} + [EBP]", eval_string_210_field_0, eval_string_210_field_1))); /* {sibsi} + {disp32} + [EBP] */
+                    return PARSE_SUCC(to_aval(evaluate_string("{sibsi} + {disp32} + [EBP]", eval_string_130_field_0, eval_string_130_field_1))); /* {sibsi} + {disp32} + [EBP] */
                 }
                 stream->pointer= pos_save_0;
 
@@ -1633,7 +1809,7 @@ if (data_Mod._value == 0b10) {
     size_t pos_save_1= stream->pointer;
 
     if (parse_sibsi(stream) && parse_regb(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("{regb} + {sibsi}", eval_string_211_field_0, eval_string_211_field_1))); /* {regb} + {sibsi} */
+        return PARSE_SUCC(to_aval(evaluate_string("{regb} + {sibsi}", eval_string_131_field_0, eval_string_131_field_1))); /* {regb} + {sibsi} */
     }
     stream->pointer= pos_save_1;
 
@@ -1698,7 +1874,7 @@ if (data_Mod._value == 0b00) {
                             size_t pos_save_0= stream->pointer;
 
 if (get_flag_mode() == FLAG_MODE_VALUE_64bit) {
-                return PARSE_SUCC(to_aval(evaluate_string("rip + {disp32}", eval_string_212_field_0))); /* rip + {disp32} */
+                return PARSE_SUCC(to_aval(evaluate_string("rip + {disp32}", eval_string_132_field_0))); /* rip + {disp32} */
                 }
 
                 stream->pointer= pos_save_0;
@@ -1730,7 +1906,7 @@ if (data_Mod._value == 0b01) {
             size_t pos_save_0= stream->pointer;
 
         if (parse_regb(stream) && parse_disp8(stream)){
-            return PARSE_SUCC(to_aval(evaluate_string("{regb} + {disp8}", eval_string_213_field_0, eval_string_213_field_1))); /* {regb} + {disp8} */
+            return PARSE_SUCC(to_aval(evaluate_string("{regb} + {disp8}", eval_string_133_field_0, eval_string_133_field_1))); /* {regb} + {disp8} */
         }
         stream->pointer= pos_save_0;
 
@@ -1745,7 +1921,7 @@ if (data_Mod._value == 0b10) {
             size_t pos_save_0= stream->pointer;
 
         if (parse_regb(stream) && parse_disp32(stream)){
-            return PARSE_SUCC(to_aval(evaluate_string("{regb} + {disp32}", eval_string_214_field_0, eval_string_214_field_1))); /* {regb} + {disp32} */
+            return PARSE_SUCC(to_aval(evaluate_string("{regb} + {disp32}", eval_string_134_field_0, eval_string_134_field_1))); /* {regb} + {disp32} */
         }
         stream->pointer= pos_save_0;
 
@@ -1802,7 +1978,7 @@ if (data_Mod._value == 0b11) {
     size_t pos_save_1= stream->pointer;
 
     if (parse_rm_INT(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("[{rm_INT}]", eval_string_215_field_0))); /* [{rm_INT}] */
+        return PARSE_SUCC(to_aval(evaluate_string("[{rm_INT}]", eval_string_135_field_0))); /* [{rm_INT}] */
     }
     stream->pointer= pos_save_1;
 
@@ -1832,7 +2008,7 @@ if (data_Mod._value == 0b11) {
     size_t pos_save_1= stream->pointer;
 
 if (0b1) {
-    return PARSE_SUCC(to_aval(evaluate_string("{addr_ptr} {rm}", eval_string_216_field_0, eval_string_216_field_1))); /* {addr_ptr} {rm} */
+    return PARSE_SUCC(to_aval(evaluate_string("{addr_ptr} {rm}", eval_string_136_field_0, eval_string_136_field_1))); /* {addr_ptr} {rm} */
     }
 
     stream->pointer= pos_save_1;
@@ -1856,7 +2032,7 @@ ParseRet parse_ModRM_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (parse_Mod(stream) && parse_regr(stream) && parse_rm(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("{regr}, {rm}", eval_string_217_field_0, eval_string_217_field_1))); /* {regr}, {rm} */
+        return PARSE_SUCC(to_aval(evaluate_string("{regr}, {rm}", eval_string_137_field_0, eval_string_137_field_1))); /* {regr}, {rm} */
     }
     stream->pointer= pos_save_0;
 
@@ -1872,6 +2048,160 @@ bool parse_ModRM(ByteStream* stream) {
 
 AVAL get_aval_ModRM() {
 	return aval_ModRM;
+}
+
+ParseRet parse_ModRM_7_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (parse_Mod(stream) && EXPECT_BITS(0b111, stream) && parse_rm(stream)){
+        return PARSE_SUCC(get_aval_rm());
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_ModRM_7(ByteStream* stream) {
+	ParseRet res= parse_ModRM_7_(stream);
+	if (!res.success) return res.success;
+	aval_ModRM_7= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_ModRM_7() {
+	return aval_ModRM_7;
+}
+
+ParseRet parse_ModRM_6_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (parse_Mod(stream) && EXPECT_BITS(0b110, stream) && parse_rm(stream)){
+        return PARSE_SUCC(get_aval_rm());
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_ModRM_6(ByteStream* stream) {
+	ParseRet res= parse_ModRM_6_(stream);
+	if (!res.success) return res.success;
+	aval_ModRM_6= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_ModRM_6() {
+	return aval_ModRM_6;
+}
+
+ParseRet parse_ModRM_5_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (parse_Mod(stream) && EXPECT_BITS(0b101, stream) && parse_rm(stream)){
+        return PARSE_SUCC(get_aval_rm());
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_ModRM_5(ByteStream* stream) {
+	ParseRet res= parse_ModRM_5_(stream);
+	if (!res.success) return res.success;
+	aval_ModRM_5= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_ModRM_5() {
+	return aval_ModRM_5;
+}
+
+ParseRet parse_ModRM_4_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (parse_Mod(stream) && EXPECT_BITS(0b100, stream) && parse_rm(stream)){
+        return PARSE_SUCC(get_aval_rm());
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_ModRM_4(ByteStream* stream) {
+	ParseRet res= parse_ModRM_4_(stream);
+	if (!res.success) return res.success;
+	aval_ModRM_4= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_ModRM_4() {
+	return aval_ModRM_4;
+}
+
+ParseRet parse_ModRM_3_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (parse_Mod(stream) && EXPECT_BITS(0b011, stream) && parse_rm(stream)){
+        return PARSE_SUCC(get_aval_rm());
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_ModRM_3(ByteStream* stream) {
+	ParseRet res= parse_ModRM_3_(stream);
+	if (!res.success) return res.success;
+	aval_ModRM_3= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_ModRM_3() {
+	return aval_ModRM_3;
+}
+
+ParseRet parse_ModRM_2_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (parse_Mod(stream) && EXPECT_BITS(0b010, stream) && parse_rm(stream)){
+        return PARSE_SUCC(get_aval_rm());
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_ModRM_2(ByteStream* stream) {
+	ParseRet res= parse_ModRM_2_(stream);
+	if (!res.success) return res.success;
+	aval_ModRM_2= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_ModRM_2() {
+	return aval_ModRM_2;
+}
+
+ParseRet parse_ModRM_0_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (parse_Mod(stream) && EXPECT_BITS(0b000, stream) && parse_rm(stream)){
+        return PARSE_SUCC(get_aval_rm());
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_ModRM_0(ByteStream* stream) {
+	ParseRet res= parse_ModRM_0_(stream);
+	if (!res.success) return res.success;
+	aval_ModRM_0= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_ModRM_0() {
+	return aval_ModRM_0;
 }
 
 void calculate_flag_opmode() {
@@ -2052,7 +2382,7 @@ ParseRet parse_ModRMS_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
 if (data_ms._value == 0b0) {
-    return PARSE_SUCC(to_aval(evaluate_string("{rm_ptr}, {regr}", eval_string_218_field_0, eval_string_218_field_1))); /* {rm_ptr}, {regr} */
+    return PARSE_SUCC(to_aval(evaluate_string("{rm_ptr}, {regr}", eval_string_138_field_0, eval_string_138_field_1))); /* {rm_ptr}, {regr} */
     }
 
     stream->pointer= pos_save_0;
@@ -2060,7 +2390,7 @@ if (data_ms._value == 0b0) {
     size_t pos_save_1= stream->pointer;
 
 if (data_ms._value == 0b1) {
-    return PARSE_SUCC(to_aval(evaluate_string("{regr}, {rm}", eval_string_219_field_0, eval_string_219_field_1))); /* {regr}, {rm} */
+    return PARSE_SUCC(to_aval(evaluate_string("{regr}, {rm}", eval_string_139_field_0, eval_string_139_field_1))); /* {regr}, {rm} */
     }
 
     stream->pointer= pos_save_1;
@@ -2084,21 +2414,21 @@ ParseRet parse_MOV_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b10, stream) && parse_ms(stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("MOV {ModRMS}", eval_string_220_field_0))); /* MOV {ModRMS} */
+        return PARSE_SUCC(to_aval(evaluate_string("MOV {ModRMS}", eval_string_140_field_0))); /* MOV {ModRMS} */
     }
     stream->pointer= pos_save_0;
 
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BITS(0b1100, stream) && EXPECT_BITS(0b011, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_Mod(stream) && EXPECT_BITS(0b000, stream) && parse_rm(stream) && parse_immM32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("MOV {rm_ptr}, {immM32}", eval_string_221_field_0, eval_string_221_field_1))); /* MOV {rm_ptr}, {immM32} */
+        return PARSE_SUCC(to_aval(evaluate_string("MOV {rm_ptr}, {immM32}", eval_string_141_field_0, eval_string_141_field_1))); /* MOV {rm_ptr}, {immM32} */
     }
     stream->pointer= pos_save_1;
 
     size_t pos_save_2= stream->pointer;
 
-    if (EXPECT_BITS(0b1011, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_regO(stream) && parse_imm(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("MOV {regT}, {imm}", eval_string_222_field_0, eval_string_222_field_1))); /* MOV {regT}, {imm} */
+    if (EXPECT_BITS(0b1011, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_regop(stream) && parse_imm(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("MOV {regop}, {imm}", eval_string_142_field_0, eval_string_142_field_1))); /* MOV {regop}, {imm} */
     }
     stream->pointer= pos_save_2;
 
@@ -2122,9 +2452,9 @@ ParseRet parse_regA_(ByteStream* stream) {
 if (0b1) {
     ByteStream stream= stream_create();
     stream_add(&stream, 0b0000, 4);
-    ParseRet res= parse_reg_(&stream);
+    bool res= parse_reg(&stream);
     stream_destroy(&stream);
-    return res;
+    return res == 1 ? PARSE_SUCC(aval_reg) : PARSE_FAIL;
     }
 
     stream->pointer= pos_save_0;
@@ -2148,28 +2478,28 @@ ParseRet parse_ADC_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BITS(0b0000, stream) && EXPECT_BITS(0b111, stream) && parse_ow(stream) && parse_immM32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("ADC RAX, {immM32}", eval_string_223_field_0))); /* ADC RAX, {immM32} */
+        return PARSE_SUCC(to_aval(evaluate_string("ADC RAX, {immM32}", eval_string_143_field_0))); /* ADC RAX, {immM32} */
     }
     stream->pointer= pos_save_0;
 
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b000, stream) && parse_ow(stream) && parse_immM32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("ADC {reg}, {immM32}", eval_string_224_field_0, eval_string_224_field_1))); /* ADC {reg}, {immM32} */
+        return PARSE_SUCC(to_aval(evaluate_string("ADC {reg}, {immM32}", eval_string_144_field_0, eval_string_144_field_1))); /* ADC {reg}, {immM32} */
     }
     stream->pointer= pos_save_1;
 
     size_t pos_save_2= stream->pointer;
 
     if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b0011, stream) && parse_Mod(stream) && EXPECT_BITS(0b010, stream) && parse_regO(stream) && parse_imm8(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("ADC {reg}, {imm8}", eval_string_225_field_0, eval_string_225_field_1))); /* ADC {reg}, {imm8} */
+        return PARSE_SUCC(to_aval(evaluate_string("ADC {reg}, {imm8}", eval_string_145_field_0, eval_string_145_field_1))); /* ADC {reg}, {imm8} */
     }
     stream->pointer= pos_save_2;
 
     size_t pos_save_3= stream->pointer;
 
     if (EXPECT_BITS(0b0001, stream) && EXPECT_BITS(0b00, stream) && parse_ms(stream) && parse_ow(stream) && parse_ModRM(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("ADC {ModRMS}", eval_string_226_field_0))); /* ADC {ModRMS} */
+        return PARSE_SUCC(to_aval(evaluate_string("ADC {ModRMS}", eval_string_146_field_0))); /* ADC {ModRMS} */
     }
     stream->pointer= pos_save_3;
 
@@ -2201,9 +2531,23 @@ ParseRet parse_PUSH_(ByteStream* stream) {
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BITS(0b0110, stream) && EXPECT_BITS(0b10, stream) && parse_ow(stream) && EXPECT_BITS(0b0, stream) && parse_immM32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("PUSH {immM32}", eval_string_229_field_0))); /* PUSH {immM32} */
+        return PARSE_SUCC(to_aval(evaluate_string("PUSH {immM32}", eval_string_149_field_0))); /* PUSH {immM32} */
     }
     stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BYTE(0xf, stream) && EXPECT_BYTE(0xa0, stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("PUSH FS"))); /* PUSH FS */
+    }
+    stream->pointer= pos_save_2;
+
+    size_t pos_save_3= stream->pointer;
+
+    if (EXPECT_BYTE(0xf, stream) && EXPECT_BYTE(0xa8, stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("PUSH GS"))); /* PUSH GS */
+    }
+    stream->pointer= pos_save_3;
 
 	return PARSE_FAIL; 
 }
@@ -2219,11 +2563,36 @@ AVAL get_aval_PUSH() {
 	return aval_PUSH;
 }
 
+ParseRet parse_POP_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    FLAG_OPMODE save_default_opmode_0= var_default_opmode;
+    var_default_opmode= FLAG_OPMODE_VALUE_64bit;
+    ParseRet res_1= parse_with_1(stream);
+    var_default_opmode= save_default_opmode_0;
+    if (res_1.success) return res_1;
+
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_POP(ByteStream* stream) {
+	ParseRet res= parse_POP_(stream);
+	if (!res.success) return res.success;
+	aval_POP= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_POP() {
+	return aval_POP;
+}
+
 ParseRet parse_CMOV_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BITS(0b0100, stream) && parse_cc(stream) && parse_ModRM(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("CMOV{cc} {ModRM}", eval_string_230_field_0, eval_string_230_field_1))); /* CMOV{cc} {ModRM} */
+        return PARSE_SUCC(to_aval(evaluate_string("CMOV{cc} {ModRM}", eval_string_153_field_0, eval_string_153_field_1))); /* CMOV{cc} {ModRM} */
     }
     stream->pointer= pos_save_0;
 
@@ -2241,69 +2610,25 @@ AVAL get_aval_CMOV() {
 	return aval_CMOV;
 }
 
-ParseRet parse_ModRM_5_(ByteStream* stream) {
-    size_t pos_save_0= stream->pointer;
-
-    if (parse_Mod(stream) && EXPECT_BITS(0b101, stream) && parse_rm(stream)){
-        return PARSE_SUCC(get_aval_rm());
-    }
-    stream->pointer= pos_save_0;
-
-	return PARSE_FAIL; 
-}
-
-bool parse_ModRM_5(ByteStream* stream) {
-	ParseRet res= parse_ModRM_5_(stream);
-	if (!res.success) return res.success;
-	aval_ModRM_5= res.aval;
-	return res.success;
-}
-
-AVAL get_aval_ModRM_5() {
-	return aval_ModRM_5;
-}
-
-ParseRet parse_ModRM_2_(ByteStream* stream) {
-    size_t pos_save_0= stream->pointer;
-
-    if (parse_Mod(stream) && EXPECT_BITS(0b010, stream) && parse_rm(stream)){
-        return PARSE_SUCC(get_aval_rm());
-    }
-    stream->pointer= pos_save_0;
-
-	return PARSE_FAIL; 
-}
-
-bool parse_ModRM_2(ByteStream* stream) {
-	ParseRet res= parse_ModRM_2_(stream);
-	if (!res.success) return res.success;
-	aval_ModRM_2= res.aval;
-	return res.success;
-}
-
-AVAL get_aval_ModRM_2() {
-	return aval_ModRM_2;
-}
-
 ParseRet parse_SUB_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BITS(0b0010, stream) && EXPECT_BITS(0b110, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_immM32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("SUB {regA}, {immM32}", eval_string_231_field_0, eval_string_231_field_1))); /* SUB {regA}, {immM32} */
+        return PARSE_SUCC(to_aval(evaluate_string("SUB {regA}, {immM32}", eval_string_154_field_0, eval_string_154_field_1))); /* SUB {regA}, {immM32} */
     }
     stream->pointer= pos_save_0;
 
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b000, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM_5(stream) && parse_immM32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("SUB {ModRM_5}, {immM32}", eval_string_232_field_0, eval_string_232_field_1))); /* SUB {ModRM_5}, {immM32} */
+        return PARSE_SUCC(to_aval(evaluate_string("SUB {ModRM_5}, {immM32}", eval_string_155_field_0, eval_string_155_field_1))); /* SUB {ModRM_5}, {immM32} */
     }
     stream->pointer= pos_save_1;
 
     size_t pos_save_2= stream->pointer;
 
     if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b0011, stream) && parse_ModRM_5(stream) && parse_imm8(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("SUB {ModRM_5}, {imm8}", eval_string_233_field_0, eval_string_233_field_1))); /* SUB {ModRM_5}, {imm8} */
+        return PARSE_SUCC(to_aval(evaluate_string("SUB {ModRM_5}, {imm8}", eval_string_156_field_0, eval_string_156_field_1))); /* SUB {ModRM_5}, {imm8} */
     }
     stream->pointer= pos_save_2;
 
@@ -2319,6 +2644,512 @@ bool parse_SUB(ByteStream* stream) {
 
 AVAL get_aval_SUB() {
 	return aval_SUB;
+}
+
+ParseRet parse_XOR_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BITS(0b0011, stream) && EXPECT_BITS(0b010, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("XOR {regA}, {immM32}", eval_string_157_field_0, eval_string_157_field_1))); /* XOR {regA}, {immM32} */
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b000, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM_6(stream) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("XOR {ModRM_6}, {immM32}", eval_string_158_field_0, eval_string_158_field_1))); /* XOR {ModRM_6}, {immM32} */
+    }
+    stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b0011, stream) && parse_ModRM_6(stream) && parse_imm8(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("XOR {ModRM_6}, {imm8}", eval_string_159_field_0, eval_string_159_field_1))); /* XOR {ModRM_6}, {imm8} */
+    }
+    stream->pointer= pos_save_2;
+
+    size_t pos_save_3= stream->pointer;
+
+    if (EXPECT_BITS(0b0011, stream) && EXPECT_BITS(0b00, stream) && parse_ms(stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("XOR {ModRMS}", eval_string_160_field_0))); /* XOR {ModRMS} */
+    }
+    stream->pointer= pos_save_3;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_XOR(ByteStream* stream) {
+	ParseRet res= parse_XOR_(stream);
+	if (!res.success) return res.success;
+	aval_XOR= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_XOR() {
+	return aval_XOR;
+}
+
+ParseRet parse_AND_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BITS(0b0010, stream) && EXPECT_BITS(0b010, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("AND {regA}, {immM32}", eval_string_161_field_0, eval_string_161_field_1))); /* AND {regA}, {immM32} */
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b000, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM_4(stream) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("AND {ModRM_4}, {immM32}", eval_string_162_field_0, eval_string_162_field_1))); /* AND {ModRM_4}, {immM32} */
+    }
+    stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b0011, stream) && parse_ModRM_4(stream) && parse_imm8(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("AND {ModRM_4}, {imm8}", eval_string_163_field_0, eval_string_163_field_1))); /* AND {ModRM_4}, {imm8} */
+    }
+    stream->pointer= pos_save_2;
+
+    size_t pos_save_3= stream->pointer;
+
+    if (EXPECT_BITS(0b0010, stream) && EXPECT_BITS(0b00, stream) && parse_ms(stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("AND {ModRMS}", eval_string_164_field_0))); /* AND {ModRMS} */
+    }
+    stream->pointer= pos_save_3;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_AND(ByteStream* stream) {
+	ParseRet res= parse_AND_(stream);
+	if (!res.success) return res.success;
+	aval_AND= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_AND() {
+	return aval_AND;
+}
+
+ParseRet parse_LEA_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BYTE(0x8d, stream) && parse_ModRM(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("LEA {ModRM}", eval_string_165_field_0))); /* LEA {ModRM} */
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_LEA(ByteStream* stream) {
+	ParseRet res= parse_LEA_(stream);
+	if (!res.success) return res.success;
+	aval_LEA= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_LEA() {
+	return aval_LEA;
+}
+
+ParseRet parse_CALL_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BYTE(0xe8, stream) && parse_imm32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("CALL rip + {imm32+5}", eval_string_166_field_0))); /* CALL rip + {imm32+5} */
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    FLAG_OPMODE save_default_opmode_0= var_default_opmode;
+    var_default_opmode= FLAG_OPMODE_VALUE_64bit;
+    ParseRet res_2= parse_with_2(stream);
+    var_default_opmode= save_default_opmode_0;
+    if (res_2.success) return res_2;
+
+    stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BYTE(0xff, stream) && parse_ModRM_3(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("CALL FAR {ModRM_3}", eval_string_168_field_0))); /* CALL FAR {ModRM_3} */
+    }
+    stream->pointer= pos_save_2;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_CALL(ByteStream* stream) {
+	ParseRet res= parse_CALL_(stream);
+	if (!res.success) return res.success;
+	aval_CALL= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_CALL() {
+	return aval_CALL;
+}
+
+ParseRet parse_CMP_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BITS(0b0011, stream) && EXPECT_BITS(0b110, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("CMP {regA}, {immM32}", eval_string_169_field_0, eval_string_169_field_1))); /* CMP {regA}, {immM32} */
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b000, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM_7(stream) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("CMP {ModRM_7}, {immM32}", eval_string_170_field_0, eval_string_170_field_1))); /* CMP {ModRM_7}, {immM32} */
+    }
+    stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b0011, stream) && parse_ModRM_7(stream) && parse_imm8(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("CMP {ModRM_7}, {imm8}", eval_string_171_field_0, eval_string_171_field_1))); /* CMP {ModRM_7}, {imm8} */
+    }
+    stream->pointer= pos_save_2;
+
+    size_t pos_save_3= stream->pointer;
+
+    if (EXPECT_BITS(0b0011, stream) && EXPECT_BITS(0b10, stream) && parse_ms(stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("CMP {ModRMS}", eval_string_172_field_0))); /* CMP {ModRMS} */
+    }
+    stream->pointer= pos_save_3;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_CMP(ByteStream* stream) {
+	ParseRet res= parse_CMP_(stream);
+	if (!res.success) return res.success;
+	aval_CMP= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_CMP() {
+	return aval_CMP;
+}
+
+ParseRet parse_JMP_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BYTE(0xeb, stream) && parse_imm8(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("JMP rip+{imm8+2}", eval_string_173_field_0))); /* JMP rip+{imm8+2} */
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    if (EXPECT_BYTE(0xe9, stream) && parse_imm32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("JMP rip+{imm32+2}", eval_string_174_field_0))); /* JMP rip+{imm32+2} */
+    }
+    stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BYTE(0xff, stream) && parse_ModRM_4(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("JMP {ModRM_4}", eval_string_175_field_0))); /* JMP {ModRM_4} */
+    }
+    stream->pointer= pos_save_2;
+
+    size_t pos_save_3= stream->pointer;
+
+    if (EXPECT_BYTE(0xff, stream) && parse_ModRM_5(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("JMP {ModRM_5}", eval_string_176_field_0))); /* JMP {ModRM_5} */
+    }
+    stream->pointer= pos_save_3;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_JMP(ByteStream* stream) {
+	ParseRet res= parse_JMP_(stream);
+	if (!res.success) return res.success;
+	aval_JMP= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_JMP() {
+	return aval_JMP;
+}
+
+ParseRet parse_HALT_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BYTE(0xf4, stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("HALT"))); /* HALT */
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_HALT(ByteStream* stream) {
+	ParseRet res= parse_HALT_(stream);
+	if (!res.success) return res.success;
+	aval_HALT= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_HALT() {
+	return aval_HALT;
+}
+
+ParseRet parse_LEAVE_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BYTE(0xc9, stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("LEAVE"))); /* LEAVE */
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_LEAVE(ByteStream* stream) {
+	ParseRet res= parse_LEAVE_(stream);
+	if (!res.success) return res.success;
+	aval_LEAVE= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_LEAVE() {
+	return aval_LEAVE;
+}
+
+ParseRet parse_RET_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BYTE(0xc3, stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("RET"))); /* RET */
+    }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_RET(ByteStream* stream) {
+	ParseRet res= parse_RET_(stream);
+	if (!res.success) return res.success;
+	aval_RET= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_RET() {
+	return aval_RET;
+}
+
+ParseRet parse_JCC_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BITS(0b0111, stream) && parse_cc(stream) && parse_imm8(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("J{cc} rip+{imm8+2}", eval_string_180_field_0, eval_string_180_field_1))); /* J{cc} rip+{imm8+2} */
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    if (EXPECT_BYTE(0xf, stream) && EXPECT_BITS(0b1000, stream) && parse_cc(stream) && parse_imm32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("J{cc} rip+{imm32+2}", eval_string_181_field_0, eval_string_181_field_1))); /* J{cc} rip+{imm32+2} */
+    }
+    stream->pointer= pos_save_1;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_JCC(ByteStream* stream) {
+	ParseRet res= parse_JCC_(stream);
+	if (!res.success) return res.success;
+	aval_JCC= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_JCC() {
+	return aval_JCC;
+}
+
+ParseRet parse_TEST_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BITS(0b1010, stream) && EXPECT_BITS(0b100, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("TEST {regA}, {immM32}", eval_string_182_field_0, eval_string_182_field_1))); /* TEST {regA}, {immM32} */
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    if (EXPECT_BITS(0b1111, stream) && EXPECT_BITS(0b011, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM_0(stream) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("TEST {rm}, {immM32}", eval_string_183_field_0, eval_string_183_field_1))); /* TEST {rm}, {immM32} */
+    }
+    stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b010, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("TEST {ModRM}", eval_string_184_field_0))); /* TEST {ModRM} */
+    }
+    stream->pointer= pos_save_2;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_TEST(ByteStream* stream) {
+	ParseRet res= parse_TEST_(stream);
+	if (!res.success) return res.success;
+	aval_TEST= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_TEST() {
+	return aval_TEST;
+}
+
+ParseRet parse_SHIFTS_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BITS(0b1101, stream) && EXPECT_BITS(0b000, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1)){
+                    size_t pos_save_0= stream->pointer;
+
+            if (parse_ModRM_7(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SAR {rm}, 1", eval_string_185_field_0))); /* SAR {rm}, 1 */
+            }
+            stream->pointer= pos_save_0;
+
+            size_t pos_save_1= stream->pointer;
+
+            if (parse_ModRM_4(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SHL {rm}, 1", eval_string_186_field_0))); /* SHL {rm}, 1 */
+            }
+            stream->pointer= pos_save_1;
+
+            size_t pos_save_2= stream->pointer;
+
+            if (parse_ModRM_5(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SHR {rm}, 1", eval_string_187_field_0))); /* SHR {rm}, 1 */
+            }
+            stream->pointer= pos_save_2;
+
+
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    if (EXPECT_BITS(0b1101, stream) && EXPECT_BITS(0b001, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1)){
+                    size_t pos_save_0= stream->pointer;
+
+            if (parse_ModRM_7(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SAR {rm}, cl", eval_string_188_field_0))); /* SAR {rm}, cl */
+            }
+            stream->pointer= pos_save_0;
+
+            size_t pos_save_1= stream->pointer;
+
+            if (parse_ModRM_4(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SHL {rm}, cl", eval_string_189_field_0))); /* SHL {rm}, cl */
+            }
+            stream->pointer= pos_save_1;
+
+            size_t pos_save_2= stream->pointer;
+
+            if (parse_ModRM_5(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SHR {rm}, cl", eval_string_190_field_0))); /* SHR {rm}, cl */
+            }
+            stream->pointer= pos_save_2;
+
+
+    }
+    stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BITS(0b1100, stream) && EXPECT_BITS(0b000, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1)){
+                    size_t pos_save_0= stream->pointer;
+
+            if (parse_ModRM_7(stream) && parse_imm8(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SAR {rm}, {imm8}", eval_string_191_field_0, eval_string_191_field_1))); /* SAR {rm}, {imm8} */
+            }
+            stream->pointer= pos_save_0;
+
+            size_t pos_save_1= stream->pointer;
+
+            if (parse_ModRM_4(stream) && parse_imm8(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SHL {rm}, {imm8}", eval_string_192_field_0, eval_string_192_field_1))); /* SHL {rm}, {imm8} */
+            }
+            stream->pointer= pos_save_1;
+
+            size_t pos_save_2= stream->pointer;
+
+            if (parse_ModRM_5(stream) && parse_imm8(stream)){
+                return PARSE_SUCC(to_aval(evaluate_string("SHR {rm}, {imm8}", eval_string_193_field_0, eval_string_193_field_1))); /* SHR {rm}, {imm8} */
+            }
+            stream->pointer= pos_save_2;
+
+
+    }
+    stream->pointer= pos_save_2;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_SHIFTS(ByteStream* stream) {
+	ParseRet res= parse_SHIFTS_(stream);
+	if (!res.success) return res.success;
+	aval_SHIFTS= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_SHIFTS() {
+	return aval_SHIFTS;
+}
+
+ParseRet parse_ADD_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (EXPECT_BITS(0b0000, stream) && EXPECT_BITS(0b010, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("ADD {regA}, {immM32}", eval_string_194_field_0, eval_string_194_field_1))); /* ADD {regA}, {immM32} */
+    }
+    stream->pointer= pos_save_0;
+
+    size_t pos_save_1= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b000, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM_0(stream) && parse_immM32(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("ADD {ModRM_0}, {immM32}", eval_string_195_field_0, eval_string_195_field_1))); /* ADD {ModRM_0}, {immM32} */
+    }
+    stream->pointer= pos_save_1;
+
+    size_t pos_save_2= stream->pointer;
+
+    if (EXPECT_BITS(0b1000, stream) && EXPECT_BITS(0b0011, stream) && parse_ModRM_0(stream) && parse_imm8(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("ADD {ModRM_0}, {imm8}", eval_string_196_field_0, eval_string_196_field_1))); /* ADD {ModRM_0}, {imm8} */
+    }
+    stream->pointer= pos_save_2;
+
+    size_t pos_save_3= stream->pointer;
+
+    if (EXPECT_BITS(0b0000, stream) && EXPECT_BITS(0b00, stream) && parse_ms(stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM(stream)){
+        return PARSE_SUCC(to_aval(evaluate_string("ADD {ModRMS}", eval_string_197_field_0))); /* ADD {ModRMS} */
+    }
+    stream->pointer= pos_save_3;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_ADD(ByteStream* stream) {
+	ParseRet res= parse_ADD_(stream);
+	if (!res.success) return res.success;
+	aval_ADD= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_ADD() {
+	return aval_ADD;
 }
 
 ParseRet parse_op2_(ByteStream* stream) {
@@ -2368,8 +3199,78 @@ ParseRet parse_op_(ByteStream* stream) {
 
     size_t pos_save_3= stream->pointer;
 
-    if (parse_SUB(stream)) return PARSE_SUCC(get_aval_SUB());
+    if (parse_POP(stream)) return PARSE_SUCC(get_aval_POP());
     stream->pointer= pos_save_3;
+
+    size_t pos_save_4= stream->pointer;
+
+    if (parse_SUB(stream)) return PARSE_SUCC(get_aval_SUB());
+    stream->pointer= pos_save_4;
+
+    size_t pos_save_5= stream->pointer;
+
+    if (parse_XOR(stream)) return PARSE_SUCC(get_aval_XOR());
+    stream->pointer= pos_save_5;
+
+    size_t pos_save_6= stream->pointer;
+
+    if (parse_AND(stream)) return PARSE_SUCC(get_aval_AND());
+    stream->pointer= pos_save_6;
+
+    size_t pos_save_7= stream->pointer;
+
+    if (parse_LEA(stream)) return PARSE_SUCC(get_aval_LEA());
+    stream->pointer= pos_save_7;
+
+    size_t pos_save_8= stream->pointer;
+
+    if (parse_CALL(stream)) return PARSE_SUCC(get_aval_CALL());
+    stream->pointer= pos_save_8;
+
+    size_t pos_save_9= stream->pointer;
+
+    if (parse_HALT(stream)) return PARSE_SUCC(get_aval_HALT());
+    stream->pointer= pos_save_9;
+
+    size_t pos_save_10= stream->pointer;
+
+    if (parse_RET(stream)) return PARSE_SUCC(get_aval_RET());
+    stream->pointer= pos_save_10;
+
+    size_t pos_save_11= stream->pointer;
+
+    if (parse_CMP(stream)) return PARSE_SUCC(get_aval_CMP());
+    stream->pointer= pos_save_11;
+
+    size_t pos_save_12= stream->pointer;
+
+    if (parse_LEAVE(stream)) return PARSE_SUCC(get_aval_LEAVE());
+    stream->pointer= pos_save_12;
+
+    size_t pos_save_13= stream->pointer;
+
+    if (parse_TEST(stream)) return PARSE_SUCC(get_aval_TEST());
+    stream->pointer= pos_save_13;
+
+    size_t pos_save_14= stream->pointer;
+
+    if (parse_JMP(stream)) return PARSE_SUCC(get_aval_JMP());
+    stream->pointer= pos_save_14;
+
+    size_t pos_save_15= stream->pointer;
+
+    if (parse_JCC(stream)) return PARSE_SUCC(get_aval_JCC());
+    stream->pointer= pos_save_15;
+
+    size_t pos_save_16= stream->pointer;
+
+    if (parse_SHIFTS(stream)) return PARSE_SUCC(get_aval_SHIFTS());
+    stream->pointer= pos_save_16;
+
+    size_t pos_save_17= stream->pointer;
+
+    if (parse_ADD(stream)) return PARSE_SUCC(get_aval_ADD());
+    stream->pointer= pos_save_17;
 
 	return PARSE_FAIL; 
 }
@@ -2409,6 +3310,13 @@ int init() {
 	aval_rm.choices= vector_create();
 	aval_rm_ptr.choices= vector_create();
 	aval_ModRM.choices= vector_create();
+	aval_ModRM_7.choices= vector_create();
+	aval_ModRM_6.choices= vector_create();
+	aval_ModRM_5.choices= vector_create();
+	aval_ModRM_4.choices= vector_create();
+	aval_ModRM_3.choices= vector_create();
+	aval_ModRM_2.choices= vector_create();
+	aval_ModRM_0.choices= vector_create();
 	aval_imm.choices= vector_create();
 	aval_immM32.choices= vector_create();
 	aval_ModRMS.choices= vector_create();
@@ -2416,10 +3324,22 @@ int init() {
 	aval_regA.choices= vector_create();
 	aval_ADC.choices= vector_create();
 	aval_PUSH.choices= vector_create();
+	aval_POP.choices= vector_create();
 	aval_CMOV.choices= vector_create();
-	aval_ModRM_5.choices= vector_create();
-	aval_ModRM_2.choices= vector_create();
 	aval_SUB.choices= vector_create();
+	aval_XOR.choices= vector_create();
+	aval_AND.choices= vector_create();
+	aval_LEA.choices= vector_create();
+	aval_CALL.choices= vector_create();
+	aval_CMP.choices= vector_create();
+	aval_JMP.choices= vector_create();
+	aval_HALT.choices= vector_create();
+	aval_LEAVE.choices= vector_create();
+	aval_RET.choices= vector_create();
+	aval_JCC.choices= vector_create();
+	aval_TEST.choices= vector_create();
+	aval_SHIFTS.choices= vector_create();
+	aval_ADD.choices= vector_create();
 	aval_op2.choices= vector_create();
 	aval_op.choices= vector_create();
 	return 0;
