@@ -184,10 +184,21 @@ int tui_loop() {
                 )
             );
         } else if (MATCH_STR("cause")) {
+            char choice[21];
+            sscanf(buff.data, "cause %[^\n]20s", choice);
+            ACTION_DATA data;
+            if (strncmp(choice, "EXAMPLE", sizeof("EXAMPLE") - 1) == 0) {
+                data.BP_CAUSE.is_simple= false;
+            } else if (strncmp(choice, "SIMPLE", sizeof("SIMPLE") - 1) == 0) {
+                data.BP_CAUSE.is_simple= true;
+            } else {
+                show_err("Invalid break cause input, expected EXAMPLE or SIMPLE\n");
+                continue;
+            }
             queueb_push_blocking(
                 &action_q,
                 create_action(ACTION_BP_CAUSE,
-                    NO_DATA
+                    data
                 )
             );
         } else {
