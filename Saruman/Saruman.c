@@ -371,7 +371,7 @@ static void raa_directory_entry_format(uint8_t** base) {
         for (int j = 0; j < structure.pos; ++j) {
             const DirStructure* entry= DirStructure_arr_ptr(&structure, j);
 
-            FORM_DATA data= raa_form_data(base, entry->form, info.a_size, 4);
+            FORM_DATA data= raa_form_data(base, entry->form, info.a_size, 4, -1);
             print_form_data(&data, entry->form, -1);
         }
         newline();
@@ -486,7 +486,7 @@ static int read_header(uint8_t* start, char* string_data) {
     for (size_t i= 0; i < dfc.v; ++i) {
         uint32_t off; // todo this offset can be uint64_t (bit64 mode)
         RAA(off);
-        show_log("[%zu] is called %s\n", i, &string_data[off]);
+        // show_log("[%zu] is called %s\n", i, &string_data[off]);
     }
     return 0;
 
