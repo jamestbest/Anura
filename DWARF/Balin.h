@@ -9,6 +9,7 @@
 #include "Saruman/DWARFParsing.h"
 #include "Sauron.h"
 #include "main.h"
+#include "shared/Vector.h"
 
 typedef enum TAGS {
     DW_TAG_array_type= 0x01,
@@ -258,6 +259,10 @@ typedef struct CU_HEADER {
     uint8_t address_size;
     CU_TYPE type;
     MODE mode;
+
+    uintptr_t low_pc;
+    uintptr_t high_pc;
+    const char* filename;
 } CU_HEADER;
 
 typedef union DIE_DATA {
@@ -296,16 +301,32 @@ typedef struct DIE {
     DIE_TYPE type;
     uint8_t nesting;
     DIEDATAArray data;
+    uintptr_t ref;
 } DIE;
 
 ARRAY_PROTO(DIE, DIE)
 
-FORM_DATA raa_form_data(uint8_t** start, DW_FORM form, uint8_t addr_size, uint8_t offset_size);
-DIE* get_main_cu();
-const char* cu_get_filename(const DIE* die);
-DIE* get_subprog_at(uintptr_t addr);
+typedef struct CU {
+    CU_HEADER header;
+    DIEArray dies;
+    VSubArray vsubprogs;
+    VVarArray globals;
+    VTypeArray types;
+} CU;
+VECTOR_PROTO(CU, CU)
+
+FORM_DATA raa_form_data(uint8_t** start, DW_FORM form, uint8_t addr_size, uint8_t offset_size, int64_t impl_const);
+CU* get_main_cu();
 const char* get_subprog_name_at(uintptr_t addr);
 VSub next_sub(SubIter* iter, bool* succ);
 void print_form_data(const FORM_DATA* data, DW_FORM form, uint64_t impl_const);
+VSub* get_vsub_at(const uintptr_t addr);
+SubIter get_selected_cu_sub_iter();
+void set_selected_cu(void* cu);
+void* get_selected_cu();
+Vector get_all_cu_filenames();
+const char* get_var_name(const DIE* var);
+uint8_t get_type_size(VType* type);
+const char* create_var_instance_value_string(VVarInstance* inst);
 
 #endif //BALIN_H

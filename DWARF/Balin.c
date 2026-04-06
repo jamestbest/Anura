@@ -9,16 +9,19 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "Helper_String.h"
 #include "main.h"
+#include "Vector.h"
 
 ARRAY_ADD(ATData, ATData)
 ARRAY_ADD(TagData, TagData)
 
 void print_die(const DIE* die);
-static int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header, TableArray* abbrev_tables);
+static int parse_cu_dies(uint8_t** data, uint8_t* section_start, const uint8_t* section_end, CU* cu, TableArray* abbrev_tables);
 static const char* die_data_get_str(const FORM_DATA* data, DW_FORM form);
+static void resolve_type_refs(CU* cu);
 
 typedef enum ParseRes {
     PARSE_FAIL=-1,
@@ -154,39 +157,67 @@ ARRAY_PROTO(uint64_t, u64)
 ARRAY_ADD(uint64_t, u64)
 ARRAY_ADD(FORM_DATA, DIEDATA)
 
-static DIEArray dies;
-static DIEArray cus;
-static DIEArray subprogs;
-static VSubArray vsubprogs;
+// static DIEArray dies;
+// static DIEArray cus;
+// static DIEArray subprogs;
+// static VSubArray vsubprogs;
+
+
+VECTOR_ADD(CU, CU)
+
+CUVector cus;
+CU* main_cu;
+CU* selected_cu;
 
 const char* get_subprog_name(const DIE* subprog);
 
+static CU* alloc_cu() {
+    CU* cu= malloc(sizeof(CU));
+    *cu= (CU){
+        .header= {0},
+        .vsubprogs= VSub_arr_construct(0),
+        .dies= DIE_arr_construct(0),
+        .types= VType_arr_create(),
+        .globals= VVar_arr_create()
+    };
+
+    return cu;
+}
+
+void set_selected_cu(void* cu) {
+    selected_cu= cu;
+}
+
+void* get_selected_cu() {
+    return selected_cu;
+}
+
 int parse_info(Section* section, TableArray* abbrev_tables) {
-    dies= DIE_arr_create();
-    cus= DIE_arr_create();
-    subprogs= DIE_arr_create();
-    vsubprogs= VSub_arr_create();
+    cus= CU_vec_create();
 
     uint8_t* section_start= section->data;
     const uint8_t* section_end= section_start + section->header->sh_size;
 
     uint8_t* data= section_start;
     while (data < section_end) {
-        CU_HEADER header;
-        int res= read_cu_header(&data, &header);
+        CU* cu= alloc_cu();
+
+        int res= read_cu_header(&data, &cu->header);
         if (res != SUCCESS) return res;
 
-        res= parse_cu_dies(&data, section_end, &header, abbrev_tables);
-        if (res != SUCCESS) return res;
+        res= parse_cu_dies(&data, section_start, section_end, cu, abbrev_tables);
+        if (cu->header.filename != NULL)
+            CU_vec_add(&cus, cu);
+
+        resolve_type_refs(cu);
     }
+
 
     return SUCCESS;
 }
 
-DIE* get_main_cu() {
-    if (cus.pos == 0) return NULL;
-
-    return DIE_arr_ptr(&cus, 0);
+CU* get_main_cu() {
+    return main_cu;
 }
 
 bool has_attr(const TagData* data, const DW_AT attr) {
@@ -205,6 +236,182 @@ int16_t get_attr_pos(const TagData* data, const DW_AT attr) {
         if (a->attr == attr) return i;
     }
     return -1;
+}
+
+VType* get_cu_type_by_ref(CU* cu, uint64_t ref) {
+    return VType_arr_search_ie(&cu->types, ref);
+}
+
+uint8_t get_type_size(VType* type) {
+    switch (type->type) {
+        case VTYPE_BASE: return type->byte_size;
+        case VTYPE_STRUCTURE: return type->byte_size;
+        case VTYPE_POINTER: return type->byte_size;
+        case VTYPE_ENUM: return type->byte_size;
+        case VTYPE_CONST: {
+            return get_type_size(type->data.constant_mod.type);
+        }
+        case VTYPE_TYPEDEF: {
+            return get_type_size(type->data.type_def.type);
+        }
+        default:
+            assert(false);
+    }
+}
+
+VType* get_base_type(VType* type) {
+    switch (type->type) {
+        case VTYPE_BASE: return type;
+        case VTYPE_STRUCTURE: return type;
+        case VTYPE_POINTER: return type;
+        case VTYPE_ENUM: return type;
+        case VTYPE_CONST: return get_base_type(type->data.constant_mod.type);
+        case VTYPE_TYPEDEF: return get_base_type(type->data.type_def.type);
+    }
+    assert(false);
+}
+
+const char* create_var_instance_value_string(VVarInstance* inst) {
+    VType* base_type= get_base_type(inst->var->type);
+
+    switch (base_type->type) {
+        case VTYPE_BASE: {
+            char* out= malloc(20);
+            snprintf(out, 19, "%ld", inst->value.data.general);
+            return out;
+        }
+        case VTYPE_STRUCTURE: {
+            return "Struct view not impl";
+        }
+        case VTYPE_POINTER: {
+            char* out= malloc(20);
+            snprintf(out, 19, "%#lx", inst->value.data.general);
+            return out;
+        }
+        case VTYPE_ENUM: {
+            uint64_t enum_val= inst->value.data.general;
+            for (int i = 0; i < base_type->data.enumerator.elements.pos; ++i) {
+                EnumElement* elem= EnumElement_arr_ptr(&base_type->data.enumerator.elements, i);
+
+                if (elem->value == enum_val) {
+                    return elem->name;
+                }
+            }
+            return "UNKNOWN ENUM VALUE";
+        }
+        default: assert(false);
+    }
+}
+
+void resolve_type_refs(CU* cu) {
+    for (int i = 0; i < cu->vsubprogs.pos; ++i) {
+        const VSub* sub= VSub_arr_ptr(&cu->vsubprogs, i);
+
+        for (int j = 0; j < sub->vars.pos; ++j) {
+            VVar* var= VVar_arr_ptr(&sub->vars, j);
+
+            var->type= get_cu_type_by_ref(cu, var->type_ref);
+        }
+
+        for (int j = 0; j < sub->params.pos; ++j) {
+            VVar* var= VVar_arr_ptr(&sub->params, j);
+
+            var->type= get_cu_type_by_ref(cu, var->type_ref);
+        }
+    }
+
+    for (int i = 0; i < cu->globals.pos; ++i) {
+        VVar* var= VVar_arr_ptr(&cu->globals, i);
+        var->type= get_cu_type_by_ref(cu, var->type_ref);
+    }
+
+    for (int i = 0; i < cu->types.pos; ++i) {
+        VType* type= VType_arr_ptr(&cu->types, i);
+
+        switch (type->type) {
+            case VTYPE_BASE: break;
+            case VTYPE_STRUCTURE: {
+                for (int j = 0; j < type->data.structure.elements.pos; ++j) {
+                    VTypeStructElement* elem= StructElem_arr_ptr(&type->data.structure.elements, j);
+                    elem->type= get_cu_type_by_ref(cu, elem->type_ref);
+                }
+                break;
+            }
+            case VTYPE_POINTER: {
+                type->data.pointer.type= get_cu_type_by_ref(cu, type->data.pointer.type_ref);
+                break;
+            }
+            case VTYPE_ENUM: {
+                type->data.enumerator.base_type= get_cu_type_by_ref(cu, type->data.enumerator.type_ref);
+                break;
+            }
+            case VTYPE_CONST: {
+                type->data.constant_mod.type= get_cu_type_by_ref(cu, type->data.constant_mod.type_ref);
+                break;
+            }
+            case VTYPE_TYPEDEF: {
+                type->data.type_def.type= get_cu_type_by_ref(cu, type->data.type_def.type_ref);
+                break;
+            }
+        }
+    }
+}
+
+VVar to_vvar(const DIE* var, bool* succ, CU* cu) {
+    const Table* abbrevs= var->type.table;
+    const TagData* data= TagData_arr_ptr(&abbrevs->abbrevs, var->type.abbrev);
+
+    if (get_attr_pos(data, DW_AT_specification) != -1) goto to_vvar_fail;
+
+    const int16_t name_pos= get_attr_pos(data, DW_AT_name);
+    if (name_pos == -1) goto to_vvar_fail;
+
+    const int16_t line_pos= get_attr_pos(data, DW_AT_decl_line);
+    const int16_t col_pos= get_attr_pos(data, DW_AT_decl_column);
+
+    uint32_t line= -1;
+    uint32_t col= -1;
+
+    if (line_pos != -1) line= DIEDATA_arr_ptr(&var->data, line_pos)->constant_m64_u;
+    if (col_pos != -1) col= DIEDATA_arr_ptr(&var->data, col_pos)->constant_m64_u;
+
+    VLocation location;
+
+    int16_t loc_pos;
+    if (loc_pos= get_attr_pos(data, DW_AT_const_value), loc_pos != -1) {
+        location.type= VLOCATION_CONST;
+        location.data.constant= DIEDATA_arr_ptr(&var->data, loc_pos)->constant_m64_s;
+    } else if (get_attr_pos(data, DW_AT_external) != -1) {
+        location.type= VLOCATION_NO_ACCESS;
+    } else if (loc_pos= get_attr_pos(data, DW_AT_location), loc_pos != -1) {
+        DW_EXPR expr= DIEDATA_arr_ptr(&var->data, loc_pos)->exprloc;
+        DW_EXPR* expr_save= malloc(sizeof(DW_EXPR));
+        *expr_save= expr;
+        location.type= VLOCATION_EXPR;
+        location.data.expr= expr_save;
+    } else {
+        goto to_vvar_fail;
+    }
+
+    const int16_t type_pos= get_attr_pos(data, DW_AT_type);
+    uint64_t type_ref= -1;
+    if (type_pos != -1) {
+        type_ref= DIEDATA_arr_ptr(&var->data, type_pos)->reference;
+    }
+
+    *succ= true;
+    VVar vvar= (VVar) {
+        .name= get_var_name(var),
+        .col= col,
+        .line= line,
+        .loc= location,
+        .type_ref= type_ref
+    };
+    return vvar;
+
+to_vvar_fail:
+    *succ= false;
+    return (VVar){0};
 }
 
 VSub to_vsub(const DIE* subprog, bool* succ) {
@@ -231,7 +438,9 @@ VSub to_vsub(const DIE* subprog, bool* succ) {
     return (VSub) {
         .vaddr_start= low_pc,
         .vaddr_end= hi_pc,
-        .subprog_name= name
+        .subprog_name= name,
+        .vars= VVar_arr_create(),
+        .params= VVar_arr_create()
     };
 
 to_vsub_fail:
@@ -239,42 +448,76 @@ to_vsub_fail:
     return (VSub){0};
 }
 
+SubIter get_selected_cu_sub_iter() {
+    return (SubIter) {
+        .idx= 0,
+        .cu= selected_cu
+    };
+}
+
+Vector get_all_cu_filenames() {
+    Vector vec= vector_construct(cus.pos);
+
+    for (size_t i = 0; i < cus.pos; ++i) {
+        const CU* cu= CU_vec_get_unsafe(&cus, i);
+        vector_add(&vec, (void*)cu->header.filename);
+    }
+
+    return vec;
+}
+
 VSub next_sub(SubIter* iter, bool* succ) {
-    if (iter->idx >= vsubprogs.pos) {
+    if (iter->idx >= iter->cu->vsubprogs.pos) {
         *succ= false;
         return (VSub){0};
     }
 
     *succ= true;
-    return VSub_arr_get(&vsubprogs, iter->idx++);
+    return VSub_arr_get(&iter->cu->vsubprogs, iter->idx++);
 }
 
-DIE* get_subprog_at(const uintptr_t addr) {
-    // ignoring external functions
-    for (int i = 0; i < subprogs.pos; ++i) {
-        DIE* subprog= DIE_arr_ptr(&subprogs, i);
+int cu_search_cmp(const void* a, const void* b) {
+    const uintptr_t addr= *(uintptr_t*)a;
+    const CU* cu= *(const CU**)b;
 
-        const Table* abbrevs= subprog->type.table;
-        const TagData* data= TagData_arr_ptr(&abbrevs->abbrevs, subprog->type.abbrev);
+    if (addr < cu->header.low_pc) return -1;
 
-        if (has_attr(data, DW_AT_ranges)) {
-            show_err("Cannot get subprogram at location as it requires DW_AT_ranges\n");
-            return NULL;
-        }
+    if (addr >= cu->header.high_pc) return 1;
 
-        const int16_t low= get_attr_pos(data, DW_AT_low_pc);
-        if (low == -1) continue;
+    return 0;
+}
 
-        const int16_t hi= get_attr_pos(data, DW_AT_high_pc);
-        if (hi == -1) continue;
+int vsub_within_cmp(const void* a, const void* b) {
+    const uintptr_t addr= *(uintptr_t*)a;
+    const VSub* sub= (const VSub*)b;
 
-        const uintptr_t low_pc= DIEDATA_arr_ptr(&subprog->data, low)->address;
-        const uintptr_t hi_pc= low_pc + DIEDATA_arr_ptr(&subprog->data, hi)->constant_m64_u;
+    if (addr < sub->vaddr_start) return -1;
+    if (addr >= sub->vaddr_end) return 1;
 
-        if (addr >= low_pc && addr <= hi_pc) return subprog;
-    }
+    return 0;
+}
 
-    return NULL;
+VSub* get_vsub_at(const uintptr_t addr) {
+    CU** search_res= bsearch(&addr, cus.arr, cus.pos, sizeof(CU), cu_search_cmp);
+    if (search_res == NULL) return NULL;
+    CU* cu= *search_res;
+
+    const uint res= arr_search((Array*)&cu->vsubprogs, &addr, vsub_within_cmp);
+    if (res == ARR_NOT_FOUND) return NULL;
+
+    return VSub_arr_ptr(&cu->vsubprogs, res);
+}
+
+const char* get_var_name(const DIE* var) {
+    const Table* abbrevs= var->type.table;
+    const TagData* data= TagData_arr_ptr(&abbrevs->abbrevs, var->type.abbrev);
+
+    const int16_t name_pos= get_attr_pos(data, DW_AT_name);
+    if (name_pos == -1) return NULL;
+
+    const FORM_DATA* die_data= DIEDATA_arr_ptr(&var->data, name_pos);
+    const DW_FORM data_form= ATData_arr_ptr(&data->attributes, name_pos)->form;
+    return die_data_get_str(die_data, data_form);
 }
 
 const char* get_subprog_name(const DIE* subprog) {
@@ -290,10 +533,9 @@ const char* get_subprog_name(const DIE* subprog) {
 }
 
 const char* get_subprog_name_at(const uintptr_t addr) {
-    DIE* subprog= get_subprog_at(addr);
-    if (!subprog) return NULL;
-
-    return get_subprog_name(subprog);
+    VSub* vsub= get_vsub_at(addr);
+    if (vsub == NULL) return NULL;
+    return vsub->subprog_name;
 }
 
 const char* die_data_get_str(const FORM_DATA* data, const DW_FORM form) {
@@ -306,25 +548,6 @@ const char* die_data_get_str(const FORM_DATA* data, const DW_FORM form) {
     }
 }
 
-const char* cu_get_filename(const DIE* die) {
-    const Table* abbrev= die->type.table;
-    const TagData* tag= TagData_arr_ptr(&abbrev->abbrevs, die->type.abbrev);
-
-    printf("Looking for main filename");
-    if (tag->tag != DW_TAG_compile_unit) return NULL;
-
-    for (int i = 0; i < tag->attributes.pos; ++i) {
-        const ATData* attr= ATData_arr_ptr(&tag->attributes, i);
-
-        if (attr->attr == DW_AT_name) {
-            const FORM_DATA* data= DIEDATA_arr_ptr(&die->data, i);
-            return die_data_get_str(data, attr->form);
-        }
-    }
-
-    return NULL;
-}
-
 static uint8_t offset_size_from_mode(MODE mode) {
     switch (mode) {
         case MODE_32bit: return 4;
@@ -333,66 +556,521 @@ static uint8_t offset_size_from_mode(MODE mode) {
     }
 }
 
-int parse_cu_dies(uint8_t** data, const uint8_t* section_end, CU_HEADER* header, TableArray* abbrev_tables) {
-    uint32_t depth= 0;
+int add_cu_data_to_header(CU* cu, DIE* die) {
+    const TagData* tag= TagData_arr_ptr(&die->type.table->abbrevs, die->type.abbrev);
 
-    const Table* table= find_table(abbrev_tables, header->abbrev_offset);
+    const size_t low_pc_pos= get_attr_pos(tag, DW_AT_low_pc);
+    if (low_pc_pos == -1) return FAIL;
 
-    while (*data < section_end) {
-        uint64_t abbrev_code= raa_uleb128(data).v;
+    const size_t high_pc_pos= get_attr_pos(tag, DW_AT_high_pc);
+    if (high_pc_pos == -1) return FAIL;
 
-        if (abbrev_code == 0) {
-            if (depth <= 0) break;
+    const uintptr_t low_pc= DIEDATA_arr_ptr(&die->data, low_pc_pos)->address;
+    const uintptr_t high_pc= low_pc + DIEDATA_arr_ptr(&die->data, high_pc_pos)->constant_m64_u;
 
-            depth--;
-            continue;
+    cu->header.low_pc= low_pc;
+    cu->header.high_pc= low_pc + high_pc;
+
+    const size_t name_pos= get_attr_pos(tag, DW_AT_name);
+    if (name_pos == -1) return FAIL;
+
+    FORM_DATA* data= DIEDATA_arr_ptr(&die->data, name_pos);
+    ATData* at= ATData_arr_ptr(&tag->attributes, name_pos);
+    cu->header.filename= die_data_get_str(data, at->form);
+
+    return SUCCESS;
+}
+
+bool tag_is_type(DW_TAG tag) {
+    switch (tag) {
+        case DW_TAG_base_type:
+        case DW_TAG_structure_type:
+        case DW_TAG_pointer_type:
+        case DW_TAG_enumeration_type:
+        case DW_TAG_const_type:
+        case DW_TAG_typedef:
+            return true;
+        default:
+        return false;
+    }
+}
+
+typedef struct ReadState {
+    uint8_t** data;
+    uint8_t* section_start;
+    const uint8_t* section_end;
+    uint32_t depth;
+    const Table* table;
+    CU* cu;
+    DIE* die;
+    const TagData* tag;
+} ReadState;
+
+#define READ_DIE_END 100
+#define READ_DIE_SENTINEL 10
+#define READ_DIE_FAIL 1
+#define READ_DIE_SUCCESS 0
+int read_cu_die(ReadState* rs);
+
+int read_die_attrs(uint8_t** data, const TagData* tag, DIE* die, CU* cu) {
+    for (int i = 0; i < tag->attributes.pos; ++i) {
+        const ATData* attr= ATData_arr_ptr(&tag->attributes, i);
+        const FORM_DATA die_data= raa_form_data(
+            data,
+            attr->form,
+            cu->header.address_size,
+            offset_size_from_mode(cu->header.mode),
+            attr->impl_const
+        );
+        DIEDATA_arr_add(&die->data, die_data);
+    }
+
+    return SUCCESS;
+}
+
+VType parse_base_type(ReadState* rs, bool* succ) {
+    VType type;
+
+    type.type= VTYPE_BASE;
+    type.ref= rs->die->ref;
+
+    const int16_t name_pos= get_attr_pos(rs->tag, DW_AT_name);
+    const int16_t encoding_pos= get_attr_pos(rs->tag, DW_AT_encoding);
+    const int16_t size_pos= get_attr_pos(rs->tag, DW_AT_byte_size);
+
+    if (name_pos != -1) {
+        const ATData* form= ATData_arr_ptr(&rs->tag->attributes, name_pos);
+        const FORM_DATA* data= DIEDATA_arr_ptr(&rs->die->data, name_pos);
+        type.data.base.name= die_data_get_str(data, form->form);
+    }
+    if (encoding_pos != -1) {
+        type.data.base.encoding= DIEDATA_arr_ptr(&rs->die->data, encoding_pos)->constant_m64_s;
+    }
+    if (size_pos != -1) {
+        type.byte_size= DIEDATA_arr_ptr(&rs->die->data, size_pos)->constant_m64_s;
+    } else goto parse_base_fail;
+
+    *succ= true;
+    return type;
+
+parse_base_fail:
+    *succ= false;
+    return (VType){0};
+}
+
+VType parse_pointer_type(ReadState* rs, bool* succ) {
+    VType type;
+
+    type.type= VTYPE_POINTER;
+    type.ref= rs->die->ref;
+
+    const int16_t ref_pos= get_attr_pos(rs->tag, DW_AT_type);
+    const int16_t size_pos= get_attr_pos(rs->tag, DW_AT_byte_size);
+
+    if (size_pos != -1) {
+        type.byte_size= DIEDATA_arr_ptr(&rs->die->data, size_pos)->constant_m64_u;
+    } else goto parse_pointer_fail;
+    if (ref_pos != -1) {
+        const uint64_t ref= DIEDATA_arr_ptr(&rs->die->data, ref_pos)->constant_m64_s;
+        type.data.pointer.type_ref= ref;
+    } else goto parse_pointer_fail;
+
+    *succ= true;
+    return type;
+
+parse_pointer_fail:
+    *succ= false;
+    return (VType){0};
+}
+
+void add_enum_val_to_enum(ReadState* rs, VType* enum_type) {
+    EnumElement e;
+    e.name= "NULL";
+    e.value= -1;
+
+    const int16_t name_pos= get_attr_pos(rs->tag, DW_AT_name);
+    const int16_t const_pos= get_attr_pos(rs->tag, DW_AT_const_value);
+
+    if (name_pos != -1) {
+        const ATData* form= ATData_arr_ptr(&rs->tag->attributes, name_pos);
+        const FORM_DATA* data= DIEDATA_arr_ptr(&rs->die->data, name_pos);
+        e.name= die_data_get_str(data, form->form);
+    }
+    if (const_pos != -1) {
+        e.value= DIEDATA_arr_ptr(&rs->die->data, const_pos)->constant_m64_s;
+    }
+
+    EnumElement_arr_add(&enum_type->data.enumerator.elements, e);
+}
+
+VType parse_enum_type(ReadState* rs, bool* succ) {
+    VType type;
+
+    type.type= VTYPE_ENUM;
+    type.ref= rs->die->ref;
+    type.data.enumerator.elements= EnumElement_arr_create();
+
+    const int16_t name_pos= get_attr_pos(rs->tag, DW_AT_name);
+    const int16_t encoding_pos= get_attr_pos(rs->tag, DW_AT_encoding);
+    const int16_t size_pos= get_attr_pos(rs->tag, DW_AT_byte_size);
+    const int16_t ref_pos= get_attr_pos(rs->tag, DW_AT_type);
+
+    if (size_pos != -1) {
+        type.byte_size= DIEDATA_arr_ptr(&rs->die->data, size_pos)->constant_m64_u;
+    } else goto parse_enum_fail;
+
+    if (name_pos != -1) {
+        const ATData* form= ATData_arr_ptr(&rs->tag->attributes, name_pos);
+        const FORM_DATA* data= DIEDATA_arr_ptr(&rs->die->data, name_pos);
+        type.data.enumerator.name= die_data_get_str(data, form->form);
+    }
+
+    if (encoding_pos != -1) {
+        type.data.enumerator.encoding= DIEDATA_arr_ptr(&rs->die->data, encoding_pos)->constant_m64_s;
+    }
+
+    if (ref_pos != -1) {
+        const uint64_t ref= DIEDATA_arr_ptr(&rs->die->data, ref_pos)->constant_m64_s;
+        type.data.enumerator.type_ref= ref;
+    }
+
+    if (rs->depth == rs->die->nesting) goto parse_enum_end;
+
+    uint32_t c_depth= rs->depth - 1;
+    while (*rs->data < rs->section_end) {
+        DIE die;
+        rs->die= &die;
+        const int res= read_cu_die(rs);
+
+        bool end_loop= false;
+        switch (res) {
+            case READ_DIE_END: end_loop= true; break;
+            case READ_DIE_SENTINEL: {
+                if (c_depth == rs->depth) {
+                    end_loop= true;
+                    break;
+                }
+                continue;
+            }
+            case READ_DIE_FAIL: goto parse_enum_fail;
+            case READ_DIE_SUCCESS: break;
+            default: assert(false);
         }
 
-        abbrev_code--;
+        if (end_loop) break;
 
-        if (abbrev_code >= table->abbrevs.pos) {
-            printf("Invalid abbrev code (%lu), unable to parse die", abbrev_code);
-            return FAIL;
-        }
+        const bool is_enum_val= rs->tag->tag == DW_TAG_enumerator;
 
-        const TagData* tag= TagData_arr_ptr(&table->abbrevs, abbrev_code);
-
-        const bool is_cu= tag->tag == DW_TAG_compile_unit;
-        const bool is_sub= tag->tag == DW_TAG_subprogram;
-
-        DIE die= (DIE) {
-            .type= (DIE_TYPE){.abbrev= abbrev_code, .table= table},
-            .nesting= depth,
-            .data= DIEDATA_arr_construct(tag->attributes.pos)
-        };
-
-        for (int i = 0; i < tag->attributes.pos; ++i) {
-            const ATData* attr= ATData_arr_ptr(&tag->attributes, i);
-            const FORM_DATA die_data= raa_form_data(data, attr->form, header->address_size, offset_size_from_mode(header->mode));
-            DIEDATA_arr_add(&die.data, die_data);
-        }
-
-        DIE_arr_add(&dies, die);
-        if (is_cu) DIE_arr_add(&cus, die);
-        if (is_sub) DIE_arr_add(&subprogs, die);
-
+        if (rs->tag->has_children) rs->depth++;
         print_die(&die);
-        if (tag->has_children) depth++;
-    }
 
-    bool succ;
-    for (int i = 0; i < subprogs.pos; ++i) {
-        const DIE* sub= DIE_arr_ptr(&subprogs, i);
-        const VSub vsub= to_vsub(sub, &succ);
-        if (!succ) {
-            const char* name= get_subprog_name(sub);
-            show_err("Unable to convert subprogram (%s) into vsub\n", name);
-            continue;
+        if (is_enum_val) {
+            add_enum_val_to_enum(rs, &type);
         }
-        VSub_arr_add(&vsubprogs, vsub);
     }
 
-    VSub_arr_sort_i(&vsubprogs);
+parse_enum_end:
+    *succ= true;
+    return type;
+
+parse_enum_fail:
+    *succ= false;
+    return (VType){0};
+}
+
+void add_struct_member_to_struct(ReadState* rs, VType* structure) {
+    VTypeStructElement e;
+
+    e.name= "NULL";
+    e.type= NULL;
+    e.offset= 0;
+    e.type_ref= -1;
+
+    const int16_t name_pos= get_attr_pos(rs->tag, DW_AT_name);
+    const int16_t ref_pos= get_attr_pos(rs->tag, DW_AT_type);
+    const int16_t offset_pos= get_attr_pos(rs->tag, DW_AT_data_member_location);
+
+    if (name_pos != -1) {
+        const ATData* form= ATData_arr_ptr(&rs->tag->attributes, name_pos);
+        const FORM_DATA* data= DIEDATA_arr_ptr(&rs->die->data, name_pos);
+        e.name= die_data_get_str(data, form->form);
+    }
+
+    if (ref_pos != -1) {
+        const uint64_t ref= DIEDATA_arr_ptr(&rs->die->data, ref_pos)->constant_m64_s;
+        e.type_ref= ref;
+    }
+
+    if (offset_pos != -1) {
+        e.offset= DIEDATA_arr_ptr(&rs->die->data, offset_pos)->constant_m64_u;
+    }
+
+    StructElem_arr_add(&structure->data.structure.elements, e);
+}
+
+VType parse_structure_type(ReadState* rs, bool* succ) {
+    VType type;
+
+    type.type= VTYPE_STRUCTURE;
+    type.ref= rs->die->ref;
+    type.data.structure.elements= StructElem_arr_create();
+
+    const int16_t name_pos= get_attr_pos(rs->tag, DW_AT_name);
+
+    if (name_pos != -1) {
+        const ATData* form= ATData_arr_ptr(&rs->tag->attributes, name_pos);
+        const FORM_DATA* data= DIEDATA_arr_ptr(&rs->die->data, name_pos);
+        type.data.structure.name= die_data_get_str(data, form->form);
+    }
+
+    if (rs->depth == rs->die->nesting) goto parse_struct_end;
+
+    uint32_t c_depth= rs->depth - 1;
+    while (*rs->data < rs->section_end) {
+        DIE die;
+        rs->die= &die;
+        const int res= read_cu_die(rs);
+
+        bool end_loop= false;
+        switch (res) {
+            case READ_DIE_END: end_loop= true; break;
+            case READ_DIE_SENTINEL: {
+                if (c_depth == rs->depth) {
+                    end_loop= true;
+                    break;
+                }
+                continue;
+            }
+            case READ_DIE_FAIL: goto parse_struct_fail;
+            case READ_DIE_SUCCESS: break;
+            default: assert(false);
+        }
+
+        if (end_loop) break;
+
+        const bool is_struct_member= rs->tag->tag == DW_TAG_member;
+
+        if (rs->tag->has_children) rs->depth++;
+        print_die(&die);
+
+        if (is_struct_member) {
+            add_struct_member_to_struct(rs, &type);
+        }
+    }
+
+parse_struct_end:
+    *succ= true;
+    return type;
+
+parse_struct_fail:
+    *succ= false;
+    return (VType){0};
+}
+
+VType parse_const_type(ReadState* rs, bool* succ) {
+    VType type;
+
+    type.type= VTYPE_CONST;
+    type.ref= rs->die->ref;
+
+    const int16_t ref_pos= get_attr_pos(rs->tag, DW_AT_type);
+
+    if (ref_pos == -1) {
+        *succ= false;
+        return (VType){0};
+    }
+
+    type.data.constant_mod.type_ref= DIEDATA_arr_ptr(&rs->die->data, ref_pos)->reference;
+    type.data.constant_mod.type= NULL;
+
+    *succ= true;
+    return type;
+}
+
+VType parse_typedef(ReadState* rs, bool* succ) {
+    VType type;
+
+    type.type= VTYPE_TYPEDEF;
+    type.ref= rs->die->ref;
+
+    const int16_t ref_pos= get_attr_pos(rs->tag, DW_AT_type);
+    if (ref_pos == -1) {
+        *succ= false;
+        return (VType){0};
+    }
+
+    type.data.type_def.type_ref= DIEDATA_arr_ptr(&rs->die->data, ref_pos)->reference;
+    type.data.type_def.type= NULL;
+
+    *succ= true;
+    return type;
+}
+
+void parse_type(ReadState* rs, VTypeArray* arr) {
+    bool succ;
+    VType type;
+
+    switch (rs->tag->tag) {
+        case DW_TAG_base_type: type= parse_base_type(rs, &succ); break;
+        case DW_TAG_enumeration_type: type= parse_enum_type(rs, &succ); break;
+        case DW_TAG_pointer_type: type= parse_pointer_type(rs, &succ); break;
+        case DW_TAG_structure_type: type= parse_structure_type(rs, &succ); break;
+        case DW_TAG_const_type: type= parse_const_type(rs, &succ); break;
+        case DW_TAG_typedef: type= parse_typedef(rs, &succ); break;
+        default: assert(false);
+    }
+
+    if (succ) {
+        VType_arr_add(arr, type);
+    }
+}
+
+void parse_var(ReadState* rs, VVarArray* arr) {
+    bool succ;
+    const VVar var= to_vvar(rs->die, &succ, rs->cu);
+    if (succ) {
+        VVar_arr_add(arr, var);
+    }
+}
+
+int parse_sub(ReadState* rs, VSubArray* arr) {
+    bool succ;
+    VSub sub= to_vsub(rs->die, &succ);
+    if (!succ) {
+        return FAIL;
+    }
+
+    if (rs->depth == rs->die->nesting) goto parse_sub_end;
+
+    uint32_t c_depth= rs->depth - 1;
+    while (*rs->data < rs->section_end) {
+        DIE die;
+        rs->die= &die;
+        const int res= read_cu_die(rs);
+
+        bool end_loop= false;
+        switch (res) {
+            case READ_DIE_END: end_loop= true; break;
+            case READ_DIE_SENTINEL: {
+                if (c_depth == rs->depth) {
+                    end_loop= true;
+                    break;
+                }
+                continue;
+            }
+            case READ_DIE_FAIL: return FAIL;
+            case READ_DIE_SUCCESS: break;
+            default: assert(false);
+        }
+
+        if (end_loop) break;
+
+        const bool is_var= rs->tag->tag == DW_TAG_variable;
+        const bool is_param= rs->tag->tag == DW_TAG_formal_parameter;
+        const bool is_type= tag_is_type(rs->tag->tag);
+
+        if (rs->tag->has_children) rs->depth++;
+        print_die(&die);
+
+        if (is_var) {
+            parse_var(rs, &sub.vars);
+        } else if (is_type) {
+            parse_type(rs, &rs->cu->types);
+        } else if (is_param) {
+            parse_var(rs, &sub.params);
+        }
+    }
+
+parse_sub_end:
+    VSub_arr_add(arr, sub);
+    if (strcmp(sub.subprog_name, "main") == 0) {
+        main_cu= rs->cu;
+    }
+
+    return SUCCESS;
+}
+
+int read_cu_die(ReadState* rs) {
+    const uintptr_t die_start= *rs->data - rs->section_start;
+    uint64_t abbrev_code= raa_uleb128(rs->data).v;
+
+    if (abbrev_code == 0) {
+        if (rs->depth <= 0) return READ_DIE_END;
+
+        rs->depth--;
+        return READ_DIE_SENTINEL;
+    }
+
+    abbrev_code--;
+
+    if (abbrev_code >= rs->table->abbrevs.pos) {
+        printf("Invalid abbrev code (%lu), unable to parse die", abbrev_code);
+        return READ_DIE_FAIL;
+    }
+
+    const TagData* tag= TagData_arr_ptr(&rs->table->abbrevs, abbrev_code);
+    rs->tag= tag;
+
+    *rs->die= (DIE) {
+        .type= (DIE_TYPE){.abbrev= abbrev_code, .table= rs->table},
+        .nesting= rs->depth,
+        .data= DIEDATA_arr_construct(tag->attributes.pos),
+        .ref= die_start
+    };
+        
+    read_die_attrs(rs->data, tag, rs->die, rs->cu);
+    DIE_arr_add(&rs->cu->dies, *rs->die);
+    
+    return READ_DIE_SUCCESS;
+}
+
+int parse_cu_dies(uint8_t** data_, uint8_t* section_start_, const uint8_t* section_end_, CU* cu_, TableArray* abbrev_tables) {
+    const Table* table= find_table(abbrev_tables, cu_->header.abbrev_offset);
+
+    ReadState rs= (ReadState) {
+        .depth= 0,
+        .section_start= section_start_,
+        .section_end= section_end_,
+        .tag= NULL,
+        .cu= cu_,
+        .data= data_,
+        .die= NULL,
+        .table= table
+    };
+
+    while (*rs.data < rs.section_end) {
+        DIE die;
+        rs.die= &die;
+        const int res= read_cu_die(&rs);
+        
+        switch (res) {
+            case READ_DIE_END: break;
+            case READ_DIE_SENTINEL: continue;
+            case READ_DIE_FAIL: return FAIL;
+            case READ_DIE_SUCCESS: break;
+            default: assert(false);
+        }
+        
+        const bool is_cu= rs.tag->tag == DW_TAG_compile_unit;
+        const bool is_sub= rs.tag->tag == DW_TAG_subprogram;
+        const bool is_var= rs.tag->tag == DW_TAG_variable;
+        const bool is_type= tag_is_type(rs.tag->tag);
+
+        if (rs.tag->has_children) rs.depth++;
+        print_die(&die);
+        
+        if (is_sub) {
+            parse_sub(&rs, &rs.cu->vsubprogs);
+        } else if (is_var) {
+            parse_var(&rs, &rs.cu->globals);
+        } else if (is_type) {
+            parse_type(&rs, &rs.cu->types);
+        } else if (is_cu) {
+            add_cu_data_to_header(rs.cu, &die);
+        }
+    }
+
+    VSub_arr_sort_i(&rs.cu->vsubprogs);
 
     return SUCCESS;
 }
@@ -532,7 +1210,7 @@ void print_die(const DIE* die) {
 
     const Table* table= die->type.table;
     const TagData* tag= TagData_arr_ptr(&table->abbrevs, die->type.abbrev);
-    printf("<%.2u> %s\n", die->nesting, tag_string(tag->tag));
+    printf("<%.2u> %s %#lx\n", die->nesting, tag_string(tag->tag), die->ref);
 
     for (int i = 0; i < tag->attributes.pos; ++i) {
         const ATData* attr= ATData_arr_ptr(&tag->attributes, i);
@@ -544,7 +1222,7 @@ void print_die(const DIE* die) {
     }
 }
 
-FORM_DATA raa_form_data(uint8_t** start, const DW_FORM form, uint8_t addr_size, uint8_t offset_size) {
+FORM_DATA raa_form_data(uint8_t** start, const DW_FORM form, uint8_t addr_size, uint8_t offset_size, int64_t impl_const) {
     switch (form) {
         case DW_FORM_addr: {
             //  An object of appropriate size to hold an address on the target machine
@@ -623,12 +1301,12 @@ FORM_DATA raa_form_data(uint8_t** start, const DW_FORM form, uint8_t addr_size, 
         case DW_FORM_indirect: {
             // This contains within it the form
             const DW_FORM encoded_form= raa_uleb128(start).v;
-            return raa_form_data(start, encoded_form, addr_size, offset_size);
+            return raa_form_data(start, encoded_form, addr_size, offset_size, impl_const);
         }
 
         case DW_FORM_implicit_const: {
             // there is no value here
-            return (FORM_DATA) {};
+            return (FORM_DATA) {.constant_m64_s= impl_const};
         }
 
         case DW_FORM_loclistx:
