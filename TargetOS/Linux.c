@@ -374,6 +374,33 @@ ssize_t process_vm_writev(pid_t pid,
                           unsigned long riovcnt,
                           unsigned long flags);
 
+int64_t get_general_data_runtime(runtime_addr runtime_addr, uint8_t bytes) {
+    uint8_t* buff= malloc(bytes);
+    struct iovec l;
+    l.iov_base= buff;
+    l.iov_len= bytes;
+    struct iovec r;
+    r.iov_base= (void*)runtime_addr;
+    r.iov_len= bytes;
+
+    const ssize_t read= process_vm_readv(target.pid, &l, 1, &r, 1, 0);
+    if (read != bytes) {
+        show_err("Cannot read vm readv\n");
+    }
+
+    switch (bytes) {
+        case 1:
+            return *(int8_t*)l.iov_base;
+        case 2:
+            return *(int16_t*)l.iov_base;
+        case 4:
+            return *(int32_t*)l.iov_base;
+        case 8:
+            return *(int64_t*)l.iov_base;
+        default: assert(false);
+    }
+}
+
 Data get_data_runtime(runtime_addr addr, uint32_t bytes) {
     char* buff= malloc(bytes);
     struct iovec l;
@@ -401,17 +428,16 @@ Data get_data_virtual(virtual_addr addr, uint32_t bytes) {
 }
 
 const char* info_main_file_path() {
-    const DIE* main_cu= get_main_cu();
+    const CU* main_cu= get_main_cu();
     show_log("Got the main cu as %p\n", main_cu);
-
     if (main_cu == NULL) return NULL;
 
-    return cu_get_filename(main_cu);
+    return main_cu->header.filename;
 }
 
 StackFrame create_stack_frame(const uintptr_t pc, const GeneralRegs regs, bool pc_is_return_addr) {
     const uintptr_t v_addr= target.target_addr_runtime_to_virtual(pc);
-    const char* sub_name= get_subprog_name_at(v_addr);
+    VSub* sub= target.target_get_vsub_at(v_addr);
 
     AddrLineRes res;
     if (pc_is_return_addr)
@@ -422,7 +448,7 @@ StackFrame create_stack_frame(const uintptr_t pc, const GeneralRegs regs, bool p
         .pc= pc,
         .v_pc= v_addr,
         .line= res.line,
-        .subprog_name= sub_name,
+        .sub= sub,
         .regs= regs,
     };
 }
@@ -433,7 +459,7 @@ void show_stack(const Stack* stack) {
         const StackFrame* frame= StackFrame_arr_ptr(stack, i);
 
         show_log("\tFrame @ %#lx (v: %#lx)\n", frame->pc, frame->v_pc);
-        show_log("\t\tSubroutine: %s:%u\n", frame->subprog_name, frame->line);
+        show_log("\t\tSubroutine: %s:%u\n", frame->sub->subprog_name, frame->line);
         show_log("\t\tRegs: \n");
     }
 }
@@ -531,6 +557,7 @@ void linux_init_target(Target* target) {
 
     target->target_get_data_runtime= get_data_runtime;
     target->target_get_data_virtual= get_data_virtual;
+    target->target_get_general_data_runtime= get_general_data_runtime;
 
     target->target_info_main_file_path= info_main_file_path;
 
@@ -539,6 +566,7 @@ void linux_init_target(Target* target) {
     target->target_get_text_section= get_text_section;
     target->target_get_next_sub= next_sub;
     target->target_get_subroutine_name_at= get_subprog_name_at;
+    target->target_get_vsub_at= get_vsub_at;
 
     target->target_line_to_addr= line2startaddr;
     target->target_addr_to_line= addr2line;
