@@ -18,6 +18,7 @@
 static void print_program_header(Elf64_Phdr* header);
 static Section make_section(uint8_t* prog_data, int i);
 static bool section_valid(const Section* section);
+static const char* section_type_strs(uint64_t type);
 
 bool verify_special(const uint8_t* start) {
     return memcmp(start, ELFMAG, SELFMAG) == 0;
@@ -316,10 +317,11 @@ const char* get_program_header_type_string(unsigned int id) {
 
 void print_program_header(Elf64_Phdr* header) {
     show_log("Program header (%s)\n", get_program_header_type_string(header->p_type));
-    show_log("\t%c%c%c ",
-        header->p_flags & PF_R ? 'R' : ' ',
-        header->p_flags & PF_W ? 'W' : ' ',
-        header->p_flags & PF_X ? 'X' : ' '
+    show_log("\tvirt_addr: 0x%04lx %c%c%c \n",
+        header->p_vaddr,
+        header->p_flags & PF_R ? 'R' : '-',
+        header->p_flags & PF_W ? 'W' : '-',
+        header->p_flags & PF_X ? 'X' : '-'
     );
 //    show_log()
 }
@@ -393,10 +395,10 @@ int decode(FILE* elf) {
         const Elf64_Shdr section= ELF.sections[i];
 
         show_log(
-                "Section %s with type %u at %ld\n",
-                &sstring_table[section.sh_name],
-                section.sh_type,
-                section.sh_offset
+            "Section %s with type %s at %#lx\n",
+            &sstring_table[section.sh_name],
+            section_type_strs(section.sh_type),
+            section.sh_offset
         );
 
         if (section.sh_type == SHT_PROGBITS) {
@@ -406,9 +408,9 @@ int decode(FILE* elf) {
 
             for (int j = 0; j < section.sh_size; ++j) {
                 show_log("%02X ", prog_data[j]);
-                if (j % 16 == 15) show_newline();
+                if (j % 16 == 15) show_log("\n");
             }
-            show_newline();
+            show_log("\n");
 
             if (SECTION_NAME_MATCH(".debug_line")) {
                 ELF.section_map.debug_line= make_section(prog_data, i);
@@ -482,6 +484,45 @@ Section make_section(uint8_t* prog_data, const int i) {
 
 bool section_valid(const Section* section) {
     return section->data && section->header;
+}
+
+const char* section_type_strs(uint64_t type) {
+    switch (type) {
+        case SHT_NULL: return "NULL";
+        case SHT_PROGBITS: return "PROGBITS";
+        case SHT_SYMTAB: return "SYMTAB";
+        case SHT_STRTAB: return "STRTAB";
+        case SHT_RELA: return "RELA";
+        case SHT_HASH: return "HASH";
+        case SHT_DYNAMIC: return "DYNAMIC";
+        case SHT_NOTE: return "NOTE";
+        case SHT_NOBITS: return "NOBITS";
+        case SHT_REL: return "REL";
+        case SHT_SHLIB: return "SHLIB";
+        case SHT_DYNSYM: return "DYNSYM";
+        case SHT_INIT_ARRAY: return "INIT_ARRAY";
+        case SHT_FINI_ARRAY: return "FINI_ARRAY";
+        case SHT_PREINIT_ARRAY: return "PREINIT_ARRAY";
+        case SHT_GROUP: return "GROUP";
+        case SHT_SYMTAB_SHNDX: return "SYMTAB_SHNDX";
+        case SHT_NUM: return "NUM";
+        case SHT_LOOS: return "LOOS";
+        case SHT_GNU_ATTRIBUTES: return "GNU_ATTRIBUTES";
+        case SHT_GNU_HASH: return "GNU_HASH";
+        case SHT_GNU_LIBLIST: return "GNU_LIBLIST";
+        case SHT_CHECKSUM: return "CHECKSUM";
+        case SHT_LOSUNW: return "LOSUNW";
+        case SHT_SUNW_COMDAT: return "SUNW_COMDAT";
+        case SHT_SUNW_syminfo: return "SUNW_syminfo";
+        case SHT_GNU_verdef: return "GNU_verdef";
+        case SHT_GNU_verneed: return "GNU_verneed";
+        case SHT_GNU_versym: return "GNU_versym";
+        case SHT_LOPROC: return "LOPROC";
+        case SHT_HIPROC: return "HIPROC";
+        case SHT_LOUSER: return "LOUSER";
+        case SHT_HIUSER: return "HIUSER";
+        default: return "UNKNOWN";
+    }
 }
 
 const char* form_strs(DW_FORM form) {
