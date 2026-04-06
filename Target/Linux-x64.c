@@ -21,6 +21,7 @@
 #include <sys/uio.h>
 
 #include "Errors.h"
+#include "DWARF/Balin.h"
 #include "Palantir/Palantir.h"
 #include "Saruman/Saruman.h"
 
@@ -142,7 +143,7 @@ long long readd_sw_bp(BPInfo* bp) {
     return res;
 }
 
-long long place_bp_(uintptr_t address, uint32_t line, BP_REASON reason, uintptr_t cfa, void (*callback)(void* data), void* data) {
+long long place_bp_(uintptr_t address, uint32_t line, BP_REASON reason, uintptr_t cfa, void (*callback)(void* data), void* data, bool defer) {
     long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
 
     bool bp_used[4]= {0};
@@ -196,7 +197,7 @@ long long place_bp_(uintptr_t address, uint32_t line, BP_REASON reason, uintptr_
             .addr= address,
             .line= line,
             .type= BP_HARDWARE,
-            .data.bp= free_bp
+            .data.bp= free_bp,
         },
         reason
     );
@@ -207,7 +208,8 @@ place_bp_end:
             .reason= reason,
             .cfa= cfa,
             .callback= callback,
-            .data= data
+            .data= data,
+            .defer= defer
         });
     }
 
@@ -222,11 +224,15 @@ long long place_temp_bp(uintptr_t address, BP_REASON reason) {
 }
 
 long long place_bp(uintptr_t address, uint32_t line, BP_REASON reason) {
-    return place_bp_(address, line, reason, -1, NULL, NULL);
+    return place_bp_(address, line, reason, -1, NULL, NULL, false);
 }
 
 long long place_bp_with_cfa(uintptr_t addr, uintptr_t cfa, BP_REASON reason, void (*callback)(void* data), void* data) {
-    return place_bp_(addr, -1, reason, cfa, callback, data);
+    return place_bp_(addr, -1, reason, cfa, callback, data, false);
+}
+
+long long place_bp_defered(uintptr_t addr, uintptr_t cfa, BP_REASON reason, void (*callback)(void* data), void* data) {
+    return place_bp_(addr, -1, reason, cfa, callback, data, true);
 }
 
 void breakpoint_hit_cleanup() {
@@ -453,7 +459,7 @@ typedef struct XSaveRegisters {
     __m128 xmm_regs[16];
     __m128 ymm_hi_regs[16];
     struct {
-        uint8_t val[32];
+        __m128 val[2];
     } zmm_hi_regs[16];
     struct {
         __m128 val[4];
@@ -461,6 +467,11 @@ typedef struct XSaveRegisters {
 
     uint64_t k_regs[8];
 } XSaveRegisters;
+
+typedef struct CombinedRegs {
+    GeneralRegs general;
+    XSaveRegisters xsave;
+} CombinedRegs;
 
 // there are currently 19 defined state components Sec. 13.1 XSAVE-SUPPORTED FEATURES AND STATE-COMPONENT BITMAPS
 #define MAX_DEFINED_STATE_COMP 19
@@ -548,7 +559,7 @@ void set_xsave_data(const uint8_t* data, XSaveRegisters* regs) {
     }
 }
 
-XSaveRegisters get_all_regs(bool* succ) {
+XSaveRegisters get_xsave_regs(bool* succ) {
     // the size of this is slightly dynamic based on the processor features
     //  an assumption could be avx2, but this should support everything
     const CPUID_XSaveExtendedInfoRes info= cpuid_query(CPUID_QUERY_XSAVE_INFO, CPUID_QUERY_XSAVE_LEAF_EXT).xsave_ext_info;
@@ -588,6 +599,121 @@ XSaveRegisters get_all_regs(bool* succ) {
     }
 
     set_xsave_data(extended_data, &regs);
+
+    *succ= true;
+    return regs;
+}
+
+void general_reg_instance(const char* name, int64_t value, VRegInstanceArray* arr) {
+    VRegInstance inst;
+    inst.name= name;
+    inst.value= malloc(20);
+
+    snprintf(inst.value, 19, "%ld", value);
+
+    VRegInstance_arr_add(arr, inst);
+}
+
+void get_all_generaL_reg_instance(GeneralRegs* regs, VRegInstanceArray* arr) {
+    general_reg_instance("r15", regs->r15, arr);
+    general_reg_instance("r14", regs->r14, arr);
+    general_reg_instance("r13", regs->r13, arr);
+    general_reg_instance("r12", regs->r12, arr);
+    general_reg_instance("rbp", regs->rbp, arr);
+    general_reg_instance("rbx", regs->rbx, arr);
+    general_reg_instance("r11", regs->r11, arr);
+    general_reg_instance("r10", regs->r10, arr);
+    general_reg_instance("r9", regs->r9, arr);
+    general_reg_instance("r8", regs->r8, arr);
+    general_reg_instance("rax", regs->rax, arr);
+    general_reg_instance("rcx", regs->rcx, arr);
+    general_reg_instance("rdx", regs->rdx, arr);
+    general_reg_instance("rsi", regs->rsi, arr);
+    general_reg_instance("rdi", regs->rdi, arr);
+    general_reg_instance("orig_rax", regs->orig_rax, arr);
+    general_reg_instance("rip", regs->rip, arr);
+    general_reg_instance("cs", regs->cs, arr);
+    general_reg_instance("eflags", regs->eflags, arr);
+    general_reg_instance("rsp", regs->rsp, arr);
+    general_reg_instance("ss", regs->ss, arr);
+    general_reg_instance("fs_base", regs->fs_base, arr);
+    general_reg_instance("gs_base", regs->gs_base, arr);
+    general_reg_instance("ds", regs->ds, arr);
+    general_reg_instance("es", regs->es, arr);
+    general_reg_instance("fs", regs->fs, arr);
+    general_reg_instance("gs", regs->gs, arr);
+}
+
+void vector_reg_instance(const char* name, uint8_t* bytes, uint8_t size, VRegInstanceArray* arr) {
+    VRegInstance inst;
+    inst.name= name;
+
+    char* value= malloc(2 + 2 * size + 1);
+    value[0]= '0';
+    value[1]= 'x';
+    for (int i = 0; i < size; ++i) {
+        snprintf(&value[1 + i * 2], 3, "%02x", bytes[i]);
+    }
+    inst.value= value;
+    VRegInstance_arr_add(arr, inst);
+}
+
+void get_all_xsave_reg_instance(XSaveRegisters* regs, VRegInstanceArray* arr) {
+    size_t len= sizeof("xmm") + 3;
+    for (int i = 0; i < 16; ++i) {
+        char* name= malloc(len);
+        snprintf(name, len, "xmm%u", i);
+        vector_reg_instance(name, (uint8_t*)&regs->xmm_regs[i], sizeof(__m128), arr);
+    }
+
+    if (regs->has_avx) {
+        for (int i = 0; i < 16; ++i) {
+            __m128 ymm_value[2];
+            ymm_value[0]= regs->xmm_regs[i];
+            ymm_value[1]= regs->ymm_hi_regs[i];
+
+            char* name= malloc(len);
+            snprintf(name, len, "ymm%u", i);
+            vector_reg_instance(name, (uint8_t*)ymm_value, sizeof(__m128) * 2, arr);
+        }
+    }
+    if (regs->has_avx512_zmmhis) {
+        for (int i = 0; i < 16; ++i) {
+            __m128 zmm_value[4];
+            zmm_value[0]= regs->xmm_regs[i];
+            zmm_value[1]= regs->ymm_hi_regs[i];
+            zmm_value[2]= regs->zmm_hi_regs[i].val[0];
+            zmm_value[3]= regs->zmm_hi_regs[i].val[1];
+
+            char* name= malloc(len);
+            snprintf(name, len, "zmm%u", i);
+            vector_reg_instance(name, (uint8_t*)zmm_value, sizeof(__m128) * 4, arr);
+        }
+    }
+    if (regs->has_avx512_hi16_zmms) {
+        for (int i = 0; i < 16; ++i) {
+            char* name= malloc(len);
+            snprintf(name, len, "zmm%u", 16 + i);
+            vector_reg_instance(name, (uint8_t*)&regs->zmm_hi16_regs[i].val, sizeof(__m128) * 4, arr);
+        }
+    }
+}
+
+VRegInstanceArray get_all_regs_instance(AllRegs* regs) {
+    VRegInstanceArray res= VRegInstance_arr_create();
+
+    get_all_generaL_reg_instance(&regs->general, &res);
+    get_all_xsave_reg_instance(&regs->xsave, &res);
+
+    return res;
+}
+
+AllRegs get_all_regs(bool* succ) {
+    AllRegs regs;
+    regs.general= target.target_get_general_regs(succ);
+
+    if (!succ) return (AllRegs){0};
+    regs.xsave= get_xsave_regs(succ);
 
     return regs;
 }
@@ -762,7 +888,7 @@ Reg get_register_value(const uint16_t register_id) {
     uint64_t val= get_general_reg_value(register_id, &succ);
     if (succ) return (Reg){.type= REGVAL_GENERAL, .value= {.general= val}};
 
-    XSaveRegisters all_regs= get_all_regs(&succ);
+    XSaveRegisters all_regs= get_xsave_regs(&succ);
     if (!succ) return (Reg){.type= REGVAL_ERROR};
 
     Reg res= {.type= REGVAL_VECTOR, .value= {.vector= {0}}};
@@ -881,6 +1007,10 @@ bool set_reg_struct_value(GeneralRegs* regs, uint16_t register_id, uint64_t valu
     }
 }
 
+void* get_main_cu_wrapper() {
+    return get_main_cu();
+}
+
 int linux_x64_init_target(Target* t) {
     linux_init_target(t);
 
@@ -900,6 +1030,9 @@ int linux_x64_init_target(Target* t) {
     t->target_get_general_reg_at= get_general_reg_at;
     t->target_get_labelled_regs= get_labelled_regs;
     t->target_set_reg_struct_value= set_reg_struct_value;
+    t->target_get_all_regs_instance= get_all_regs_instance;
+
+    t->target_check_comparison= check_comparison;
 
     t->target_place_temp_bp= place_temp_bp;
     t->target_aligned_write= aligned_write;
@@ -908,6 +1041,14 @@ int linux_x64_init_target(Target* t) {
     t->target_cf_main= cf_main;
 
     t->target_place_bp_with_cfa= place_bp_with_cfa;
+    t->target_place_bp_defered= place_bp_defered;
+
+    t->target_get_main_cu= get_main_cu_wrapper;
+    t->target_get_selected_cu_sub_iter= get_selected_cu_sub_iter;
+    t->target_set_selected_cu= set_selected_cu;
+    t->target_get_selected_cu= get_selected_cu;
+    t->target_get_all_cu_filenames= get_all_cu_filenames;
+    t->target_create_var_instance_string= create_var_instance_value_string;
 
     return 0;
 }
