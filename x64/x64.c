@@ -1,7 +1,11 @@
 #include "x64.h"
 
-int disassemble(const char** output){
+int disassemble(const char** output, uintptr_t rip){
 	reset();
+
+	data_rip._value= rip;
+	data_rip.parsed= true;
+
 	while (parse_lprefix(&top_stream)) {}
 
 	parse_prefix(&top_stream);
@@ -24,6 +28,8 @@ void reset() {
 	data_regx._value= 0;
 	data_sibs.parsed= false;
 	data_sibs._value= 0;
+	data_rip.parsed= false;
+	data_rip._value= 0;
 	data_imm8.parsed= false;
 	data_imm8._value= 0;
 	data_imm16.parsed= false;
@@ -356,7 +362,7 @@ void eval_string_165_field_0(Buffer* buff) {
 }
 
 void eval_string_166_field_0(Buffer* buff) {
-	buffer_concat(buff, data_to_string(data_imm32._value + 0x5));
+	buffer_concat(buff, data_to_string(data_rip._value + data_imm32._value + 0x5));
 }
 
 void eval_string_167_field_0(Buffer* buff) {
@@ -396,11 +402,11 @@ void eval_string_172_field_0(Buffer* buff) {
 }
 
 void eval_string_173_field_0(Buffer* buff) {
-	buffer_concat(buff, data_to_string(data_imm8._value + 0x2));
+	buffer_concat(buff, data_to_string(data_rip._value + data_imm8._value + 0x2));
 }
 
 void eval_string_174_field_0(Buffer* buff) {
-	buffer_concat(buff, data_to_string(data_imm32._value + 0x2));
+	buffer_concat(buff, data_to_string(data_rip._value + data_imm32._value + 0x2));
 }
 
 void eval_string_175_field_0(Buffer* buff) {
@@ -416,7 +422,7 @@ void eval_string_180_field_0(Buffer* buff) {
 }
 
 void eval_string_180_field_1(Buffer* buff) {
-	buffer_concat(buff, data_to_string(data_imm8._value + 0x2));
+	buffer_concat(buff, data_to_string(data_rip._value + data_imm8._value + 0x2));
 }
 
 void eval_string_181_field_0(Buffer* buff) {
@@ -424,7 +430,7 @@ void eval_string_181_field_0(Buffer* buff) {
 }
 
 void eval_string_181_field_1(Buffer* buff) {
-	buffer_concat(buff, data_to_string(data_imm32._value + 0x2));
+	buffer_concat(buff, data_to_string(data_rip._value + data_imm32._value + 0x2));
 }
 
 void eval_string_182_field_0(Buffer* buff) {
@@ -616,6 +622,18 @@ bool parse_sibs(ByteStream* stream) {
 	const DATA_SIBS res= parse_sibs_(stream);
 	if (!res.parsed) return false;
 	data_sibs= res;
+	return true;
+}
+
+DATA_RIP parse_rip_(ByteStream* stream) {
+	uint64_t res= read_bits(stream, 64);
+	return (DATA_RIP){._value= res, .parsed= true};
+}
+
+bool parse_rip(ByteStream* stream) {
+	const DATA_RIP res= parse_rip_(stream);
+	if (!res.parsed) return false;
+	data_rip= res;
 	return true;
 }
 
@@ -2758,7 +2776,7 @@ ParseRet parse_CALL_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BYTE(0xe8, stream) && parse_imm32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("CALL rip + {imm32+5}", eval_string_166_field_0))); /* CALL rip + {imm32+5} */
+        return PARSE_SUCC(to_aval(evaluate_string("CALL {rip+imm32+5}", eval_string_166_field_0))); /* CALL {rip+imm32+5} */
     }
     stream->pointer= pos_save_0;
 
@@ -2840,14 +2858,14 @@ ParseRet parse_JMP_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BYTE(0xeb, stream) && parse_imm8(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("JMP rip+{imm8+2}", eval_string_173_field_0))); /* JMP rip+{imm8+2} */
+        return PARSE_SUCC(to_aval(evaluate_string("JMP {rip+imm8+2}", eval_string_173_field_0))); /* JMP {rip+imm8+2} */
     }
     stream->pointer= pos_save_0;
 
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BYTE(0xe9, stream) && parse_imm32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("JMP rip+{imm32+2}", eval_string_174_field_0))); /* JMP rip+{imm32+2} */
+        return PARSE_SUCC(to_aval(evaluate_string("JMP {rip+imm32+2}", eval_string_174_field_0))); /* JMP {rip+imm32+2} */
     }
     stream->pointer= pos_save_1;
 
@@ -2949,14 +2967,14 @@ ParseRet parse_JCC_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BITS(0b0111, stream) && parse_cc(stream) && parse_imm8(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("J{cc} rip+{imm8+2}", eval_string_180_field_0, eval_string_180_field_1))); /* J{cc} rip+{imm8+2} */
+        return PARSE_SUCC(to_aval(evaluate_string("J{cc} {rip+imm8+2}", eval_string_180_field_0, eval_string_180_field_1))); /* J{cc} {rip+imm8+2} */
     }
     stream->pointer= pos_save_0;
 
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BYTE(0xf, stream) && EXPECT_BITS(0b1000, stream) && parse_cc(stream) && parse_imm32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("J{cc} rip+{imm32+2}", eval_string_181_field_0, eval_string_181_field_1))); /* J{cc} rip+{imm32+2} */
+        return PARSE_SUCC(to_aval(evaluate_string("J{cc} {rip+imm32+2}", eval_string_181_field_0, eval_string_181_field_1))); /* J{cc} {rip+imm32+2} */
     }
     stream->pointer= pos_save_1;
 

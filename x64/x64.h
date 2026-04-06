@@ -226,6 +226,13 @@ typedef struct DATA_SIBS {
 DATA_SIBS data_sibs= {0};
 bool parse_sibs(ByteStream* stream);
 
+typedef struct DATA_RIP {
+	uint8_t parsed: 1;
+	uint64_t _value: 64;
+} DATA_RIP;
+DATA_RIP data_rip= {0};
+bool parse_rip(ByteStream* stream);
+
 typedef struct DATA_IMM8 {
 	uint8_t parsed: 1;
 	uint8_t _value: 8;
