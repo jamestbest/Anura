@@ -37,6 +37,13 @@ const unsigned int LEN_MAP[4]= {
     [0b11]= 4
 };
 
+const char* BP_REASON_STRS[BP_REASON_COUNT]= {
+    [BP_REASON_STEP_OUT]= "STEP OUT",
+    [BP_REASON_STEP_OVER]= "STEP OVER",
+    [BP_REASON_BREAK_CAUSE]= "BREAK CAUSE",
+    [BP_REASON_USER]= "USER"
+};
+
 void hlog(const char* message, ...);
 
 void print_bp_status(long long r7, unsigned int reg, const char* prefix) {
@@ -120,11 +127,21 @@ int vsub_cmp(const uintptr_t a, const uintptr_t b) {
     return a - b;
 }
 
+int64_t vtype_cmp(const int64_t a, const int64_t b) {
+    return a - b;
+}
+
 ARRAY_ADD(BPInfo, BPInfo)
 ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 ARRAY_ADD(StackFrame, StackFrame)
 ARRAY_ADD(BP, BP)
 ARRAY_ADD_CMP(VSub, VSub, vsub_cmp, vaddr_start)
+ARRAY_ADD(VTypeStructElement, StructElem)
+ARRAY_ADD_CMP(VVar, VVar, strcmp, name);
+ARRAY_ADD_CMP(VType, VType, vtype_cmp, ref);
+ARRAY_ADD(EnumElement, EnumElement);
+ARRAY_ADD(VVarInstance, VVarInstance)
+ARRAY_ADD(VRegInstance, VRegInstance)
 
 BPAddressInfoArray bp_info;
 
@@ -252,7 +269,22 @@ void print_breakpoints() {
                 show_log("No data");
                 break;
         }
-        show_log(" on line %u\n", bp->line);
+        show_log(" on line %u", bp->line);
+
+        if (addr_info->bps.pos != 0) {
+            for (int i = 0; i < addr_info->bps.pos; ++i) {
+                BP* bp= BP_arr_ptr(&addr_info->bps, i);
+                show_log("      * BP for %s CFA: %#lx Callback: %p Data: %p Defered: %s\n",
+                    BP_REASON_STRS[bp->reason],
+                    bp->cfa,
+                    bp->callback,
+                    bp->data,
+                    bp->defer ? "True" : "False"
+                );
+            }
+        } else {
+            show_log("\n");
+        }
     }
 }
 

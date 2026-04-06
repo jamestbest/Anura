@@ -52,13 +52,17 @@ typedef enum BP_REASON {
     BP_REASON_STEP_OUT,
     BP_REASON_BREAK_CAUSE,
     BP_REASON_USER,
+    BP_REASON_COUNT
 } BP_REASON;
+
+extern const char* BP_REASON_STRS[BP_REASON_COUNT];
 
 typedef struct BP {
     BP_REASON reason;
     uintptr_t cfa;
     void (*callback)(void* data);
     void* data;
+    bool defer;
 } BP;
 
 ARRAY_PROTO(BP, BP)
@@ -100,6 +104,7 @@ typedef enum ACTION_TYPE {
     ACTION_CF_CONTINUE,
 
     ACTION_AT_ATTACH, // ACTION_AT is ATTACH requests (attaching, detaching, running)
+    ACTION_AT_OPEN,
     ACTION_AT_QUIT,
 
     ACTION_DS_REGS, // ACTION_DS is DISPLAY requests
@@ -126,6 +131,14 @@ typedef union ACTION_DATA {
     struct {
         const char* filepath;
     } AT_ATTACH;
+
+    struct {
+        bool is_simple;
+    } BP_CAUSE;
+
+    struct {
+        const char* path;
+    } AT_OPEN;
 } ACTION_DATA;
 
 typedef struct Action {
@@ -171,6 +184,7 @@ typedef struct LabelledRegs {
 #if ANURA_TARGET == TARGET_LINUX_X64
 #include <sys/user.h>
 typedef struct user_regs_struct GeneralRegs;
+typedef struct CombinedRegs AllRegs;
 typedef enum FLAGS {
     FLAG_ZERO= 0x40
 } FLAGS;
@@ -186,19 +200,16 @@ typedef enum COMPARISONS {
 
 ARRAY_PROTO(GeneralRegs, GeneralRegs)
 
-typedef struct StackFrame {
-    uintptr_t pc;
-    uintptr_t v_pc;
-    uint32_t line;
-    const char* subprog_name;
-    GeneralRegs regs;
-    uintptr_t cfa;
-    uintptr_t end_stack_pointer;
-    uint8_t* data;
-} StackFrame;
+typedef struct Data {
+    uint8_t* raw_data;
+    uint32_t data_size;
+} Data;
 
-ARRAY_PROTO(StackFrame, StackFrame)
-typedef StackFrameArray Stack;
+typedef struct VRegInstance {
+    const char* name;
+    char* value;
+} VRegInstance;
+ARRAY_PROTO(VRegInstance, VRegInstance)
 
 typedef struct VSection {
     uintptr_t vaddr_start;
@@ -207,16 +218,166 @@ typedef struct VSection {
     uint8_t* data;
 } VSection;
 
+typedef enum VTypeType {
+    VTYPE_BASE,
+    VTYPE_STRUCTURE,
+    VTYPE_POINTER,
+    VTYPE_ENUM,
+    VTYPE_CONST,
+    VTYPE_TYPEDEF
+} VTypeType;
+
+typedef struct VTypeBaseData {
+    uint8_t encoding;
+    const char* name;
+} VTypeBaseData;
+
+typedef struct VTypeStructElement {
+    const char* name;
+    struct VType* type;
+    uint64_t type_ref;
+    uint32_t offset;
+} VTypeStructElement;
+ARRAY_PROTO(VTypeStructElement, StructElem)
+
+typedef struct VTypeStructData {
+    const char* name;
+    StructElemArray elements;
+} VTypeStructData;
+
+typedef struct VTypePointerData {
+    struct VType* type;
+    uint64_t type_ref;
+} VTypePointerData;
+
+typedef struct EnumElement {
+    const char* name;
+    int64_t value;
+} EnumElement;
+ARRAY_PROTO(EnumElement, EnumElement);
+
+typedef struct VTypeEnumData {
+    const char* name;
+    uint8_t encoding;
+    struct VType* base_type;
+    uint64_t type_ref;
+    EnumElementArray elements;
+} VTypeEnumData;
+
+typedef struct VTypeConstData {
+    uint64_t type_ref;
+    struct VType* type;
+} VTypeConstData;
+
+typedef struct VTypeTypedef {
+    uint64_t type_ref;
+    struct VType* type;
+} VTypeTypedef;
+
+typedef union VTypeData {
+    VTypeBaseData base;
+    VTypeStructData structure;
+    VTypePointerData pointer;
+    VTypeEnumData enumerator;
+    VTypeConstData constant_mod;
+    VTypeTypedef type_def;
+} VTypeData;
+
+typedef struct VType {
+    uint64_t ref;
+    VTypeType type;
+    VTypeData data;
+    uint16_t byte_size;
+} VType;
+int64_t vtype_cmp(const int64_t a, const int64_t b);
+ARRAY_PROTO_CMP(VType, VType, vtype_cmp, ref);
+
+typedef enum VLocationType {
+    VLOCATION_REGISTER,
+    VLOCATION_REG_OFF,
+    VLOCATION_CONST,
+    VLOCATION_ADDR,
+    VLOCATION_NO_ACCESS,
+    VLOCATION_EXPR
+} VLocationType;
+
+typedef union VLocationData {
+    uint16_t register_id;
+    struct {
+        uint16_t register_id;
+        int64_t offset;
+    } reg_off;
+    int64_t constant;
+    uintptr_t vaddr;
+    void* expr;
+} VLocationData;
+
+typedef struct VLocation {
+    VLocationType type;
+    VLocationData data;
+} VLocation;
+
+typedef struct VVar {
+    const char* name;
+    uint32_t line;
+    uint32_t col;
+    VType* type;
+    uint64_t type_ref;
+    VLocation loc;
+} VVar;
+ARRAY_PROTO_CMP(VVar, VVar, strcmp, name);
+
+typedef enum ValueType {
+    VALUE_NONE,
+    VALUE_GENERAL_VALUE,
+    VALUE_DATA
+} ValueType;
+
+typedef union ValueData {
+    int64_t general;
+    Data data;
+} ValueData;
+
+typedef struct Value {
+    ValueType type;
+    ValueData data;
+} Value;
+
+typedef struct VVarInstance {
+    VVar* var;
+    Value value;
+} VVarInstance;
+ARRAY_PROTO(VVarInstance, VVarInstance)
+
 typedef struct VSub {
     uintptr_t vaddr_start;
     uintptr_t vaddr_end;
     const char* subprog_name;
+    VVarArray vars;
+    VVarArray params;
 } VSub;
+
+typedef struct StackFrame {
+    uintptr_t pc;
+    uintptr_t v_pc;
+    uint32_t line;
+    VSub* sub;
+    GeneralRegs regs;
+    uintptr_t cfa;
+    uintptr_t end_stack_pointer;
+    uint8_t* data;
+    VVarInstanceArray vars;
+    VVarInstanceArray args;
+} StackFrame;
+
+ARRAY_PROTO(StackFrame, StackFrame)
+typedef StackFrameArray Stack;
 
 int vsub_cmp(const uintptr_t a, const uintptr_t b);
 ARRAY_PROTO_CMP(VSub, VSub, vsub_cmp, vaddr_start);
 
 typedef struct SubIter {
+    struct CU* cu;
     size_t idx;
 } SubIter;
 
