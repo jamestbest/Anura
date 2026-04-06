@@ -1,0 +1,31 @@
+%YAML 1.2
+---
+name: ISDL
+file_extensions: [isdl]
+scope: source.isdl
+
+contexts:
+  main:
+    - match: \b(BIT|BITS|BYTE|BYTES)\b
+      scope: storage.type
+    - match: \b(STRUCTURE|VAR|WITH|OF|MAP|ALIAS|FLAT|DATA|CALCULATE|RULE|RIGHT|ON|FLAG|META)\b
+      scope: keyword.control
+    - match: \b(if)\b
+      scope: keyword.control  
+    - match: '"'
+      push: string
+    - match: '='
+      scope: keyword.operator.assignment
+    - match: '[{}()\[\]]'
+      scope: punctuation.section
+    - match: '\.'
+      scope: punctuation.accessor
+    - match: \b(0x[0-9A-Fa-f]+|\d+)\b
+      scope: constant.numeric
+    - match: \b[a-zA-Z_][a-zA-Z0-9_]*\b
+      scope: entity.name
+  string:
+    - meta_scope: string.quoted.double
+    - match: '"'
+      pop: true
+    

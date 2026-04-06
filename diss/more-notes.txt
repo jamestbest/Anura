@@ -1,0 +1,41 @@
+history of debuggers
+ where they started
+ the different types-- software/hardware
+
+support for debuggers
+ OS support
+
+existing debuggers
+ different types -- gui/backend
+
+different features of a basic debugger
+
+features of Anura
+ - ISDL
+  - Why it's needed
+  - existing implementations (CHUMP and SLEIGH)
+    - where ISDL sits between them
+  - ISDL statements
+  - Changes over time
+    - Change to DATA statement
+    - Addition of MAP, WITH, and VAR, Endianness
+
+ - Break cause
+
+
+only the latest is marked as alive the rest are split but dead, to allow for stack capture
+
+
+sometimes dataflow and the control flow are not matched and we have to explicitly say
+go to my child node and add the markers there as well -- this is what PASS is forarguime,emnments and starting position of functions iwwith arguments
+
+reason for going step by step - to avoid hitting functions early
+funcA as a dependancy and it's big but several calls to funcA before that aren't needed
+single stepping allows avoiding this
+This could also be done by going up to headers and waiting for hits before going into headers
+You can do this in the current impl by having all as PASS except the ones before headers
+
+
+writing about the testing for ISDL by running it on programs etc and comparing to objdump
+
+rip in ISDL
