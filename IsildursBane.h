@@ -7,4 +7,14 @@
 
 void* control_thread_create(void* data);
 
+typedef enum CONTROL_STATE {
+    STATE_NORMAL,
+    STATE_STEP_INTO, // we handle SIG TRAPS and send single step until
+    STATE_STEP_OVER,
+    STATE_STEP_OUT,
+    STATE_BREAK_CAUSE
+} CONTROL_STATE;
+
+void change_state(CONTROL_STATE state);
+
 #endif //ISILDURSBANE_H

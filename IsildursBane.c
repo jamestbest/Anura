@@ -31,13 +31,6 @@ typedef enum ACTION_HANDLE_RES {
     ACTION_HANDLE_CONTINUE
 } ACTION_HANDLE_RES;
 
-typedef enum CONTROL_STATE {
-    STATE_NORMAL,
-    STATE_STEP_INTO, // we handle SIG TRAPS and send single step until
-    STATE_STEP_OVER,
-    STATE_STEP_OUT,
-} CONTROL_STATE;
-
 CONTROL_STATE state= STATE_NORMAL;
 uint64_t step_into_line= 0;
 
@@ -50,6 +43,10 @@ typedef struct StepOverInfo {
 StepOverInfo step_over_info;
 
 uintptr_t step_out_addr= -1;
+
+void change_state(const CONTROL_STATE new_state) {
+    state= new_state;
+}
 
 ACTION_HANDLE_RES handle_cf_single_step() {
     const long long res= target.target_cf_single_step_assembly();
@@ -248,9 +245,11 @@ ACTION_HANDLE_RES handle_action(Action* action) {
         }
 
         case ACTION_BP_CAUSE: {
-            break_on_cause("res", 34);
+            state= STATE_BREAK_CAUSE;
+            break_on_cause(action->data.BP_CAUSE.is_simple);
 
-            return ACTION_HANDLE_CONTINUE;
+            target.target_cf_continue();
+            return ACTION_HANDLE_PROC_WAIT;
         }
 
         case ACTION_CF_SINGLE_STEP: {
@@ -324,6 +323,10 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             ptrace(PTRACE_KILL, target.pid, NULL, 0);
 
             return ACTION_HANDLE_EXIT;
+        case ACTION_AT_OPEN: {
+            open_program(action->data.AT_OPEN.path);
+            return ACTION_HANDLE_PROC_WAIT;
+        }
         default: assert(false);
     }
 }
@@ -367,6 +370,7 @@ ACTION_HANDLE_RES handle_signal_trap(const BPAddressInfo* bp) {
                 case STATE_STEP_INTO: return handle_step_into_step();
                 case STATE_STEP_OVER: return handle_step_over();
                 case STATE_STEP_OUT: return handle_step_out();
+                case STATE_BREAK_CAUSE: return ACTION_HANDLE_CONTINUE;
                 case STATE_NORMAL: {
                     show_log("Recieved trap in normal state\n");
                     break;
@@ -390,6 +394,9 @@ void* control_thread_create(void* data) {
 
         if (action->type == ACTION_AT_ATTACH) {
             control_target(action->data.AT_ATTACH.filepath);
+        }
+        if (action->type == ACTION_AT_OPEN) {
+            open_program(action->data.AT_OPEN.path);
         }
 
         if (action->type == ACTION_AT_QUIT) return NULL;
@@ -522,6 +529,20 @@ end_q_stat_loop1:;
             for (int i = 0; i < bp_copy.pos; ++i) {
                 const BP* point= BP_arr_ptr(&bp_copy, i);
 
+                if (point->defer) {
+                    continue;
+                }
+                if (point->cfa == -1 || point->cfa == cfa) {
+                    if (point->callback) {
+                        point->callback(point->data);
+                    }
+                }
+            }
+
+            for (int i = 0; i < bp_copy.pos; ++i) {
+                const BP* point= BP_arr_ptr(&bp_copy, i);
+
+                if (!point->defer) continue;
                 if (point->cfa == -1 || point->cfa == cfa) {
                     if (point->callback) {
                         point->callback(point->data);
@@ -533,6 +554,11 @@ end_q_stat_loop1:;
         }
 
         target.target_breakpoint_hit_cleanup();
+
+        if (state == STATE_BREAK_CAUSE) {
+            target.target_cf_continue();
+            goto proc_wait_loop;
+        }
 
         if (WIFSTOPPED(status)) {
             hlog("Target stopped by signal %d\n", WSTOPSIG(status));
