@@ -4,9 +4,6 @@ project(Anura C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_BUILD_TYPE Debug)
 
-#add_compile_options(-fsanitize=address)
-#add_link_options(-fsanitize=address)
-
 add_executable(BreakSimple
     breakcause/break_cause_simple.c
 )
@@ -59,7 +56,11 @@ add_executable(Anura main.c shared/Array.c
 
         x64/x64.c
         MtDoom/output/default.c
+        DWARF/Expr_eval.c
 )
+
+target_compile_options(Anura PRIVATE -fsanitize=address)
+target_link_options(Anura PRIVATE -fsanitize=address)
 
 add_executable(MtDoom
         MtDoom/output/default.c
@@ -130,6 +131,8 @@ target_compile_options(Palantir PRIVATE ${GTK4_CFLAGS_OTHER})
 target_include_directories(Anura PRIVATE ${GTK4_INCLUDE_DIRS})
 target_link_libraries(Anura PRIVATE ${GTK4_LIBRARIES})
 target_compile_options(Anura PRIVATE ${GTK4_CFLAGS_OTHER})
+
+target_compile_options(BreakSimple PRIVATE -O0)
 
 message(STATUS "GTSV_INCLUDE_DIRS=${GTSV_INCLUDE_DIRS}")
 message(STATUS "GTSV_LIBRARIES=${GTSV_LIBRARIES}")
