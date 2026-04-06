@@ -35,6 +35,7 @@ VAR default_opmode OF opmode = 32bit
 DATA ow 1 bit
 DATA regx 3 BITS
 DATA sibs 2 BITS
+DATA rip 8 BYTES
 
 DATA imm8 1 BYTE
 DATA imm16 2 BYTES
@@ -74,8 +75,12 @@ ALIAS prefix= {
     // EVEX
 }
 
-ALIAS lp1 1 BYTE= {
+ALIAS p_lock= {
   0xF0= "LOCK"
+}
+
+ALIAS lp1 1 BYTE= {
+  p_lock
   0xF2= "REPNE"  // REPNE,REPNZ,BND; BND has some restrictions to do with what the instr is
   0xF3= "REP"
 }
@@ -329,8 +334,8 @@ FLAT ALIAS ModRMS= {
 
 ALIAS MOV= {
   1000 10 ms ~ow ModRM= "MOV {ModRMS}"
-  1100 011 ~ow Mod 000 rm immM32 = "MOV {rm_ptr}, {immM32}"
-  1011 ~ow regop imm= "MOV {regop}, {imm}" //todo fix this regT
+  1100 011 ~ow ModRM_0 immM32 = "MOV {rm_ptr}, {immM32}"
+  1011 ~ow regop imm= "MOV {regop}, {imm}"
 }
 
 // ALIAS regA= "RAX"
@@ -390,7 +395,7 @@ ALIAS LEA= {
 }
 
 ALIAS CALL= {
-  0xE8 imm32 = "CALL rip + {imm32+5}"
+  0xE8 imm32 = "CALL {rip+imm32+5}"
   WITH default_opmode = 64bit {
     0xFF ModRM_2 = "CALL {ModRM_2}"
   }
@@ -405,8 +410,8 @@ ALIAS CMP= {
 }
 
 ALIAS JMP= {
-  0xEB imm8 = "JMP rip+{imm8+2}"
-  0xE9 imm32= "JMP rip+{imm32+2}"
+  0xEB imm8 = "JMP {rip+imm8+2}"
+  0xE9 imm32= "JMP {rip+imm32+5}"
   0xFF ModRM_4 = "JMP {ModRM_4}"
   0xFF ModRM_5 = "JMP {ModRM_5}"
 }
@@ -424,8 +429,8 @@ ALIAS RET= {
 }
 
 ALIAS JCC= {
-  0111 cc imm8 = "J{cc} rip+{imm8+2}"
-  0x0F 1000 cc imm32 = "J{cc} rip+{imm32+2}"
+  0111 cc imm8 = "J{cc} {rip+imm8+2}"
+  0x0F 1000 cc imm32 = "J{cc} {rip+imm32+6}"
 }
 
 ALIAS TEST= {
