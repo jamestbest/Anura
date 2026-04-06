@@ -26,6 +26,8 @@ GtkWidget* disassembly_scroller;
 
 GtkWidget* memory_view;
 
+GtkWidget* code_box;
+
 GtkWidget* terminal_view;
 GtkWidget* output_view;
 
@@ -131,9 +133,7 @@ TreeNodeObject* tree_node_object_new(TreeNode* node) {
     return obj;
 }
 
-static GListModel*
-create_child_model(gpointer item, gpointer user_data)
-{
+static GListModel* create_child_model(gpointer item, gpointer user_data) {
     TreeNodeObject *obj = item;
     TreeNode* node=  obj->node;
 
@@ -154,30 +154,43 @@ static void setup(GtkListItemFactory *factory,
                   GtkListItem *list_item,
                   gpointer data)
 {
-    GtkWidget *expander = gtk_tree_expander_new();
-    GtkWidget *label = gtk_label_new(NULL);
+    GtkWidget* expander = gtk_tree_expander_new();
+    GtkWidget* label = gtk_label_new(NULL);
 
     gtk_tree_expander_set_child(GTK_TREE_EXPANDER(expander), label);
     gtk_list_item_set_child(list_item, expander);
 }
 
-static void bind(GtkListItemFactory *factory,
-                 GtkListItem *list_item,
-                 gpointer data)
-{
-    GtkTreeListRow *row = gtk_list_item_get_item(list_item);
-    TreeNodeObject *obj = gtk_tree_list_row_get_item(row);
+static void bind(
+    GtkListItemFactory *factory,
+    GtkListItem *list_item,
+    gpointer data
+) {
+    GtkTreeListRow* row= gtk_list_item_get_item(list_item);
+    TreeNodeObject* obj= gtk_tree_list_row_get_item(row);
 
-    GtkWidget *expander = gtk_list_item_get_child(list_item);
-    GtkWidget *label =
-        gtk_tree_expander_get_child(GTK_TREE_EXPANDER(expander));
+    GtkWidget* expander= gtk_list_item_get_child(list_item);
+    GtkWidget* label= gtk_tree_expander_get_child(GTK_TREE_EXPANDER(expander));
 
     gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(expander), row);
 
     char buffer[128];
-    snprintf(buffer, sizeof(buffer), "CFA: %p instance of %s", (void*)obj->node->frame.cfa, obj->node->frame.subprog_name);
+    snprintf(buffer, sizeof(buffer), "CFA: %p instance of %s", (void*)obj->node->frame.cfa, obj->node->frame.sub->subprog_name);
 
     gtk_label_set_text(GTK_LABEL(label), buffer);
+}
+
+void var_setup_callback(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
+    GtkWidget* label= gtk_label_new(NULL);
+    gtk_list_item_set_child(item, label);
+}
+
+void var_bind_callback(GtkSignalListItemFactory *factory, GtkListItem *item, gpointer user_data) {
+    GtkWidget* label= gtk_list_item_get_child(item);
+    const char* text= gtk_string_object_get_string(
+        gtk_list_item_get_item(item)
+    );
+    gtk_label_set_text(GTK_LABEL(label), text);
 }
 
 static void break_cause_detail_change(GtkSelectionModel* selection, guint pos, guint n, gpointer data) {
@@ -195,25 +208,72 @@ static void break_cause_detail_change(GtkSelectionModel* selection, guint pos, g
 
     TreeNode* node= selected->node;
 
-
-    GtkWidget *list_box = gtk_list_box_new();
+    GtkWidget* list_box= gtk_list_box_new();
     gtk_widget_add_css_class(list_box, "boxed-list");
     gtk_box_append(GTK_BOX(cont), list_box);
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box), GTK_SELECTION_NONE);
 
-    char *cfa_str = g_strdup_printf("CFA: %p - %p", node->frame.cfa, node->frame.end_stack_pointer);
+    char *cfa_str = g_strdup_printf("CFA: %#lx - %#lx", node->frame.cfa, node->frame.end_stack_pointer);
     gtk_list_box_append(GTK_LIST_BOX(list_box), gtk_label_new(cfa_str));
     g_free(cfa_str);
 
-    GtkWidget *expander = gtk_expander_new("Markers List");
-    GtkWidget *marker_list_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    GtkWidget* expander= gtk_expander_new("Markers List");
+    GtkWidget* marker_list_box= gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_widget_set_margin_start(marker_list_box, 20);
 
     if (node->markers.arr) {
         for (size_t i = 0; i < node->markers.pos; i++) {
             const Marker* marker= Marker_vec_get_unsafe(&node->markers, i);
             if (!marker) continue;
-            char* str= g_strdup_printf("Marker @ %#lx prev: %#p", marker->pc, marker->prev);
+            char* str= g_strdup_printf("Marker @ %#lx prev: %#p Target value %s %s: ",
+                marker->pc, marker->prev,
+                TARGET_VALUE_TYPE_STRS[marker->target_value.type],
+                marker->target_value.inverted ? "(INVERTED)" : ""
+            );
+            switch (marker->target_value.type) {
+                case TARGET_VALUE_LOGICAL: {
+                    char* str2= g_strconcat(str, "true", NULL);
+                    free(str);
+                    str= str2;
+                    break;
+                }
+                case TARGET_VALUE_VALUE: {
+                    char* str2= g_strdup_printf("%ld", marker->target_value.data.value);
+                    char* str3= g_strconcat(str, str2, NULL);
+                    free(str);
+                    free(str2);
+                    str= str3;
+                    break;
+                }
+                case TARGET_VALUE_RULES:
+                    for (int j = 0; j < marker->target_value.data.rules.pos; ++j) {
+                        TargetRule* rule= TargetRule_arr_ptr(&marker->target_value.data.rules, j);
+                        char* str2= g_strdup_printf("%s %s %ld", j != 0 ? " AND " : "", OPERATOR_STRS[rule->op], rule->value);
+                        char* str3= g_strconcat(str, str2, NULL);
+                        free(str);
+                        free(str2);
+                        str= str3;
+                    }
+                    break;
+                case TARGET_VALUE_RANGE: {
+                    char* str2= g_strdup_printf("%ld-%ld", marker->target_value.data.range.start, marker->target_value.data.range.end);
+                    char* str3= g_strconcat(str, str2, NULL);
+                    free(str);
+                    free(str2);
+                    str= str3;
+                    break;
+                }
+                case TARGET_VALUE_ANY: {
+                    char* str2= g_strconcat(str, "ANY", NULL);
+                    free(str);
+                    str= str2;
+                    break;
+                }
+                case TARGET_VALUE_COUNT:
+                default:
+                    assert(false);
+            }
+
             gtk_box_append(GTK_BOX(marker_list_box), gtk_label_new(str));
             g_free(str);
         }
@@ -221,6 +281,115 @@ static void break_cause_detail_change(GtkSelectionModel* selection, guint pos, g
 
     gtk_expander_set_child(GTK_EXPANDER(expander), marker_list_box);
     gtk_list_box_append(GTK_LIST_BOX(list_box), expander);
+
+    GtkStringList* var_model = gtk_string_list_new(NULL);
+    if (node->frame.end_stack_pointer != 0) {
+        for (int i = 0; i < node->frame.vars.pos; ++i) {
+            VVarInstance* inst= VVarInstance_arr_ptr(&node->frame.vars, i);
+            char* stra= g_strdup_printf("Local var %s: ", inst->var->name);
+            const char* strb= target.target_create_var_instance_string(inst);
+            char* total= g_strconcat(stra, strb, NULL);
+            gtk_string_list_append(var_model, total);
+            free(stra);
+            free(total);
+        }
+    }
+
+    GtkListItemFactory* var_factory= gtk_signal_list_item_factory_new();
+    g_signal_connect(var_factory, "setup", G_CALLBACK(var_setup_callback), NULL);
+    g_signal_connect(var_factory, "bind", G_CALLBACK(var_bind_callback), NULL);
+
+    GtkWidget* var_list= gtk_list_view_new(
+        GTK_SELECTION_MODEL(gtk_single_selection_new(G_LIST_MODEL(var_model))),
+        var_factory
+    );
+
+    GtkWidget* var_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget* var_title = gtk_label_new("Local variables:");
+
+    gtk_box_append(GTK_BOX(var_box), var_title);
+    gtk_box_append(GTK_BOX(var_box), var_list);
+    gtk_list_box_append(GTK_LIST_BOX(list_box), var_box);
+
+    GtkStringList* arg_model = gtk_string_list_new(NULL);
+    for (int i = 0; i < node->frame.args.pos; ++i) {
+        VVarInstance* inst= VVarInstance_arr_ptr(&node->frame.args, i);
+        char* stra= g_strdup_printf("Local var %s: ", inst->var->name);
+        const char* strb= target.target_create_var_instance_string(inst);
+        char* total= g_strconcat(stra, strb, NULL);
+        gtk_string_list_append(var_model, total);
+        free(stra);
+        free(total);
+    }
+
+    GtkListItemFactory* arg_factory= gtk_signal_list_item_factory_new();
+    g_signal_connect(arg_factory, "setup", G_CALLBACK(var_setup_callback), NULL);
+    g_signal_connect(arg_factory, "bind", G_CALLBACK(var_bind_callback), NULL);
+
+    GtkWidget* arg_list= gtk_list_view_new(
+        GTK_SELECTION_MODEL(gtk_single_selection_new(G_LIST_MODEL(arg_model))),
+        arg_factory
+    );
+
+    GtkWidget* arg_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget* arg_title = gtk_label_new("Function arguments:");
+
+    gtk_box_append(GTK_BOX(arg_box), arg_title);
+    gtk_box_append(GTK_BOX(arg_box), arg_list);
+    gtk_list_box_append(GTK_LIST_BOX(list_box), arg_box);
+}
+
+G_DECLARE_FINAL_TYPE(RegInstance, reg_instance, REG, INSTANCE, GObject)
+struct _RegInstance {
+    GObject parent_instance;
+    const char* name;
+    const char* value;
+};
+G_DEFINE_TYPE(RegInstance, reg_instance, G_TYPE_OBJECT)
+static void reg_instance_init(RegInstance* item) {}
+static void reg_instance_class_init(RegInstanceClass* class) {}
+
+static RegInstance* reg_instance_new(VRegInstance* vreg) {
+    RegInstance* reg= g_object_new(reg_instance_get_type(), NULL);
+    reg->name= vreg->name;
+    reg->value= vreg->value;
+    return reg;
+}
+
+GListModel* create_reg_instance_model(VRegInstanceArray* instances) {
+    GListStore* store= g_list_store_new(reg_instance_get_type());
+
+    for (int i = 0; i < instances->pos; ++i) {
+        g_list_store_append(store, reg_instance_new(VRegInstance_arr_ptr(instances, i)));
+    }
+
+    return G_LIST_MODEL(store);
+}
+
+static void reg_inst_setup_callback(GtkSignalListItemFactory* factory, GObject* item) {
+    GtkWidget* label= gtk_label_new(NULL);
+    gtk_list_item_set_child(GTK_LIST_ITEM(item), label);
+}
+
+static void reg_inst_bind_name_callback(GtkSignalListItemFactory* factory, GtkListItem* item) {
+    GtkWidget* label= gtk_list_item_get_child(item);
+    GObject* generic= gtk_list_item_get_item(GTK_LIST_ITEM(item));
+    RegInstance* reg= REG_INSTANCE(generic);
+    gtk_label_set_text(GTK_LABEL(label), reg->name);
+}
+
+static void reg_inst_bind_value_callback(GtkSignalListItemFactory* factory, GtkListItem* item) {
+    GtkWidget* label= gtk_list_item_get_child(item);
+    GObject* generic= gtk_list_item_get_item(GTK_LIST_ITEM(item));
+    RegInstance* reg= REG_INSTANCE(generic);
+    gtk_label_set_text(GTK_LABEL(label), reg->value);
+}
+
+gboolean display_all_registers(gpointer data) {
+    AllRegs* regs= data;
+
+    VRegInstanceArray instances= target.target_get_all_regs_instance(regs);
+
 }
 
 gboolean display_break_cause_tree(gpointer root) {
@@ -245,11 +414,11 @@ gboolean display_break_cause_tree(gpointer root) {
         gtk_single_selection_new(G_LIST_MODEL(tree_list))
     );
 
-    GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
+    GtkListItemFactory* factory = gtk_signal_list_item_factory_new();
     g_signal_connect(factory, "setup", G_CALLBACK(setup), NULL);
     g_signal_connect(factory, "bind", G_CALLBACK(bind), NULL);
 
-    GtkWidget *view = gtk_list_view_new(selection, factory);
+    GtkWidget* view = gtk_list_view_new(selection, factory);
 
     GtkWidget* main_box= gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_window_set_child(GTK_WINDOW(window), main_box);
@@ -352,9 +521,6 @@ static gboolean event_key_pressed_cb(
     GdkModifierType        state,
     GtkEventControllerKey *event_controller
 ) {
-    printf("Got event\n");
-    goto_line(88);
-
     return true;
 }
 
@@ -377,7 +543,11 @@ static void open_file_response(GtkDialog *dialog, int response){
 
         const char* path= g_file_get_path(file);
         g_print("Selected file: %s\n", path);
-        open_program(path);
+        queueb_push_blocking(&action_q, create_action(ACTION_AT_OPEN, (ACTION_DATA) {
+            .AT_OPEN= {
+                .path= path
+            }
+        }));
         g_object_unref(file);
     }
 
@@ -788,7 +958,7 @@ static void activate(GtkApplication* app, gpointer user_data) {
     GtkWidget* top_ui= gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_box_append(GTK_BOX(box), top_ui);
 
-    GtkWidget* code_box= gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    code_box= gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 
     GtkWidget* menu_bar= make_menu_bar();
     GtkWidget* run_button= gtk_button_new_with_label("run");
@@ -1031,6 +1201,225 @@ ByteStream stream_of_sub(VSub sub, const VSection* section) {
     return stream;
 }
 
+typedef struct {
+    bool success;
+    uintptr_t pointer;
+} DissRes;
+
+DissRes disassemble_from_to(VSub sub, uintptr_t base, uintptr_t end, const char* sub_name, GtkTextBuffer* buffer, GtkTextIter* end_iter) {
+    char scratch_buff[100];
+    const char* out;
+
+    while (base < end && disassemble(&out, base)) {
+        const uintptr_t new_base= sub.vaddr_start + (top_stream.pointer >> 3);
+
+        GtkTextMark* mark= gtk_text_buffer_create_mark(buffer, NULL, end_iter, TRUE);
+        g_object_set_data(G_OBJECT(mark), "addr", GUINT_TO_POINTER(base));
+        LocInfo* info= alloc_loc_info(mark, base, new_base - base);
+        g_hash_table_insert(address_to_mark, GUINT_TO_POINTER(base), info);
+
+        snprintf(scratch_buff, sizeof(scratch_buff), "%#lx: %s", base, out);
+        gtk_text_buffer_insert(buffer, end_iter, scratch_buff, -1);
+
+        // printf("%#lx: %s\n", base, out);
+        base= new_base;
+
+        if (base >= end) {
+            snprintf(scratch_buff, sizeof(scratch_buff), " -- sub %s END", sub_name);
+            gtk_text_buffer_insert(buffer, end_iter, scratch_buff, -1);
+        }
+
+        gtk_text_buffer_insert(buffer, end_iter, "\n", -1);
+    }
+
+    return (DissRes) {
+        .success= base >= end,
+        .pointer= base
+    };
+}
+
+uintptr_t fill_with_unknown(
+    VSection section,
+    uintptr_t base,
+    uintptr_t end,
+    GtkTextBuffer* buffer,
+    GtkTextIter* end_iter,
+    const char* sub_name,
+    ByteStream* stream
+) {
+    char scratch_buffer[100];
+    uintptr_t start= base;
+    for (uintptr_t i = base; i < end; ++i) {
+        GtkTextMark* mark= gtk_text_buffer_create_mark(buffer, NULL, end_iter, TRUE);
+        LocInfo* info= alloc_loc_info(mark, base, 1);
+        g_hash_table_insert(address_to_mark, GUINT_TO_POINTER(base), info);
+
+        snprintf(scratch_buffer, sizeof(scratch_buffer), "%#lx: 0x%.2x ???", base, section.data[base - section.vaddr_start]);
+        gtk_text_buffer_insert(buffer, end_iter, scratch_buffer, -1);
+        base++;
+
+        if (i == end - 1 && sub_name) {
+            snprintf(scratch_buffer, sizeof(scratch_buffer), " -- sub %s END", sub_name);
+            gtk_text_buffer_insert(buffer, end_iter, scratch_buffer, -1);
+        }
+
+        gtk_text_buffer_insert(buffer, end_iter, "\n", -1);
+    }
+
+    stream->pointer += (end - start) << 3;
+    return base;
+}
+//
+// void fill_cu_disassembly_view(CU* cu) {
+//
+// }
+
+VECTOR_PROTO(struct FileNode, FileNode)
+typedef struct FileNode {
+    const char* name;
+    gboolean is_folder;
+    FileNodeVector children;
+} FileNode;
+VECTOR_ADD(FileNode, FileNode)
+
+G_DECLARE_FINAL_TYPE(FileObject, file_object, FILE, FILE_OBJECT, GObject)
+struct _FileObject {
+    GObject parent_instance;
+    FileNode* file;
+};
+G_DEFINE_TYPE(FileObject, file_object, G_TYPE_OBJECT)
+
+static void file_object_class_init(FileObjectClass* class) {}
+static void file_object_init(FileObject* self) {}
+FileObject* file_object_new(FileNode* file) {
+    FileObject* obj= g_object_new(file_object_get_type(), NULL);
+    obj->file= file;
+    return obj;
+}
+
+FileNode* alloc_file_node(const char* name, bool is_folder) {
+    FileNode* file= malloc(sizeof(FileNode));
+    *file= (FileNode) {
+        .children= FileNode_vec_construct(5),
+        .is_folder= is_folder,
+        .name= name
+    };
+    return file;
+}
+
+static GListModel* create_file_child_model(gpointer item, gpointer user_data) {
+    FileObject* obj= item;
+    FileNode* file= obj->file;
+
+    if (file->children.pos == 0) return NULL;
+
+    GListStore* store= g_list_store_new(file_object_get_type());
+
+    for (int i = 0; i < file->children.pos; ++i) {
+        FileNode* child= FileNode_vec_get_unsafe(&file->children, i);
+        FileObject* child_obj= file_object_new(child);
+        g_list_store_append(store, child_obj);
+    }
+
+    return G_LIST_MODEL(store);
+}
+
+FileNode* find_or_add_child(FileNode* existing_root, char* path_part, bool is_file) {
+    for (int i = 0; i < existing_root->children.pos; ++i) {
+        FileNode* item= FileNode_vec_get_unsafe(&existing_root->children, i);
+
+        if (strcmp(item->name, path_part) == 0) {
+            return item;
+        }
+    }
+
+    FileNode* new= alloc_file_node(path_part, is_file);
+    FileNode_vec_add(&existing_root->children, new);
+
+    return new;
+}
+
+FileNode* build_file_tree(Vector filepaths) {
+    FileNode* root= alloc_file_node("/", true);
+
+    for (int i = 0; i < filepaths.pos; ++i) {
+        const char* filepath= vector_get_unsafe(&filepaths, i);
+        char** splits= g_strsplit(filepath, "/", -1);
+
+        FileNode* current= root;
+        size_t idx= 0;
+        while (splits[idx] != NULL) {
+            char* part= splits[idx];
+
+            if (part[0] == '\0') {
+                idx++;
+                continue;
+            };
+
+            char* file_part= strdup(part);
+            gboolean is_last= splits[idx + 1] == NULL;
+            FileNode* file= find_or_add_child(current, file_part, is_last);
+
+            current= file;
+            idx++;
+        }
+
+        g_strfreev(splits);
+    }
+
+    return root;
+}
+
+void setup_file_view_callback(GtkListItemFactory* factory, GtkListItem* list_item, gpointer data) {
+    GtkWidget* expander= gtk_tree_expander_new();
+    GtkWidget* label= gtk_label_new(NULL);
+
+    gtk_tree_expander_set_child(GTK_TREE_EXPANDER(expander), label);
+    gtk_list_item_set_child(list_item, expander);
+}
+
+void bind_file_view_callback(GtkListItemFactory* factory, GtkListItem* list_item, gpointer data) {
+    GtkTreeListRow* row= gtk_list_item_get_item(list_item);
+    FileObject* file= gtk_tree_list_row_get_item(row);
+
+    GtkWidget* expander= gtk_list_item_get_child(list_item);
+    GtkWidget* label= gtk_tree_expander_get_child(GTK_TREE_EXPANDER(expander));
+
+    gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(expander), row);
+
+    gtk_label_set_text(GTK_LABEL(label), file->file->name);
+}
+
+void fill_file_view() {
+    Vector filepaths= target.target_get_all_cu_filenames();
+    FileNode* tree= build_file_tree(filepaths);
+
+    GListStore* root_model= g_list_store_new(file_object_get_type());
+    g_list_store_append(root_model, file_object_new(tree));
+
+    GtkTreeListModel* file_list= gtk_tree_list_model_new(
+        G_LIST_MODEL(root_model),
+        FALSE,
+        FALSE,
+        create_file_child_model,
+        NULL,
+        NULL
+    );
+
+    GtkSelectionModel* selection= GTK_SELECTION_MODEL(
+        gtk_single_selection_new(G_LIST_MODEL(file_list))
+    );
+
+    GtkListItemFactory* factory= gtk_signal_list_item_factory_new();
+    g_signal_connect(factory, "setup", G_CALLBACK(setup_file_view_callback), NULL);
+    g_signal_connect(factory, "bind", G_CALLBACK(bind_file_view_callback), NULL);
+
+    GtkWidget* view= gtk_list_view_new(selection, factory);
+
+    gtk_box_prepend(GTK_BOX(code_box), view);
+    gtk_widget_show(view);
+}
+
 void fill_disassembly_view() {
     init();
     address_to_mark= g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -1039,80 +1428,64 @@ void fill_disassembly_view() {
     top_stream= stream_of_vsection(&text);
 
     newline();
-    SubIter iter= (SubIter) {.idx= 0};
+    SubIter iter= target.target_get_selected_cu_sub_iter();
     bool succ;
 
     GtkTextBuffer* buffer= gtk_text_view_get_buffer(GTK_TEXT_VIEW(disassembly_view));
     GtkTextIter end_iter;
     gtk_text_buffer_get_end_iter(buffer, &end_iter);
 
-    char buff[100];
     VSub sub= target.target_get_next_sub(&iter, &succ);
 
     while (succ) {
         top_stream= stream_of_sub(sub, &text);
 
         uintptr_t base= sub.vaddr_start;
-        const char* out;
 
-        while (base < sub.vaddr_end && disassemble(&out)) {
-            uintptr_t new_base= sub.vaddr_start + (top_stream.pointer >> 3);;
+        const AddrLineRes max_line_res= target.target_addr_to_line(sub.vaddr_end);
+        uint32_t max_line= -1;
+        if (max_line_res.succ)
+            max_line= max_line_res.line;
 
-            GtkTextMark* mark= gtk_text_buffer_create_mark(buffer, NULL, &end_iter, TRUE);
-            g_object_set_data(G_OBJECT(mark), "addr", GUINT_TO_POINTER(base));
-            LocInfo* info= alloc_loc_info(mark, base, new_base - base);
-            g_hash_table_insert(address_to_mark, GUINT_TO_POINTER(base), info);
+        while (true) {
+            const DissRes res= disassemble_from_to(sub, base, sub.vaddr_end, sub.subprog_name, buffer, &end_iter);
+            base= res.pointer;
+            if (res.success) break;
 
-            snprintf(buff, sizeof(buff), "%#lx: %s", base, out);
-            gtk_text_buffer_insert(buffer, &end_iter, buff, -1);
-
-            // printf("%#lx: %s\n", base, out);
-            base= new_base;
-
-            if (base >= sub.vaddr_end) {
-                snprintf(buff, sizeof(buff), " -- sub %s END", sub.subprog_name);
-                gtk_text_buffer_insert(buffer, &end_iter, buff, -1);
+            const AddrLineRes line_res= target.target_addr_to_line(base);
+            if (!line_res.succ) {
+                break;
             }
 
-            gtk_text_buffer_insert(buffer, &end_iter, "\n", -1);
-        }
+            uint32_t line= line_res.line;
+            while (true) {
+                line++;
+                if (line > max_line) break;
 
-        const uintptr_t end= sub.vaddr_end;
-        for (int i = base; i < end; ++i) {
-            GtkTextMark* mark= gtk_text_buffer_create_mark(buffer, NULL, &end_iter, TRUE);
-            LocInfo* info= alloc_loc_info(mark, base, 1);
-            g_hash_table_insert(address_to_mark, GUINT_TO_POINTER(base), info);
+                const LineAddrRes addr_res= target.target_line_to_addr(line);
+                if (!addr_res.succ) continue;
 
-            snprintf(buff, sizeof(buff), "%#lx: 0x%.2x ???", base, text.data[base - text.vaddr_start]);
-            gtk_text_buffer_insert(buffer, &end_iter, buff, -1);
-            base++;
-
-            if (i == end - 1) {
-                snprintf(buff, sizeof(buff), " -- sub %s END", sub.subprog_name);
-                gtk_text_buffer_insert(buffer, &end_iter, buff, -1);
+                const uintptr_t new_base= addr_res.addr;
+                base= fill_with_unknown(text, base, new_base, buffer, &end_iter, NULL, &top_stream);
+                break;
             }
-
-            gtk_text_buffer_insert(buffer, &end_iter, "\n", -1);
         }
+
+        base= fill_with_unknown(text, base, sub.vaddr_end, buffer, &end_iter, sub.subprog_name, &top_stream);
 
         sub= target.target_get_next_sub(&iter, &succ);
         if (!succ) break;
-        for (uintptr_t i = base; i < sub.vaddr_start; ++i) {
-            GtkTextMark* mark= gtk_text_buffer_create_mark(buffer, NULL, &end_iter, TRUE);
-            LocInfo* info= alloc_loc_info(mark, base, 1);
-            g_hash_table_insert(address_to_mark, GUINT_TO_POINTER(base), info);
 
-            snprintf(buff, sizeof(buff), "%#lx: ???\n", base);
-            gtk_text_buffer_insert(buffer, &end_iter, buff, -1);
-            base++;
-        }
-            // printf("%#lx: Disassembly failed\n", base);
+        fill_with_unknown(text, base, sub.vaddr_start, buffer, &end_iter, NULL, &top_stream);
     }
 }
 
 gboolean update_target_data(gpointer data) {
+    target.target_set_selected_cu(target.target_get_main_cu());
+
     fill_disassembly_view();
     fill_memory_view();
+    fill_file_view();
 
     return false;
 }
