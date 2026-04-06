@@ -17,6 +17,7 @@ typedef enum DEPTYPE {
     DEPTYPE_SPLIT,
     DEPTYPE_COND,
     DEPTYPE_HEADER,
+    DEPTYPE_COLLECT,
     DEPTYPE_EXPR,
 
     DEPTYPE_SENTINEL,
@@ -36,13 +37,17 @@ extern DEP_BASE SENTINEL;
 typedef enum OPERATOR {
     OP_EQ,
     OP_NE,
-    OP_GT
+    OP_GT,
+    OP_COUNT
 } OPERATOR;
+
+extern const char* OPERATOR_STRS[OP_COUNT];
 
 typedef enum TYPE {
     TYPE_LEFT,
     TYPE_RIGHT,
     TYPE_BOTH,
+    TYPE_NONE
 } TYPE;
 
 typedef enum LocationType {
@@ -65,6 +70,7 @@ typedef union LocationData {
 typedef struct Location {
     LocationType type;
     LocationData data;
+    uint8_t byte_size;
 } Location;
 
 #define HITTABLE_BASE BASE; \
@@ -92,7 +98,7 @@ typedef struct DEP_EXPR {
 
 typedef struct DEP_SPLIT {
     BASE
-    DEP_BASE* links[4];
+    DEP_BASE* links[10];
 } DEP_SPLIT;
 
 typedef struct DEP_COND {
@@ -107,6 +113,12 @@ typedef struct DEP_HEADER {
     uintptr_t addr;
     DEP_BASE* link;
 } DEP_HEADER;
+
+typedef struct DEP_COLLECT {
+    BASE
+    size_t conns;
+    DEP_BASE* link;
+} DEP_COLLECT;
 
 #define MAKE_CONST(id_, val, addr_) {                                        \
     .addr= addr_,                                                       \
@@ -164,6 +176,14 @@ typedef struct DEP_HEADER {
     .link= (DEP_BASE*)&link_\
 }
 
+#define MAKE_COLLECT(id_, conns_, dead_, pass_, link_) (DEP_COLLECT) {\
+    .base= {.type= DEPTYPE_COLLECT, .dead= dead_, .id=id_, .pass=pass_},\
+    .conns= conns_,\
+    .link= (DEP_BASE*)&link_\
+}
+
+#define CONNECTIONS(num) num
+
 #define t3_output 0
 #define t2_output 0
 
@@ -171,13 +191,12 @@ typedef struct DEP_HEADER {
 #define RBP_CODE 6
 #define RSP_CODE 7
 #define RIP_CODE 16
-#define LOC_RAX (Location){.type= LOCATION_REGISTER, .data.register_id=RAX_CODE}
+#define LOC_RAX (Location){.type= LOCATION_REGISTER, .data.register_id=RAX_CODE, .byte_size=8}
+#define LOC_EAX (Location){.type= LOCATION_REGISTER, .data.register_id=RAX_CODE, .byte_size=4}
 
-#define LOC_CONST(val) (Location){.type= LOCATION_CONST, .data.const_val= val}
-#define LOC_REG_OFF(reg_id, off) (Location){.type= LOCATION_REGISTER_OFFSET, .data.reg_off= {.register_id= reg_id, .offset= off}}
+#define LOC_CONST(val) (Location){.type= LOCATION_CONST, .data.const_val= val, .byte_size=8}
+#define LOC_REG_OFF(reg_id, off, size) (Location){.type= LOCATION_REGISTER_OFFSET, .data.reg_off= {.register_id= reg_id, .offset= off}, .byte_size= size}
 #define LOC_COMPARE(comp){.type= LOCATION_COMPARE, .data.comparison= comp}
-
-ARRAY_PROTO(uintptr_t, Addr)
 
 typedef struct SubInfo {
     uintptr_t func_start; // id
@@ -185,12 +204,39 @@ typedef struct SubInfo {
 } SubInfo;
 #define FUNC_ENDS_END 0x0
 
-// this can either be a normal value, or it's logical for conditionals in which case 0 or not 0
+typedef struct TargetRule {
+    OPERATOR op;
+    int64_t value;
+} TargetRule;
+ARRAY_PROTO(TargetRule, TargetRule)
+
+typedef union TargetValueData {
+    int64_t value;
+    TargetRuleArray rules;
+    struct {
+        int64_t start;
+        int64_t end;
+    } range;
+} TargetValueData;
+
+typedef enum TargetValueType {
+    TARGET_VALUE_LOGICAL,
+    TARGET_VALUE_VALUE,
+    TARGET_VALUE_RULES,
+    TARGET_VALUE_RANGE,
+    TARGET_VALUE_ANY,
+    TARGET_VALUE_COUNT
+} TargetValueType;
+
+extern const char* TARGET_VALUE_TYPE_STRS[TARGET_VALUE_COUNT];
+
 typedef struct TargetValue {
-    uint64_t value;
-    bool logical; // 0 or not 0
-    bool is_logical;
+    TargetValueType type;
+    TargetValueData data;
+    bool inverted;
 } TargetValue;
+
+extern const TargetValue TARGET_VALUE_BASE;
 
 struct TreeNode;
 
@@ -209,6 +255,13 @@ typedef struct Marker {
 
 VECTOR_PROTO(Marker, Marker)
 
+typedef struct CollectInfo {
+    DEP_COLLECT* collect;
+    TargetValue target_value;
+    size_t current_hits;
+} CollectInfo;
+ARRAY_PROTO_CMP(CollectInfo, CollectInfo, collect_info_cmp, collect)
+
 VECTOR_PROTO(struct TreeNode, Node)
 typedef struct TreeNode {
     uintptr_t cfa;
@@ -217,8 +270,9 @@ typedef struct TreeNode {
     StackFrame frame;
     NodeVector links;
     MarkerVector markers;
+    CollectInfoArray collections;
 } TreeNode;
 
-int break_on_cause(const char* ident, uint32_t line);
+int break_on_cause(bool is_simple);
 
 #endif //ANURA_BREAK_ON_CAUSE_H
