@@ -141,8 +141,10 @@ int generate_reset_func(RootNode* root) {
 
 int generate_disassembly_func(StructureNode* structure) {
     fprintf(ofile,
-        "int disassemble(const char** output){\n"
-        "\treset();\n");
+        "int disassemble(const char** output, uintptr_t rip){\n"
+        "\treset();\n\n"
+        "\tdata_rip._value= rip;\n"
+        "\tdata_rip.parsed= true;\n\n");
     for (int i = 0; i < structure->rules.pos; ++i) {
         const MarkedIdent* ident= MarkedIdent_arr_ptr(&structure->rules, i);
 
