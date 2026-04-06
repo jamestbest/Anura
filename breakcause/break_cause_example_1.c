@@ -36,13 +36,16 @@ int main() {
     return parse();
 }
 
+// X Y Y
+// Y Z X X
+// Z Y Z Z
 Token tokens[]= {
     DUMMY_X,
     DUMMY_Y,
     DUMMY_Y,
     DUMMY_Y,
     DUMMY_Z,
-    DUMMY_X,
+    DUMMY_Y,
     DUMMY_X,
     DUMMY_Z,
     DUMMY_Y,
