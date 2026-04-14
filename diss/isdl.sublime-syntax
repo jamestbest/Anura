@@ -10,7 +10,7 @@ contexts:
       scope: storage.type
     - match: \b(STRUCTURE|VAR|WITH|OF|MAP|ALIAS|FLAT|DATA|CALCULATE|RULE|RIGHT|ON|FLAG|META)\b
       scope: keyword.control
-    - match: \b(if)\b
+    - match: \b(if|then)\b
       scope: keyword.control  
     - match: '"'
       push: string
@@ -24,8 +24,18 @@ contexts:
       scope: constant.numeric
     - match: \b[a-zA-Z_][a-zA-Z0-9_]*\b
       scope: entity.name
+    - match: \b[0-9a-zA-Z][a-zA-Z0-9_]*\b
+      scope: entity.name
   string:
     - meta_scope: string.quoted.double
+    - match: '{'
+      push: brace
     - match: '"'
+      pop: true
+  brace:
+    - meta_scope: brace
+    - match: \b[a-zA-Z_][a-zA-Z0-9_]*\b
+      scope: entity.name
+    - match: '}'
       pop: true
     

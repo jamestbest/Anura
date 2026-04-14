@@ -27,7 +27,8 @@ only the latest is marked as alive the rest are split but dead, to allow for sta
 
 
 sometimes dataflow and the control flow are not matched and we have to explicitly say
-go to my child node and add the markers there as well -- this is what PASS is forarguime,emnments and starting position of functions iwwith arguments
+go to my child node and add the markers there as well -- this is what PASS is forarguime,
+emnments and starting position of functions iwwith arguments
 
 reason for going step by step - to avoid hitting functions early
 funcA as a dependancy and it's big but several calls to funcA before that aren't needed
@@ -39,3 +40,5 @@ You can do this in the current impl by having all as PASS except the ones before
 writing about the testing for ISDL by running it on programs etc and comparing to objdump
 
 rip in ISDL
+
+it doesn't have very good multi-cu support
