@@ -107,7 +107,7 @@ The overall aim of this project is to develop an extensible GUI debugger that is
 There are three sub-aims for the project. The first is to develop an instruction set disassembly language (ISDL) that can be used to generate disassemblers. The second is to create a form of stack frame saving that saves the data and control flow points of the program to later be walked by the user, referred to as break-save. The third is to explore and create a demonstration of a feature that allows users to specify target values for a variable and for the debugger to be able to use compiler information to propagate this value down the program. This allows the debugger to break at the earliest point in execution that it can guarantee the variable will later evaluate to the target value, this is referred to as break-on-cause.
 
 == Motivation
-Debuggers are used throughout all aspects of software development, and they have real impact on the efficiency (and enjoyment) of programming. There is still much more room for debuggers to grow, especially within data analysis. This is the motivation behind the break-save and break-on-cause features which both help reason about the data flow of a program.
+Debuggers are used throughout all aspects of software development, and they have real impact on the efficiency (and enjoyment) of programming. There is still much more room for debuggers to grow, especially within data analysis. This is the motivation behind the break-save and break-on-cause features which both help reason about the data flow of a program, where instead developers can spend lots of their time restarting or logging the program to gather information.
 
 Developing a multi-target debugger comes with lots of new work for each target, one of the reasons for developing ISDL is to make adding disassembly support for each target a much faster process. The goal of ISDL therefore is to allow writing of instructions close to how they are written in instruction set manuals, so that little translation is required from the developer.
 
@@ -128,7 +128,7 @@ Later systems also had hardware level debugging, for example the PDP-11 has a se
 
 As the main programming level moved from assembly to high-level languages debuggers expanded to provide source level functions. For example, dbx found on many OSes provided symbolic debugging for languages like C, C++, and Fortran @DBXManual, as well as source level stepping, the ability to skip over an entire source line.
 
-Within modern debugging development tools like the (G)NU project (D)e(B)ugger were introduced for UNIX @gdb. GDB also allows for remote debugging where the target and host can have different architectures, communicating commands and data to debug @GBDRemote. GDB and later LLDB contain all the features of modern debuggers, with source and assembly level interaction, breakpoints, stepping, viewing registers, evaluating expressions, all with support for multiple languages.
+Within modern debugging development tools like the (G)NU project (D)e(B)ugger were introduced for UNIX @gdb. GDB and later LLDB contain all the features of modern debuggers, with source and assembly level interaction, breakpoints, stepping, viewing registers, evaluating expressions, all with support for multiple languages and targets.
 
 Throughout this development the debugger has become a tool that does even more for the developer, removing the tedium of mapping addresses, single stepping through hundreds of lines, or disassembling by hand. This project hopes to build on this by taking an aspect of debugging that currently requires lots of a developer's time and place the burden on the debugger instead.
 
@@ -158,10 +158,11 @@ Ghidra's SLEIGH is a much more general language as it describes the architecture
 ISDL sits between these two languages allowing for more complex descriptions than CHUMP, without needing as much information as SLEIGH. The output of ISDL will also be the same as CHUMP, a single disassembled string, not formatted information like SLEIGH. 
 
 === Related break-x
-// have a brief overview saying what break-xs are -- new functions 
-The first of the break-xs is break-save which is closely related to other time-travel debuggers. The aforementioned WinDbg is also an example of a debugger that supports (T)ime-(T)ravel (D)ebugging. This is where the program can be stepped-back to restore the program state to before some instruction executed. GDB also supports time-travel debugging, whereas LLDB currently does not. Break-save is a less advanced version, as you cannot restore the full state of the program like in real TTDs. Instead users can view the value of variables at points of execution along with the control flow steps in each of the saved stack frames. This form of TTD is at a source level, tracking changes to variables and control flow such as if statements and function calls. Existing TTDs focus at an assembly level, where the effects of an instruction can be completely reversed, restoring the state. 
+The break-x features both allow the user to specify some data condition, i.e. a variable having some value, and each aim to provide the developer with a view into why the variable evaluated to or will evaluate to that value.
 
-The second break-x is break-on-cause, compared with break-save which saves the past state, break-on-cause is used to break at the earliest point in execution where the debugger can guarantee that the value of a variable will later evaluate to some specified value. A similar process to this is symbolic execution @SymbolicExe which is used to determine what inputs or variable constraints lead to certain parts of the program executing. @symEx shows an example function where symbolic execution would represent the constraint on ```c return 1;``` executing as (x_sym \* 2) == 12, which can then be solved to give the concrete restriction of x_sym= 6.
+The first of the break-xs is break-save which is closely related to other (T)ime (T)ravel (D)ebuggers. The aforementioned WinDbg is also an example of a debugger that supports time-travel debugging. This is where the program can be stepped-back to restore the program state to before some instruction executed. Break-save is a less advanced version, as you cannot restore the full state of the program like in real TTDs. Instead users can see saved stack frames and what the control flow was through the functions. It also displays the value of variables at each point. This form of TTD is at a source level, tracking changes to variables and control flow such as if statements and function calls. Existing TTDs focus at an assembly level, where the effects of an instruction can be completely reversed. The benefit of this source method is that it does not require a full x64 emulator.
+
+The second break-x is break-on-cause, compared with break-save which saves the past state, break-on-cause is used to break at the earliest point in execution where the debugger can guarantee that the value of a variable will later evaluate to some specified value. A similar process to this is symbolic execution @SymbolicExe which is used to determine what inputs or variable constraints lead to certain parts of the program executing. @symEx shows an example function where symbolic execution would represent the constraint on the line '```c return 1;```' as (x_sym \* 2) == 12, which can then be solved to give the concrete restriction of x_sym= 6.
 
 #codefig(
   "Symbolic execution example",
@@ -176,7 +177,7 @@ int f(int x) {
 ```
 )<symEx>
 
-Break-on-cause is similar to symbolic execution however its implementation is different. In symbolic execution the symbolic expressions are formed from moving forwards to each exit point exit point (e.g. (x_sym \* 2) == 12), and then a solver calculates the restrictions on the symbols. Break-on-cause starts at the exit points and unwinds the expressions, based on the compiler information, until it reaches a value it can check against the target value.
+Break-on-cause is similar to symbolic execution however, its implementation is different. In symbolic execution the symbolic expressions are formed from moving forwards to each exit point exit point (e.g. (x_sym \* 2) == 12), and then a solver calculates the restrictions on the symbols. Break-on-cause starts at the exit points and unwinds the expressions, based on the compiler information, until it reaches a value it can check against the target value.
 
 == Linux-x64
 === x64
@@ -238,12 +239,13 @@ runtime_addr virtual_to_runtime_addr(virtual_address v_addr) {
 )
 
 When mapping from a runtime address to a virtual address a similar process is done, the /proc/\<pid>/maps entry that contains the runtime address is found, which contains a base runtime address as well as a base virtual address (offset). It is important to note however that  
+// todo
 
 === DWARF
 DWARF is the debugging information format for ELF #cite(<DWARF5Manual>). This information contains different sections. In the debug_info section there are Debug Information Entries (DIEs) which contain information on the compilation units, the sub-programs within them, the variables, types, and lexical blocks @DWARF5Manual[sec.~2.1]. DWARF also contains a line number program which stores information on converting the program addresses into source code lines, this is contained in the debug_line section @DWARF5Manual[sec.~6.2]. DWARF information also contains a debug_frame section which describes how to restore the registers of the previous frame at an address, this is used to unroll the stack into a trace @DWARF5Manual[sec.~6.4], debug_frame is often omitted and instead replaced with eh_frame which is used for exception handling and contains a very similar format to that of debug_frame with changes to the header @EHFrame. There are several sections that are used to store debug strings, for example debug_str, and debug_line_str, which are referenced by other debugging information.
 
 = Basic debugger
-Anura was developed in C99, using gtk4 as it's UI library. C99 was chosen as it exposed much of the low level interfaces needed, for example ptrace. Gtk4 is a multi-platform UI library @GTK4Platforms and provided an extensive set of UI widgets. The following section describes the implementation details of creating a basic debugger, i.e. the basic features of Anura.
+Anura was developed in C99, using gtk4 @GTK4 as its UI library. C99 was chosen as it exposed much of the low level interfaces needed, for example ptrace. Gtk4 is a multi-platform UI library @GTK4Platforms and provided an extensive set of UI widgets. The following section describes the implementation details of creating a basic debugger, i.e. the basic features of Anura.
 
 == Target abstraction
 To help with extensibility Anura abstracts functions that are target specific into a large Target struct. Upon start up of the target process the corresponding start up function for the target architecture-OS combination sets these functions to its internal implementations. For example, when waiting for the process to hit a breakpoint or another debug event in Linux requires calling waitpid @LinuxWaitPID. In windows this is done by calling WaitForDebugEvent @WindowsDebugEvent, the abstracted function target_wait therefore exists in the target struct. These are called throughout Anura via the global target variable.
