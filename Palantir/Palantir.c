@@ -7,6 +7,7 @@
 #include "main.h"
 #include "MtDoom.h"
 #include "Target.h"
+#include "breaksave/break_save.h"
 #include "output/default.h"
 
 void goto_line(int line);
@@ -31,6 +32,8 @@ GtkWidget* code_box;
 GtkWidget* terminal_view;
 GtkWidget* output_view;
 
+GListStore* stack_store;
+
 GtkApplication* app;
 
 GtkTextTag* user_bp_hit_highlight= NULL;
@@ -38,6 +41,9 @@ size_t user_bp_hit_highlight_line= -1;
 
 GtkTextTag* all_bp_hit_highlight= NULL;
 size_t all_bp_hit_highlight_line= -1;
+
+GtkTextTag* line_highlight= NULL;
+size_t line_highlight_line= -1;
 
 GHashTable* address_to_mark;
 typedef struct LocInfo {
@@ -92,6 +98,32 @@ void highlight_diss_addr(uint32_t addr) {
     all_bp_hit_highlight_line= line;
 }
 
+void highlight_code_line_as_info(uint32_t line) {
+    if (!line_highlight) line_highlight= gtk_text_buffer_create_tag(
+        code_buffer,
+        "line-highlight",
+        "paragraph-background", "#7bb7ef",
+        NULL
+    );
+
+    if (line_highlight_line != -1) {
+        GtkTextIter start, end;
+        gtk_text_buffer_get_start_iter(code_buffer, &start);
+        gtk_text_buffer_get_end_iter(code_buffer, &end);
+        gtk_text_buffer_remove_tag(code_buffer, line_highlight, &start, &end);
+        line_highlight_line= -1;
+    }
+
+    GtkTextIter start, end;
+    gtk_text_buffer_get_iter_at_line(code_buffer, &start, line - 1);
+    end= start;
+    gtk_text_iter_forward_to_line_end(&end);
+
+    gtk_text_buffer_apply_tag(code_buffer, line_highlight, &start, &end);
+
+    line_highlight_line= line - 1;
+}
+
 void highlight_code_line(uint32_t line) {
     if (!user_bp_hit_highlight) user_bp_hit_highlight= gtk_text_buffer_create_tag(
         code_buffer,
@@ -133,8 +165,73 @@ TreeNodeObject* tree_node_object_new(TreeNode* node) {
     return obj;
 }
 
+G_DECLARE_FINAL_TYPE(TracedFrameObject, traced_frame_object, TRACED, FRAME_OBJECT, GObject)
+struct _TracedFrameObject {
+    GObject parent_instance;
+    TracedFrame* frame;
+};
+G_DEFINE_TYPE(TracedFrameObject, traced_frame_object, G_TYPE_OBJECT)
+
+static void traced_frame_object_class_init(TracedFrameObjectClass* class) {}
+static void traced_frame_object_init(TracedFrameObject* self) {}
+TracedFrameObject* traced_frame_object_new(TracedFrame* frame) {
+    TracedFrameObject* obj= g_object_new(traced_frame_object_get_type(), NULL);
+    obj->frame= frame;
+    return obj;
+}
+
+static GListModel* create_traced_frame_child_model(gpointer item, gpointer user_data) {
+    TracedFrameObject* obj= item;
+    TracedFrame* frame= obj->frame;
+
+    if (frame->links.pos == 0)
+        return NULL;
+
+    GListStore* store= g_list_store_new(traced_frame_object_get_type());
+
+    for (int i = 0; i < frame->links.pos; ++i) {
+        TracedFrame* child= TracedFrame_vec_get_unsafe(&frame->links, i);
+        g_list_store_append(store, traced_frame_object_new(child));
+    }
+
+    return G_LIST_MODEL(store);
+}
+
+static void save_tree_setup(
+    GtkListItemFactory* factory,
+    GtkListItem* list_item,
+    gpointer data
+) {
+    GtkWidget* expander= gtk_tree_expander_new();
+    GtkWidget* label= gtk_label_new(NULL);
+
+    gtk_tree_expander_set_child(GTK_TREE_EXPANDER(expander), label);
+    gtk_list_item_set_child(list_item, expander);
+}
+
+static void save_tree_bind(
+    GtkListItemFactory *factory,
+    GtkListItem *list_item,
+    gpointer data
+) {
+    GtkTreeListRow* row= gtk_list_item_get_item(list_item);
+    TracedFrameObject* obj= gtk_tree_list_row_get_item(row);
+
+    GtkWidget* expander= gtk_list_item_get_child(list_item);
+    GtkWidget* label= gtk_tree_expander_get_child(GTK_TREE_EXPANDER(expander));
+
+    gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(expander), row);
+
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer),
+        "CFA: %#lx instance of %s", obj->frame->frame.cfa, obj->frame->frame.sub->subprog_name);
+
+    gtk_label_set_text(GTK_LABEL(label), buffer);
+}
+
+
 static GListModel* create_child_model(gpointer item, gpointer user_data) {
-    TreeNodeObject *obj = item;
+    TreeNodeObject* obj= item;
     TreeNode* node=  obj->node;
 
     if (node->links.pos == 0)
@@ -150,10 +247,11 @@ static GListModel* create_child_model(gpointer item, gpointer user_data) {
     return G_LIST_MODEL(store);
 }
 
-static void setup(GtkListItemFactory *factory,
-                  GtkListItem *list_item,
-                  gpointer data)
-{
+static void setup(
+    GtkListItemFactory *factory,
+    GtkListItem *list_item,
+    gpointer data
+) {
     GtkWidget* expander = gtk_tree_expander_new();
     GtkWidget* label = gtk_label_new(NULL);
 
@@ -193,6 +291,233 @@ void var_bind_callback(GtkSignalListItemFactory *factory, GtkListItem *item, gpo
     gtk_label_set_text(GTK_LABEL(label), text);
 }
 
+static int highlight_and_goto_line(gpointer data) {
+    uint32_t line= GPOINTER_TO_INT(data);
+
+    goto_line(line);
+    highlight_code_line_as_info(line);
+
+    return false;
+}
+
+GtkWidget* var_box;
+GtkWidget* point_info_box;
+
+static int var_search_cmp(const void* a, const void* b) {
+    const uint64_t ref= (uint64_t)a;
+    const VVarInstance* inst= b;
+
+    if (ref < inst->var->ref) return -1;
+    if (ref > inst->var->ref) return 1;
+    return 0;
+}
+
+static int var_sort_cmp(const void* a, const void* b) {
+    const VVarInstance* var_a= a;
+    const VVarInstance* var_b= b;
+
+    if (var_a->var->ref < var_b->var->ref) return -1;
+    if (var_a->var->ref > var_b->var->ref) return 1;
+    return 0;
+}
+
+void add_label(GtkWidget* box, char* format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    char* str= g_strdup_vprintf(format, args);
+    GtkWidget* label= gtk_label_new(str);
+    free(str);
+
+    gtk_box_append(GTK_BOX(box), label);
+
+    va_end(args);
+}
+
+static void break_save_point_selected(GtkListBox* box, GtkListBoxRow* row, gpointer user_data) {
+    if (!row) return;
+
+    GtkWidget* child= gtk_list_box_row_get_child(row);
+
+    gpointer point= g_object_get_data(G_OBJECT(child), "point");
+    PointInstance* p= point;
+
+    AddrLineRes res= target.target_addr_to_line(p->point->addr);
+    if (!res.succ) return;
+    g_idle_add(highlight_and_goto_line, GUINT_TO_POINTER(res.line));
+
+    TracedFrame* frame= user_data;
+    GtkWidget* existing;
+    while (existing= gtk_widget_get_first_child(var_box), existing != NULL) {
+        gtk_box_remove(GTK_BOX(var_box), existing);
+    }
+
+    while (existing= gtk_widget_get_first_child(point_info_box), existing != NULL) {
+        gtk_box_remove(GTK_BOX(point_info_box), existing);
+    }
+
+    add_label(point_info_box, "Type: %s", POINT_TYPE_STRS[p->point->type]);
+    add_label(point_info_box, "Virtual: %#lx", p->point->addr);
+    add_label(point_info_box, "Runtime: %#lx", target.target_addr_virtual_to_runtime(p->point->addr));
+
+    switch (p->type) {
+        case POINT_TYPE_DF: {
+            DFPointInstance* df= (DFPointInstance*)p;
+            DF_POINT* df_point= (DF_POINT*)df->base.point;
+            add_label(point_info_box, "Reason: %s", DF_POINT_REASON_STRS[df_point->reason]);
+            add_label(point_info_box, "Die offset: %#lx", df_point->die_offset);
+            break;
+        }
+        case POINT_TYPE_CF: {
+            CFPointInstance* cf= (CFPointInstance*)p;
+            CF_POINT* cf_point= (CF_POINT*)cf->base.point;
+            add_label(point_info_box, "Reason: %s", CF_POINT_REASON_STRS[cf_point->reason]);
+            break;
+        }
+        case POINT_TYPE_SENTINEL:
+            break;
+    }
+
+    const VSub* sub= frame->frame.sub;
+    VVarInstanceArray vars= VVarInstance_arr_construct(frame->frame.args.pos + sub->vars.pos);
+    for (int i = 0; i < frame->frame.args.pos; ++i) {
+        VVarInstance_arr_add(&vars, VVarInstance_arr_get(&frame->frame.args, i));
+    }
+
+    for (int i = 0; i < sub->vars.pos; ++i) {
+        VVarInstance_arr_add(&vars, (VVarInstance) {
+            .value= (Value) {.type= VALUE_NONE},
+            .var= VVar_vec_get_unsafe(&sub->vars, i)
+        });
+    }
+
+    arr_sort((Array*)&vars, var_sort_cmp);
+
+    for (int i = 0; i < frame->points.pos; ++i) {
+        PointInstance* pi= PointInstance_vec_get_unsafe(&frame->points, i);
+        if (pi->type == POINT_TYPE_DF) {
+            DFPointInstance* df= (DFPointInstance*)pi;
+            DF_POINT* df_point= (DF_POINT*)df->base.point;
+
+            if (df_point->reason == DF_REASON_VAR_ASSIGN) {
+                uint64_t ref= df_point->die_offset;
+
+                VVarInstance* inst= arr_search_e((Array*)&vars, (void*)ref, var_search_cmp);
+                if (!inst) continue;
+
+                inst->value= df->value;
+            }
+        }
+
+        if (pi == p) break;
+    }
+
+    GtkStringList* var_model = gtk_string_list_new(NULL);
+    for (int i = 0; i < vars.pos; ++i) {
+        VVarInstance* inst= VVarInstance_arr_ptr(&vars, i);
+        char* stra= g_strdup_printf("Local var %s: ", inst->var->name);
+        const char* strb= target.target_create_var_instance_string(inst);
+        char* total= g_strconcat(stra, strb, NULL);
+        gtk_string_list_append(var_model, total);
+        free(stra);
+        free(total);
+    }
+
+
+    GtkListItemFactory* var_factory= gtk_signal_list_item_factory_new();
+    g_signal_connect(var_factory, "setup", G_CALLBACK(var_setup_callback), NULL);
+    g_signal_connect(var_factory, "bind", G_CALLBACK(var_bind_callback), NULL);
+
+    GtkWidget* var_list= gtk_list_view_new(
+        GTK_SELECTION_MODEL(gtk_single_selection_new(G_LIST_MODEL(var_model))),
+        var_factory
+    );
+
+    GtkWidget* var_title = gtk_label_new("Variables:");
+
+    gtk_box_append(GTK_BOX(var_box), var_title);
+    gtk_box_append(GTK_BOX(var_box), var_list);
+}
+
+static void break_save_detail_change(GtkSelectionModel* selection, guint pos, guint n, gpointer data) {
+    GtkWidget* cont= GTK_WIDGET(data);
+
+    GtkWidget* existing;
+    while (existing= gtk_widget_get_first_child(cont), existing != NULL) {
+        gtk_box_remove(GTK_BOX(cont), existing);
+    }
+
+    GtkTreeListRow* selected_row= gtk_single_selection_get_selected_item(GTK_SINGLE_SELECTION(selection));
+    if (!selected_row) return;
+    TracedFrameObject* selected= gtk_tree_list_row_get_item(selected_row);
+    if (!selected) return;
+
+    TracedFrame* node= selected->frame;
+
+    GtkWidget* list_box= gtk_list_box_new();
+    gtk_widget_add_css_class(list_box, "boxed-list");
+    gtk_box_append(GTK_BOX(cont), list_box);
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box), GTK_SELECTION_SINGLE);
+
+    var_box= gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+    point_info_box= gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+
+    GtkWidget* expander= gtk_expander_new("Point List");
+
+    GtkWidget* marker_list_box= gtk_list_box_new();
+    gtk_widget_set_margin_start(marker_list_box, 20);
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(marker_list_box), GTK_SELECTION_SINGLE);
+
+    g_signal_connect(marker_list_box, "row-selected", G_CALLBACK(break_save_point_selected), node);
+
+    for (int i = 0; i < node->points.pos; ++i) {
+        PointInstance* inst= PointInstance_vec_get_unsafe(&node->points, i);
+        if (!inst) continue;
+
+        char* str= g_strdup_printf("[%#lx] Point instance %s ", inst->point->addr, POINT_TYPE_STRS[inst->type]);
+
+        switch (inst->type) {
+            case POINT_TYPE_DF: {
+                DFPointInstance* df= (DFPointInstance*)inst;
+                DF_POINT* point= (DF_POINT*)df->base.point;
+
+                char* str2= g_strconcat(str, DF_POINT_REASON_STRS[point->reason], NULL);
+                free(str);
+                str= str2;
+                break;
+            }
+            case POINT_TYPE_CF: {
+                CFPointInstance* cf= (CFPointInstance*)inst;
+                CF_POINT* point= (CF_POINT*)cf->base.point;
+
+                char* str2= g_strconcat(str, CF_POINT_REASON_STRS[point->reason], NULL);
+                free(str);
+                str= str2;
+                break;
+            }
+            case POINT_TYPE_SENTINEL:
+                break;
+        }
+
+        GtkWidget* row = gtk_list_box_row_new();
+
+        GtkWidget* label= gtk_label_new(str);
+        g_object_set_data(G_OBJECT(label), "point", inst);
+        // gtk_label_set_selectable(GTK_LABEL(label), TRUE);
+
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+        gtk_list_box_append(GTK_LIST_BOX(marker_list_box), row);
+
+        g_free(str);
+    }
+
+    gtk_expander_set_child(GTK_EXPANDER(expander), marker_list_box);
+    gtk_list_box_append(GTK_LIST_BOX(list_box), expander);
+
+    gtk_list_box_append(GTK_LIST_BOX(list_box), point_info_box);
+    gtk_list_box_append(GTK_LIST_BOX(list_box), var_box);
+}
+
 static void break_cause_detail_change(GtkSelectionModel* selection, guint pos, guint n, gpointer data) {
     GtkWidget* cont= GTK_WIDGET(data);
 
@@ -213,7 +538,7 @@ static void break_cause_detail_change(GtkSelectionModel* selection, guint pos, g
     gtk_box_append(GTK_BOX(cont), list_box);
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box), GTK_SELECTION_NONE);
 
-    char *cfa_str = g_strdup_printf("CFA: %#lx - %#lx", node->frame.cfa, node->frame.end_stack_pointer);
+    char* cfa_str= g_strdup_printf("CFA: %#lx - %#lx", node->frame.cfa, node->frame.end_stack_pointer);
     gtk_list_box_append(GTK_LIST_BOX(list_box), gtk_label_new(cfa_str));
     g_free(cfa_str);
 
@@ -225,7 +550,7 @@ static void break_cause_detail_change(GtkSelectionModel* selection, guint pos, g
         for (size_t i = 0; i < node->markers.pos; i++) {
             const Marker* marker= Marker_vec_get_unsafe(&node->markers, i);
             if (!marker) continue;
-            char* str= g_strdup_printf("Marker @ %#lx prev: %#p Target value %s %s: ",
+            char* str= g_strdup_printf("Marker @ %#lx prev: %p Target value %s %s: ",
                 marker->pc, marker->prev,
                 TARGET_VALUE_TYPE_STRS[marker->target_value.type],
                 marker->target_value.inverted ? "(INVERTED)" : ""
@@ -351,8 +676,8 @@ static void reg_instance_class_init(RegInstanceClass* class) {}
 
 static RegInstance* reg_instance_new(VRegInstance* vreg) {
     RegInstance* reg= g_object_new(reg_instance_get_type(), NULL);
-    reg->name= vreg->name;
-    reg->value= vreg->value;
+    reg->name= g_strdup(vreg->name);
+    reg->value= g_strdup(vreg->value);
     return reg;
 }
 
@@ -366,19 +691,19 @@ GListModel* create_reg_instance_model(VRegInstanceArray* instances) {
     return G_LIST_MODEL(store);
 }
 
-static void reg_inst_setup_callback(GtkSignalListItemFactory* factory, GObject* item) {
+static void reg_inst_setup_callback(GtkSignalListItemFactory* factory, GObject* item, gpointer data) {
     GtkWidget* label= gtk_label_new(NULL);
     gtk_list_item_set_child(GTK_LIST_ITEM(item), label);
 }
 
-static void reg_inst_bind_name_callback(GtkSignalListItemFactory* factory, GtkListItem* item) {
+static void reg_inst_bind_name_callback(GtkSignalListItemFactory* factory, GtkListItem* item, gpointer data) {
     GtkWidget* label= gtk_list_item_get_child(item);
     GObject* generic= gtk_list_item_get_item(GTK_LIST_ITEM(item));
     RegInstance* reg= REG_INSTANCE(generic);
     gtk_label_set_text(GTK_LABEL(label), reg->name);
 }
 
-static void reg_inst_bind_value_callback(GtkSignalListItemFactory* factory, GtkListItem* item) {
+static void reg_inst_bind_value_callback(GtkSignalListItemFactory* factory, GtkListItem* item, gpointer data) {
     GtkWidget* label= gtk_list_item_get_child(item);
     GObject* generic= gtk_list_item_get_item(GTK_LIST_ITEM(item));
     RegInstance* reg= REG_INSTANCE(generic);
@@ -390,6 +715,107 @@ gboolean display_all_registers(gpointer data) {
 
     VRegInstanceArray instances= target.target_get_all_regs_instance(regs);
 
+    GtkWidget* window= gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(window), "Registers");
+    gtk_window_set_default_size(GTK_WINDOW(window), 1920/2, 1080/2);
+
+    GListModel* root_model= create_reg_instance_model(&instances);
+
+    GtkSelectionModel* selection= GTK_SELECTION_MODEL(
+        gtk_single_selection_new(G_LIST_MODEL(root_model))
+    );
+
+    GtkWidget* view= gtk_column_view_new(selection);
+
+    GtkCssProvider* provider= gtk_css_provider_new();
+    gtk_css_provider_load_from_data(
+        provider,
+        "textview {"
+        "  font-size: 15px;"
+        "  font-family: monospace;"
+        "  color: black;"
+        "}",
+        -1
+    );
+
+    GdkDisplay* display= gtk_widget_get_display(view);
+    gtk_style_context_add_provider_for_display(
+        display,
+        GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION
+    );
+
+    g_object_unref(provider);
+
+    GtkListItemFactory* factory= gtk_signal_list_item_factory_new();
+    g_signal_connect(factory, "setup", G_CALLBACK(reg_inst_setup_callback), NULL);
+    g_signal_connect(factory, "bind", G_CALLBACK(reg_inst_bind_name_callback), NULL);
+
+    GtkColumnViewColumn* name_col= gtk_column_view_column_new("Name", GTK_LIST_ITEM_FACTORY(factory));
+    gtk_column_view_append_column(GTK_COLUMN_VIEW(view), name_col);
+
+    GtkListItemFactory* val_factory= gtk_signal_list_item_factory_new();
+    g_signal_connect(val_factory, "setup", G_CALLBACK(reg_inst_setup_callback), NULL);
+    g_signal_connect(val_factory, "bind", G_CALLBACK(reg_inst_bind_value_callback), NULL);
+
+    GtkColumnViewColumn* value_col= gtk_column_view_column_new("Value", GTK_LIST_ITEM_FACTORY(val_factory));
+    gtk_column_view_append_column(GTK_COLUMN_VIEW(view), value_col);
+    gtk_column_view_column_set_expand(value_col, TRUE);
+
+    GtkWidget* scroller= gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), view);
+
+    gtk_window_set_child(GTK_WINDOW(window), scroller);
+    gtk_widget_show(window);
+
+    return false;
+}
+
+gboolean display_break_save_tree(gpointer root) {
+    GtkWidget* window= gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(window), "Break on cause result");
+    gtk_window_set_default_size(GTK_WINDOW(window), 1920/2, 1080/2);
+
+    GListStore* root_model= g_list_store_new(traced_frame_object_get_type());
+    g_list_store_append(root_model, traced_frame_object_new(root));
+
+    GtkTreeListModel* tree_list= gtk_tree_list_model_new(
+        G_LIST_MODEL(root_model),
+        FALSE,
+        FALSE,
+        create_traced_frame_child_model,
+        NULL,
+        NULL
+    );
+
+    GtkSelectionModel* selection= GTK_SELECTION_MODEL(
+        gtk_single_selection_new(G_LIST_MODEL(tree_list))
+    );
+
+    GtkListItemFactory* factory = gtk_signal_list_item_factory_new();
+    g_signal_connect(factory, "setup", G_CALLBACK(save_tree_setup), NULL);
+    g_signal_connect(factory, "bind", G_CALLBACK(save_tree_bind), NULL);
+
+    GtkWidget* view = gtk_list_view_new(selection, factory);
+
+    GtkWidget* main_box= gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_window_set_child(GTK_WINDOW(window), main_box);
+
+    GtkWidget* scroller= gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), view);
+    gtk_paned_set_start_child(GTK_PANED(main_box), scroller);
+    gtk_paned_set_resize_start_child(GTK_PANED(main_box), TRUE);
+
+    GtkWidget* detail_scroller= gtk_scrolled_window_new();
+    GtkWidget* details_view= gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(detail_scroller), details_view);
+    gtk_paned_set_end_child(GTK_PANED(main_box), detail_scroller);
+
+    g_signal_connect(selection, "selection-changed", G_CALLBACK(break_save_detail_change), details_view);
+
+    gtk_window_present(GTK_WINDOW(window));
+
+    return false;
 }
 
 gboolean display_break_cause_tree(gpointer root) {
@@ -409,8 +835,7 @@ gboolean display_break_cause_tree(gpointer root) {
         NULL
     );
 
-    GtkSelectionModel *selection =
-    GTK_SELECTION_MODEL(
+    GtkSelectionModel* selection= GTK_SELECTION_MODEL(
         gtk_single_selection_new(G_LIST_MODEL(tree_list))
     );
 
@@ -440,40 +865,92 @@ gboolean display_break_cause_tree(gpointer root) {
     return false;
 }
 
+G_DECLARE_FINAL_TYPE(Frame, frame, FRAME, frame, GObject)
+struct _Frame{
+    GObject parent_instance;
+
+    char* text;
+    uintptr_t v_addr;
+};
+G_DEFINE_TYPE(Frame, frame, G_TYPE_OBJECT)
+static void frame_init(Frame* self) {}
+static void frame_class_init(FrameClass* class) {}
+
+static Frame* frame_new(StackFrame* stack_frame) {
+    Frame* item= g_object_new(frame_get_type(), NULL);
+
+    item->text= g_strdup_printf(
+        "Frame @ %#lx (v: %#lx)\n"
+        "\tSubroutine: %s:%u",
+        stack_frame->pc, stack_frame->v_pc,
+        stack_frame->sub->subprog_name, stack_frame->line
+    );
+
+    item->v_addr= stack_frame->v_pc;
+
+    return item;
+}
+
+
+gboolean display_stack_trace(gpointer data) {
+    Stack* stack= data;
+
+    g_list_store_remove_all(stack_store);
+
+    for (int i = 0; i < stack->pos; ++i) {
+        StackFrame* frame= StackFrame_arr_ptr(stack, i);
+        Frame* f= frame_new(frame);
+
+        g_list_store_append(stack_store, f);
+    }
+
+    return false;
+}
+
 typedef struct {
     GtkTextBuffer* mem_buff;
     GtkTextBuffer* diss_buff;
 } MemoryViewBuffers;
+MemoryViewBuffers mem_buffers;
+
+typedef struct MemoryData {
+    Data data;
+    LocInfo* info;
+} MemoryData;
 
 static void memory_view_add(gpointer key, gpointer value, gpointer data) {
     const LocInfo* info= value;
     const uintptr_t addr= GPOINTER_TO_SIZE(key);
 
-    MemoryViewBuffers* buffers= data;
+    const Data* text_data= data;
+    const VSection text_section= target.target_get_text_section();
 
     GtkTextIter iter;
-    gtk_text_buffer_get_iter_at_mark(buffers->diss_buff, &iter, info->mark);
+    gtk_text_buffer_get_iter_at_mark(mem_buffers.diss_buff, &iter, info->mark);
     const int line= gtk_text_iter_get_line(&iter);
 
-    Data d_read= target.target_get_data_virtual(addr, info->bytes);
     const int buff_size= 3 * info->bytes + 1;
+    const uintptr_t start_addr_offset= addr - text_section.vaddr_start;
     char* buff= malloc(buff_size);
     for (int i = 0; i < info->bytes; ++i) {
-        snprintf(&buff[i * 3], 4, "%.2x ", d_read.raw_data[i]);
+        snprintf(&buff[i * 3], 4, "%.2x ", text_data->raw_data[start_addr_offset + i]);
     }
 
-    gtk_text_buffer_get_iter_at_line(buffers->mem_buff, &iter, line);
-    gtk_text_buffer_insert(buffers->mem_buff, &iter, buff, -1);
+    gtk_text_buffer_get_iter_at_line(mem_buffers.mem_buff, &iter, line);
+    GtkTextIter end= iter;
+    gtk_text_buffer_get_end_iter(mem_buffers.mem_buff ,&end);
+
+    gtk_text_buffer_insert(mem_buffers.mem_buff, &iter, buff, -1);
 }
 
-static void fill_memory_view() {
+static void fill_memory_view(Data* text_data) {
     GtkTextBuffer* buff= gtk_text_view_get_buffer(GTK_TEXT_VIEW(memory_view));
     gtk_text_buffer_set_text(buff, "", -1);
 
     GtkTextBuffer* diss_buff= gtk_text_view_get_buffer(GTK_TEXT_VIEW(disassembly_view));
     const int lines= gtk_text_buffer_get_line_count(diss_buff);
 
-    MemoryViewBuffers buffers= {
+    mem_buffers= (MemoryViewBuffers){
         .diss_buff= diss_buff,
         .mem_buff= buff
     };
@@ -484,7 +961,7 @@ static void fill_memory_view() {
         gtk_text_buffer_insert(buff, &end, "\n", -1);
     }
 
-    g_hash_table_foreach(address_to_mark, memory_view_add, &buffers);
+    g_hash_table_foreach(address_to_mark, memory_view_add, text_data);
 }
 
 static bool set_buffer_as_file(const char* file, GtkTextBuffer* buff) {
@@ -725,6 +1202,10 @@ static void step_over_button_callback(GtkButton* button, gpointer data) {
     queueb_push_blocking(&action_q, create_action(ACTION_CF_STEP_OVER, (ACTION_DATA){.NO_DATA= 0}));
 }
 
+static void register_button_callback(GtkButton* button, gpointer data) {
+    queueb_push_blocking(&action_q, create_action(ACTION_DS_REGS, (ACTION_DATA){.NO_DATA= 0}));
+}
+
 static void terminal_input_callback(GtkEntry* entry, gpointer data) {
     const char* input= gtk_editable_get_text(GTK_EDITABLE(entry));
 
@@ -947,6 +1428,37 @@ gboolean update_breakpoint_displays(gpointer data) {
     return false;
 }
 
+static void stack_setup_callback(GtkListItemFactory* factory, GtkListItem* item, gpointer user_data) {
+    GtkWidget* label= gtk_label_new(NULL);
+    gtk_list_item_set_child(item, label);
+}
+
+static void stack_bind_callback(GtkListItemFactory* factory, GtkListItem* item, gpointer user_data) {
+    GtkWidget* label= gtk_list_item_get_child(item);
+    Frame* frame= gtk_list_item_get_item(item);
+    const char* text= frame->text;
+
+    gtk_label_set_text(GTK_LABEL(label), text);
+}
+
+static void stack_frame_selected(GtkSelectionModel* model, guint pos, guint item_c, gpointer data) {
+    guint selected= gtk_single_selection_get_selected(GTK_SINGLE_SELECTION(model));
+    if (selected == GTK_INVALID_LIST_POSITION)
+        return;
+
+    GListModel* list= gtk_single_selection_get_model(GTK_SINGLE_SELECTION(model));
+    Frame* frame= g_list_model_get_item(list, selected);
+
+    if (!frame) return;
+
+    uintptr_t v_addr= frame->v_addr;
+    AddrLineRes res= target.target_addr_to_line(v_addr);
+    if (!res.succ) return;
+
+    highlight_code_line_as_info(res.line);
+    goto_line(res.line);
+}
+
 static void activate(GtkApplication* app, gpointer user_data) {
     GtkWidget* window= gtk_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Anura: GUI Debugger");
@@ -976,7 +1488,11 @@ static void activate(GtkApplication* app, gpointer user_data) {
     gtk_widget_set_tooltip_text(step_out_button, "Step out");
     g_signal_connect(step_out_button, "clicked", G_CALLBACK(step_out_button_callback), NULL);
 
+    GtkWidget* register_button= gtk_button_new_with_label("regs");
+    g_signal_connect(register_button, "clicked", G_CALLBACK(register_button_callback), NULL);
+
     GtkWidget* buttons= gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    gtk_box_append(GTK_BOX(buttons), register_button);
     gtk_box_append(GTK_BOX(buttons), step_over_button);
     gtk_box_append(GTK_BOX(buttons), step_into_button);
     gtk_box_append(GTK_BOX(buttons), step_out_button);
@@ -995,7 +1511,7 @@ static void activate(GtkApplication* app, gpointer user_data) {
     gtk_text_view_set_monospace(GTK_TEXT_VIEW(code_view), TRUE);
 
     code_buffer= gtk_text_view_get_buffer(GTK_TEXT_VIEW(code_view));
-    set_buffer_as_file("/home/jamestbest/test.s", code_buffer);
+    // set_buffer_as_file("/home/jamestbest/test.s", code_buffer);
 
     GtkCssProvider* provider= gtk_css_provider_new();
     gtk_css_provider_load_from_data(
@@ -1099,10 +1615,24 @@ static void activate(GtkApplication* app, gpointer user_data) {
     gtk_box_append(GTK_BOX(terminal), terminal_scroller);
     gtk_box_append(GTK_BOX(terminal), terminal_input);
 
+    GtkWidget* stack_trace_scroller= gtk_scrolled_window_new();
+    stack_store= g_list_store_new(frame_get_type());
+    GtkListItemFactory* stack_factory= gtk_signal_list_item_factory_new();
+    g_signal_connect(stack_factory, "setup", G_CALLBACK(stack_setup_callback), NULL);
+    g_signal_connect(stack_factory, "bind", G_CALLBACK(stack_bind_callback), NULL);
+
+    GtkSingleSelection* selection= gtk_single_selection_new(G_LIST_MODEL(stack_store));
+    g_signal_connect(selection, "selection-changed", G_CALLBACK(stack_frame_selected), NULL);
+
+    GtkWidget* stack_list= gtk_list_view_new(GTK_SELECTION_MODEL(selection), stack_factory);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(stack_trace_scroller), stack_list);
+    gtk_widget_set_size_request(stack_trace_scroller, 250, -1);
+
     GtkWidget* terminals= gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 
     gtk_box_append(GTK_BOX(terminals), terminal);
     gtk_box_append(GTK_BOX(terminals), output_scroller);
+    gtk_box_append(GTK_BOX(terminals), stack_trace_scroller);
 
     gtk_box_append(GTK_BOX(box), code_box);
     gtk_box_append(GTK_BOX(box), terminals);
@@ -1191,11 +1721,11 @@ ByteStream stream_of_vsection(const VSection* section) {
     return stream;
 }
 
-ByteStream stream_of_sub(VSub sub, const VSection* section) {
+ByteStream stream_of_sub(VSub* sub, const VSection* section) {
     ByteStream stream;
-    stream.raw_stream= section->data + (sub.vaddr_start - section->vaddr_start);
+    stream.raw_stream= section->data + (sub->vaddr_start - section->vaddr_start);
     stream.pointer= 0;
-    stream.max_pointer= (sub.vaddr_end - sub.vaddr_start) << 3;
+    stream.max_pointer= (sub->vaddr_end - sub->vaddr_start) << 3;
     stream.size= stream.max_pointer;
 
     return stream;
@@ -1206,12 +1736,12 @@ typedef struct {
     uintptr_t pointer;
 } DissRes;
 
-DissRes disassemble_from_to(VSub sub, uintptr_t base, uintptr_t end, const char* sub_name, GtkTextBuffer* buffer, GtkTextIter* end_iter) {
+DissRes disassemble_from_to(VSub* sub, uintptr_t base, uintptr_t end, const char* sub_name, GtkTextBuffer* buffer, GtkTextIter* end_iter) {
     char scratch_buff[100];
     const char* out;
 
     while (base < end && disassemble(&out, base)) {
-        const uintptr_t new_base= sub.vaddr_start + (top_stream.pointer >> 3);
+        const uintptr_t new_base= sub->vaddr_start + (top_stream.pointer >> 3);
 
         GtkTextMark* mark= gtk_text_buffer_create_mark(buffer, NULL, end_iter, TRUE);
         g_object_set_data(G_OBJECT(mark), "addr", GUINT_TO_POINTER(base));
@@ -1435,20 +1965,20 @@ void fill_disassembly_view() {
     GtkTextIter end_iter;
     gtk_text_buffer_get_end_iter(buffer, &end_iter);
 
-    VSub sub= target.target_get_next_sub(&iter, &succ);
+    VSub* sub= target.target_get_next_sub(&iter);
 
-    while (succ) {
+    while (sub) {
         top_stream= stream_of_sub(sub, &text);
 
-        uintptr_t base= sub.vaddr_start;
+        uintptr_t base= sub->vaddr_start;
 
-        const AddrLineRes max_line_res= target.target_addr_to_line(sub.vaddr_end);
+        const AddrLineRes max_line_res= target.target_addr_to_line(sub->vaddr_end);
         uint32_t max_line= -1;
         if (max_line_res.succ)
             max_line= max_line_res.line;
 
         while (true) {
-            const DissRes res= disassemble_from_to(sub, base, sub.vaddr_end, sub.subprog_name, buffer, &end_iter);
+            const DissRes res= disassemble_from_to(sub, base, sub->vaddr_end, sub->subprog_name, buffer, &end_iter);
             base= res.pointer;
             if (res.success) break;
 
@@ -1471,12 +2001,12 @@ void fill_disassembly_view() {
             }
         }
 
-        base= fill_with_unknown(text, base, sub.vaddr_end, buffer, &end_iter, sub.subprog_name, &top_stream);
+        base= fill_with_unknown(text, base, sub->vaddr_end, buffer, &end_iter, sub->subprog_name, &top_stream);
 
-        sub= target.target_get_next_sub(&iter, &succ);
-        if (!succ) break;
+        sub= target.target_get_next_sub(&iter);
+        if (sub == NULL) break;
 
-        fill_with_unknown(text, base, sub.vaddr_start, buffer, &end_iter, NULL, &top_stream);
+        fill_with_unknown(text, base, sub->vaddr_start, buffer, &end_iter, NULL, &top_stream);
     }
 }
 
@@ -1484,14 +2014,15 @@ gboolean update_target_data(gpointer data) {
     target.target_set_selected_cu(target.target_get_main_cu());
 
     fill_disassembly_view();
-    fill_memory_view();
+    fill_memory_view(data);
     fill_file_view();
 
     return false;
 }
 
 gboolean update_breakpoint_memory(gpointer data) {
-    fill_memory_view();
+    Data* text_data= data;
+    fill_memory_view(text_data);
 
     return false;
 }
@@ -1501,13 +2032,13 @@ static void quit_action(GSimpleAction *action, GVariant *parameter, gpointer app
 }
 
 static void create_quit_mapping() {
-    GSimpleAction *quit = g_simple_action_new("quit", NULL);
+    GSimpleAction* quit= g_simple_action_new("quit", NULL);
     g_signal_connect(quit, "activate", G_CALLBACK(quit_action), app);
     g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(quit));
 }
 
 static void create_open_mapping() {
-    GSimpleAction *open_action = g_simple_action_new("open", NULL);
+    GSimpleAction* open_action= g_simple_action_new("open", NULL);
     g_signal_connect(open_action, "activate", G_CALLBACK(open_file_action), app);
     g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(open_action));
 }
