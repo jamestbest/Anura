@@ -21,5 +21,8 @@ gboolean update_breakpoint_displays(gpointer data);
 gboolean update_breakpoint_memory(gpointer data);
 
 gboolean display_break_cause_tree(gpointer root);
+gboolean display_break_save_tree(gpointer root);
+gboolean display_all_registers(gpointer data);
+gboolean display_stack_trace(gpointer data);
 
 #endif //ANURA_PALANTIR_GUI_H
