@@ -228,56 +228,56 @@ bool parse_sibs(ByteStream* stream);
 
 typedef struct DATA_RIP {
 	uint8_t parsed: 1;
-	uint64_t _value: 64;
+	int64_t _value: 64;
 } DATA_RIP;
 DATA_RIP data_rip= {0};
 bool parse_rip(ByteStream* stream);
 
 typedef struct DATA_IMM8 {
 	uint8_t parsed: 1;
-	uint8_t _value: 8;
+	int8_t _value: 8;
 } DATA_IMM8;
 DATA_IMM8 data_imm8= {0};
 bool parse_imm8(ByteStream* stream);
 
 typedef struct DATA_IMM16 {
 	uint8_t parsed: 1;
-	uint16_t _value: 16;
+	int16_t _value: 16;
 } DATA_IMM16;
 DATA_IMM16 data_imm16= {0};
 bool parse_imm16(ByteStream* stream);
 
 typedef struct DATA_IMM32 {
 	uint8_t parsed: 1;
-	uint32_t _value: 32;
+	int32_t _value: 32;
 } DATA_IMM32;
 DATA_IMM32 data_imm32= {0};
 bool parse_imm32(ByteStream* stream);
 
 typedef struct DATA_IMM64 {
 	uint8_t parsed: 1;
-	uint64_t _value: 64;
+	int64_t _value: 64;
 } DATA_IMM64;
 DATA_IMM64 data_imm64= {0};
 bool parse_imm64(ByteStream* stream);
 
 typedef struct DATA_DISP8 {
 	uint8_t parsed: 1;
-	uint8_t _value: 8;
+	int8_t _value: 8;
 } DATA_DISP8;
 DATA_DISP8 data_disp8= {0};
 bool parse_disp8(ByteStream* stream);
 
 typedef struct DATA_DISP16 {
 	uint8_t parsed: 1;
-	uint16_t _value: 16;
+	int16_t _value: 16;
 } DATA_DISP16;
 DATA_DISP16 data_disp16= {0};
 bool parse_disp16(ByteStream* stream);
 
 typedef struct DATA_DISP32 {
 	uint8_t parsed: 1;
-	uint32_t _value: 32;
+	int32_t _value: 32;
 } DATA_DISP32;
 DATA_DISP32 data_disp32= {0};
 bool parse_disp32(ByteStream* stream);
@@ -312,6 +312,11 @@ AVAL aval_prefix= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)
 AVAL get_aval_prefix();
 bool parse_prefix(ByteStream* stream);
 ParseRet parse_prefix_(ByteStream* stream);
+
+AVAL aval_p_lock= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
+AVAL get_aval_p_lock();
+bool parse_p_lock(ByteStream* stream);
+ParseRet parse_p_lock_(ByteStream* stream);
 
 AVAL aval_lp1= (AVAL){.choices={0}, .chosen_val= NULL, .chosen_idx= (uint8_t)-1, .parsed_successfully= false};
 AVAL get_aval_lp1();

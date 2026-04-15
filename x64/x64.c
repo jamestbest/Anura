@@ -53,6 +53,7 @@ void reset() {
 		0
 	};
 	clear_aval(&aval_prefix);
+	clear_aval(&aval_p_lock);
 	clear_aval(&aval_lp1);
 	clear_aval(&aval_lp2);
 	clear_aval(&aval_lp3);
@@ -406,7 +407,7 @@ void eval_string_173_field_0(Buffer* buff) {
 }
 
 void eval_string_174_field_0(Buffer* buff) {
-	buffer_concat(buff, data_to_string(data_rip._value + data_imm32._value + 0x2));
+	buffer_concat(buff, data_to_string(data_rip._value + data_imm32._value + 0x5));
 }
 
 void eval_string_175_field_0(Buffer* buff) {
@@ -430,7 +431,7 @@ void eval_string_181_field_0(Buffer* buff) {
 }
 
 void eval_string_181_field_1(Buffer* buff) {
-	buffer_concat(buff, data_to_string(data_rip._value + data_imm32._value + 0x2));
+	buffer_concat(buff, data_to_string(data_rip._value + data_imm32._value + 0x6));
 }
 
 void eval_string_182_field_0(Buffer* buff) {
@@ -822,12 +823,32 @@ AVAL get_aval_prefix() {
 	return aval_prefix;
 }
 
-ParseRet parse_lp1_(ByteStream* stream) {
+ParseRet parse_p_lock_(ByteStream* stream) {
     size_t pos_save_0= stream->pointer;
 
     if (EXPECT_BYTE(0xf0, stream)){
         return PARSE_SUCC(to_aval(evaluate_string("LOCK"))); /* LOCK */
     }
+    stream->pointer= pos_save_0;
+
+	return PARSE_FAIL; 
+}
+
+bool parse_p_lock(ByteStream* stream) {
+	ParseRet res= parse_p_lock_(stream);
+	if (!res.success) return res.success;
+	aval_p_lock= res.aval;
+	return res.success;
+}
+
+AVAL get_aval_p_lock() {
+	return aval_p_lock;
+}
+
+ParseRet parse_lp1_(ByteStream* stream) {
+    size_t pos_save_0= stream->pointer;
+
+    if (parse_p_lock(stream)) return PARSE_SUCC(get_aval_p_lock());
     stream->pointer= pos_save_0;
 
     size_t pos_save_1= stream->pointer;
@@ -2438,7 +2459,7 @@ ParseRet parse_MOV_(ByteStream* stream) {
 
     size_t pos_save_1= stream->pointer;
 
-    if (EXPECT_BITS(0b1100, stream) && EXPECT_BITS(0b011, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_Mod(stream) && EXPECT_BITS(0b000, stream) && parse_rm(stream) && parse_immM32(stream)){
+    if (EXPECT_BITS(0b1100, stream) && EXPECT_BITS(0b011, stream) && parse_ow(stream)&& ((data_ow._value= ~data_ow._value) || 1) && parse_ModRM_0(stream) && parse_immM32(stream)){
         return PARSE_SUCC(to_aval(evaluate_string("MOV {rm_ptr}, {immM32}", eval_string_141_field_0, eval_string_141_field_1))); /* MOV {rm_ptr}, {immM32} */
     }
     stream->pointer= pos_save_1;
@@ -2470,9 +2491,9 @@ ParseRet parse_regA_(ByteStream* stream) {
 if (0b1) {
     ByteStream stream= stream_create();
     stream_add(&stream, 0b0000, 4);
-    bool res= parse_reg(&stream);
+    bool res= parse_regO(&stream);
     stream_destroy(&stream);
-    return res == 1 ? PARSE_SUCC(aval_reg) : PARSE_FAIL;
+    return res == 1 ? PARSE_SUCC(aval_regO) : PARSE_FAIL;
     }
 
     stream->pointer= pos_save_0;
@@ -2865,7 +2886,7 @@ ParseRet parse_JMP_(ByteStream* stream) {
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BYTE(0xe9, stream) && parse_imm32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("JMP {rip+imm32+2}", eval_string_174_field_0))); /* JMP {rip+imm32+2} */
+        return PARSE_SUCC(to_aval(evaluate_string("JMP {rip+imm32+5}", eval_string_174_field_0))); /* JMP {rip+imm32+5} */
     }
     stream->pointer= pos_save_1;
 
@@ -2974,7 +2995,7 @@ ParseRet parse_JCC_(ByteStream* stream) {
     size_t pos_save_1= stream->pointer;
 
     if (EXPECT_BYTE(0xf, stream) && EXPECT_BITS(0b1000, stream) && parse_cc(stream) && parse_imm32(stream)){
-        return PARSE_SUCC(to_aval(evaluate_string("J{cc} {rip+imm32+2}", eval_string_181_field_0, eval_string_181_field_1))); /* J{cc} {rip+imm32+2} */
+        return PARSE_SUCC(to_aval(evaluate_string("J{cc} {rip+imm32+6}", eval_string_181_field_0, eval_string_181_field_1))); /* J{cc} {rip+imm32+6} */
     }
     stream->pointer= pos_save_1;
 
@@ -3306,6 +3327,7 @@ AVAL get_aval_op() {
 
 int init() {
 	aval_prefix.choices= vector_create();
+	aval_p_lock.choices= vector_create();
 	aval_lp1.choices= vector_create();
 	aval_lp2.choices= vector_create();
 	aval_lp3.choices= vector_create();
