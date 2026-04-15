@@ -20,6 +20,7 @@
 #include <sys/wait.h>
 
 #include "break_on_cause.h"
+#include "breaksave/break_save.h"
 #include "Palantir/Palantir.h"
 #include "Saruman/Saruman.h"
 
@@ -205,6 +206,16 @@ ACTION_HANDLE_RES handle_step_out() {
     return ACTION_HANDLE_CONTINUE;
 }
 
+void handle_task(Task* task) {
+    switch (task->type) {
+        case TASK_GET_DATA: {
+            const Data data= target.target_get_data_virtual(task->data.GET_DATA.addr, task->data.GET_DATA.bytes);
+            task->data.GET_DATA.callback(data, task->data.GET_DATA.info);
+            break;
+        }
+    }
+}
+
 ACTION_HANDLE_RES handle_action(Action* action) {
     switch (action->type) {
         case ACTION_CF_CONTINUE: {
@@ -248,8 +259,16 @@ ACTION_HANDLE_RES handle_action(Action* action) {
             state= STATE_BREAK_CAUSE;
             break_on_cause(action->data.BP_CAUSE.is_simple);
 
-            target.target_cf_continue();
-            return ACTION_HANDLE_PROC_WAIT;
+            // target.target_cf_continue();
+            return ACTION_HANDLE_CONTINUE;
+        }
+
+        case ACTION_BP_SAVE: {
+            state= STATE_BREAK_SAVE;
+            break_save();
+
+            // target.target_cf_continue();
+            return ACTION_HANDLE_CONTINUE;
         }
 
         case ACTION_CF_SINGLE_STEP: {
@@ -312,6 +331,12 @@ ACTION_HANDLE_RES handle_action(Action* action) {
         case ACTION_DS_REGS: {
             LabelledRegs lregs= target.target_get_labelled_regs();
             display_labelled_regs(lregs);
+
+            bool succ;
+            AllRegs* all_regs= target.target_get_all_regs(&succ);
+            if (succ)
+                g_idle_add(display_all_registers, all_regs);
+
             return ACTION_HANDLE_CONTINUE;
         }
         case ACTION_DS_STACK_UNWIND: {
@@ -371,6 +396,7 @@ ACTION_HANDLE_RES handle_signal_trap(const BPAddressInfo* bp) {
                 case STATE_STEP_OVER: return handle_step_over();
                 case STATE_STEP_OUT: return handle_step_out();
                 case STATE_BREAK_CAUSE: return ACTION_HANDLE_CONTINUE;
+                case STATE_BREAK_SAVE: return ACTION_HANDLE_CONTINUE;
                 case STATE_NORMAL: {
                     show_log("Recieved trap in normal state\n");
                     break;
@@ -401,6 +427,15 @@ void* control_thread_create(void* data) {
 
         if (action->type == ACTION_AT_QUIT) return NULL;
     }
+}
+
+
+static void update_text_memory() {
+    VSection sec= target.target_get_text_section();
+    Data text_memory= target.target_get_data_virtual(sec.vaddr_start, sec.size);
+    Data* text_data= malloc(sizeof(Data));
+    *text_data= text_memory;
+    g_idle_add(update_breakpoint_memory, text_data);
 }
 
 void control_target(const char* filepath_p) {
@@ -469,9 +504,27 @@ end_q_stat_loop1:;
             break;
         }
 
-        g_idle_add(update_breakpoint_memory, NULL);
+        target.target_unwind_stack();
+
+        update_text_memory();
+
+        QueueBRes q_res;
+        while (q_res= queueb_pop(&task_q), q_res.succ) {
+            Task* task= q_res.data;
+            handle_task(task);
+            free(task);
+        }
 
         const long long r6= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[6]));
+        const long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
+
+        const long long r0= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[0]));
+        const long long r1= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[1]));
+        const long long r2= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[2]));
+        const long long r3= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[3]));
+        const long long r4= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[4]));
+        const long long r5= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[5]));
+
 
         long long rip= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, regs.rip));
 
@@ -518,6 +571,7 @@ end_q_stat_loop1:;
             );
         }
 
+        bool is_user_bp= bp && bp->user_bp_count > 0;
         if (bp) {
             bool succ;
             const uintptr_t cfa= target.target_get_cfa(&succ);
@@ -555,11 +609,6 @@ end_q_stat_loop1:;
 
         target.target_breakpoint_hit_cleanup();
 
-        if (state == STATE_BREAK_CAUSE) {
-            target.target_cf_continue();
-            goto proc_wait_loop;
-        }
-
         if (WIFSTOPPED(status)) {
             hlog("Target stopped by signal %d\n", WSTOPSIG(status));
 
@@ -579,6 +628,20 @@ end_q_stat_loop1:;
                     default: assert(false);
                 }
             }
+        }
+
+        if (state == STATE_BREAK_CAUSE) {
+            target.target_cf_continue();
+            goto proc_wait_loop;
+        }
+
+        if (state == STATE_BREAK_SAVE && !is_user_bp) {
+            target.target_cf_continue();
+            goto proc_wait_loop;
+        }
+
+        if (WIFSTOPPED(status)) {
+            hlog("Target stopped by signal %d\n", WSTOPSIG(status));
 
             void* q_status;
             while (q_status= queueb_pop_blocking(&action_q), q_status) {
