@@ -340,7 +340,7 @@ ALIAS MOV= {
 
 // ALIAS regA= "RAX"
 FLAT ALIAS regA = {
-    if 1 then MAP reg 0000
+    if 1 then MAP regO 0000
 }
 
 ALIAS ADC= {
