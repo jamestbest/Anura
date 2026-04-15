@@ -20,6 +20,8 @@
 
 #include "Errors.h"
 #include "DWARF/Balin.h"
+#include "DWARF/Expr_eval.h"
+#include "Palantir/Palantir.h"
 #include "Saruman/FrameInfo.h"
 
 static uintptr_t virtual_to_runtime_addr(uintptr_t v_addr);
@@ -219,6 +221,13 @@ void load_proc_maps() {
 
 void first_stopped() {
     load_proc_maps();
+
+    VSection text= target.target_get_text_section();
+    Data text_data= target.target_get_data_virtual(text.vaddr_start, text.size);
+    Data* text_data_p= malloc(sizeof(Data));
+    *text_data_p= text_data;
+
+    g_idle_add(update_target_data, text_data_p);
 }
 
 int vaddr_in_segment_range(const void* addrp, const void* segmentp) {
@@ -427,6 +436,19 @@ Data get_data_virtual(virtual_addr addr, uint32_t bytes) {
     return get_data_runtime(raddr, bytes);
 }
 
+void get_data_virtual_callback(virtual_addr addr, uint32_t bytes, void (*callback)(Data data, void* info), void* info) {
+    queueb_push_blocking(&task_q,
+        create_task(TASK_GET_DATA, (TASK_DATA) {
+            .GET_DATA= {
+                .addr= addr,
+                .bytes= bytes,
+                .callback= callback,
+                .info= info
+            }
+        })
+    );
+}
+
 const char* info_main_file_path() {
     const CU* main_cu= get_main_cu();
     show_log("Got the main cu as %p\n", main_cu);
@@ -484,7 +506,8 @@ void unwind_stack() {
     }
 
 
-    Stack stack= StackFrame_arr_create();
+    Stack* stack= malloc(sizeof(Stack));
+    *stack= StackFrame_arr_create();
 
     GeneralRegs regs= target.target_get_general_regs(&succ);
     if (!succ) {
@@ -492,7 +515,7 @@ void unwind_stack() {
         return;
     }
 
-    StackFrame_arr_add(&stack, create_stack_frame(start, regs, false));
+    StackFrame_arr_add(stack, create_stack_frame(start, regs, false));
 
     RegisterRule rule;
     while (rule= get_rule_for(&row, s_fde->cie_entry->return_address_register, &succ),
@@ -514,12 +537,13 @@ void unwind_stack() {
             break;
         }
 
-        GeneralRegs* old_regs= &StackFrame_arr_peek(&stack)->regs;
+        GeneralRegs* old_regs= &StackFrame_arr_peek(stack)->regs;
         regs= restore_regs(&row, old_regs, cfa, s_fde->cie_entry->return_address_register);
-        StackFrame_arr_add(&stack, create_stack_frame(return_addr, regs, true));
+        StackFrame_arr_add(stack, create_stack_frame(return_addr, regs, true));
     }
 
-    show_stack(&stack);
+    g_idle_add(display_stack_trace, stack);
+    show_stack(stack);
 }
 
 VSection get_text_section() {
@@ -533,6 +557,71 @@ VSection get_text_section() {
         .vaddr_end= end,
         .size= size
     };
+}
+
+Value get_value_from_loc(VLocation loc, uint8_t size, uintptr_t cfa) {
+    const bool gen= size <= 8;
+    Value res;
+    
+    if (gen) {
+        res.type= VALUE_GENERAL_VALUE;
+    } else {
+        res.type= VALUE_DATA;
+    }
+
+    switch (loc.type) {
+        case VLOCATION_REGISTER: {
+            res.data.general= target.target_get_reg(loc.data.register_id).value.general;
+            break;
+        }
+        case VLOCATION_REG_OFF: {
+            const int64_t reg_value= target.target_get_reg(loc.data.reg_off.register_id).value.general;
+            const int64_t pos= reg_value + loc.data.reg_off.offset;
+            if (!gen) {
+                res.data.data= target.target_get_data_runtime(pos, size);
+            } else {
+                res.data.general= target.target_get_general_data_runtime(pos, size);
+            }
+            break;
+        }
+        case VLOCATION_CONST: {
+            res.data.general= loc.data.constant;
+            break;
+        }
+        case VLOCATION_ADDR: {
+            const int64_t pos= loc.data.vaddr;
+            if (!gen) {
+                res.data.data= target.target_get_data_runtime(pos, size);
+            } else {
+                res.data.general= target.target_get_general_data_runtime(pos, size);
+            }
+            break;
+        }
+        case VLOCATION_NO_ACCESS: {
+            res.type= VALUE_NONE;
+            break;
+        }
+        case VLOCATION_EXPR: {
+            const VLocation new_loc= eval_dw_expr_to_location(loc.data.expr, cfa);
+            return get_value_from_loc(new_loc, size, cfa);
+        }
+    }
+
+    return res;
+}
+
+VVarInstance instance_var(VVar* var, uintptr_t cfa) {
+    const uint8_t size= get_type_size(var->type);
+
+    VVarInstance inst;
+    inst.var= var;
+    inst.value= get_value_from_loc(var->loc, size, cfa);
+
+    return inst;
+}
+
+Value instance_value(VType* type, VLocation location, uintptr_t cfa) {
+    return get_value_from_loc(location, get_type_size(type), cfa);
 }
 
 void linux_init_target(Target* target) {
@@ -557,6 +646,7 @@ void linux_init_target(Target* target) {
 
     target->target_get_data_runtime= get_data_runtime;
     target->target_get_data_virtual= get_data_virtual;
+    target->target_get_data_virtual_callback= get_data_virtual_callback;
     target->target_get_general_data_runtime= get_general_data_runtime;
 
     target->target_info_main_file_path= info_main_file_path;
@@ -570,4 +660,7 @@ void linux_init_target(Target* target) {
 
     target->target_line_to_addr= line2startaddr;
     target->target_addr_to_line= addr2line;
+
+    target->target_instance_var= instance_var;
+    target->target_instance_value= instance_value;
 }
