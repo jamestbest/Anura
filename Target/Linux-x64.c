@@ -36,7 +36,7 @@ long long aligned_write(uintptr_t address, uint8_t value, uint8_t* existing_valu
 long long remove_hw_bp(uint8_t bp_register) {
     long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
 
-    r7 &= 0 << (bp_register << 1); // disable LOCAL BREAKPOINT
+    r7 &= ~(1 << (bp_register << 1)); // disable LOCAL BREAKPOINT
 
     long long res= 0;
     res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[7]), r7);
@@ -143,6 +143,14 @@ long long readd_sw_bp(BPInfo* bp) {
     return res;
 }
 
+void update_text_memory() {
+    VSection sec= target.target_get_text_section();
+    Data text_memory= target.target_get_data_virtual(sec.vaddr_start, sec.size);
+    Data* text_data= malloc(sizeof(Data));
+    *text_data= text_memory;
+    g_idle_add(update_breakpoint_memory, text_data);
+}
+
 long long place_bp_(uintptr_t address, uint32_t line, BP_REASON reason, uintptr_t cfa, void (*callback)(void* data), void* data, bool defer) {
     long long r7= ptrace(PTRACE_PEEKUSER, target.pid, offsetof(struct user, u_debugreg[7]));
 
@@ -154,17 +162,19 @@ long long place_bp_(uintptr_t address, uint32_t line, BP_REASON reason, uintptr_
         if (!used && (free_bp == (unsigned int)-1)) free_bp= j;
     }
 
-    BPAddressInfo* addr_info;
+    BPAddressInfo* addr_info= BPAddressInfo_arr_search_ie(&bp_info, address);
     // if there is a local or global breakpoint enabled for all bps then we cannot create a hardware breakpoint
     if (free_bp == -1) {
         uint8_t shadow;
 
-        target.target_get_data_runtime(address - 8, 16);
+        if (!addr_info) {
+            target.target_get_data_runtime(address - 8, 16);
 
-        const long long res= aligned_write(address, SW_INT_CODE, &shadow);
-        if (res != 0) return res;
+            const long long res= aligned_write(address, SW_INT_CODE, &shadow);
+            if (res != 0) return res;
 
-        target.target_get_data_runtime(address - 8, 16);
+            target.target_get_data_runtime(address - 8, 16);
+        }
 
         addr_info= get_or_add_bp_address_info(address,
             (BPInfo){
@@ -176,21 +186,23 @@ long long place_bp_(uintptr_t address, uint32_t line, BP_REASON reason, uintptr_
             reason
         );
 
-        g_idle_add(update_breakpoint_memory, NULL);
+        update_text_memory();
 
         goto place_bp_end;
     }
 
-    r7 |= 1 << (free_bp << 1); // enable LOCAL BREAKPOINT free_bp
-    r7 &= (~(0b11 << (16 + (free_bp << 2)))); // set R/Wx to 00 I.e. BRK INST
-    r7 &= (~(0b11 << (18 + (free_bp << 2)))); // set LENx to 00 FOLLOWING R/W0 being 00 (Vol. 3B 19-5)
+    if (!addr_info) {
+        r7 |= 1 << (free_bp << 1); // enable LOCAL BREAKPOINT free_bp
+        r7 &= (~(0b11 << (16 + (free_bp << 2)))); // set R/Wx to 00 I.e. BRK INST
+        r7 &= (~(0b11 << (18 + (free_bp << 2)))); // set LENx to 00 FOLLOWING R/W0 being 00 (Vol. 3B 19-5)
 
-    long long res= 0;
-    res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[7]), r7);
-    if (res != 0) return res;
+        long long res= 0;
+        res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[7]), r7);
+        if (res != 0) return res;
 
-    res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[free_bp]), (long long)address);
-    if (res != 0) return res;
+        res= ptrace(PTRACE_POKEUSER, target.pid, offsetof(struct user, u_debugreg[free_bp]), (long long)address);
+        if (res != 0) return res;
+    }
 
     addr_info= get_or_add_bp_address_info(address,
         (BPInfo) {
@@ -598,7 +610,7 @@ XSaveRegisters get_xsave_regs(bool* succ) {
         decode_ext_format(&header);
     }
 
-    set_xsave_data(extended_data, &regs);
+    set_xsave_data(iov.iov_base, &regs);
 
     *succ= true;
     return regs;
@@ -607,9 +619,9 @@ XSaveRegisters get_xsave_regs(bool* succ) {
 void general_reg_instance(const char* name, int64_t value, VRegInstanceArray* arr) {
     VRegInstance inst;
     inst.name= name;
-    inst.value= malloc(20);
+    inst.value= malloc(60);
 
-    snprintf(inst.value, 19, "%ld", value);
+    snprintf(inst.value, 60, "%ld (%#lx)", value, value);
 
     VRegInstance_arr_add(arr, inst);
 }
@@ -658,8 +670,28 @@ void vector_reg_instance(const char* name, uint8_t* bytes, uint8_t size, VRegIns
     VRegInstance_arr_add(arr, inst);
 }
 
+void floating_point_reg_instance(const char* name, uint8_t* bytes, VRegInstanceArray* arr) {
+    VRegInstance inst;
+    inst.name= name;
+
+    size_t max_len= 20 * sizeof(uint8_t) + 1;
+    char* value= malloc(max_len);
+    long double floating_val= 0;
+    memcpy(&floating_val, bytes, 10);
+    snprintf(value, max_len, "%.19Lf", floating_val);
+    inst.value= value;
+    VRegInstance_arr_add(arr, inst);
+}
+
 void get_all_xsave_reg_instance(XSaveRegisters* regs, VRegInstanceArray* arr) {
-    size_t len= sizeof("xmm") + 3;
+    size_t len= sizeof("st") + 2;
+    for (int i = 0; i < 8; ++i) {
+        char* name= malloc(len);
+        snprintf(name, len, "st%u", i);
+        floating_point_reg_instance(name, regs->mm_regs[i].val, arr);
+    }
+
+    len= sizeof("xmm") + 3;
     for (int i = 0; i < 16; ++i) {
         char* name= malloc(len);
         snprintf(name, len, "xmm%u", i);
@@ -699,6 +731,15 @@ void get_all_xsave_reg_instance(XSaveRegisters* regs, VRegInstanceArray* arr) {
     }
 }
 
+AllRegs* get_all_regs(bool* succ) {
+    AllRegs* res= malloc(sizeof(AllRegs));
+
+    res->general= get_regs(succ);
+    res->xsave= get_xsave_regs(succ);
+
+    return res;
+}
+
 VRegInstanceArray get_all_regs_instance(AllRegs* regs) {
     VRegInstanceArray res= VRegInstance_arr_create();
 
@@ -706,16 +747,6 @@ VRegInstanceArray get_all_regs_instance(AllRegs* regs) {
     get_all_xsave_reg_instance(&regs->xsave, &res);
 
     return res;
-}
-
-AllRegs get_all_regs(bool* succ) {
-    AllRegs regs;
-    regs.general= target.target_get_general_regs(succ);
-
-    if (!succ) return (AllRegs){0};
-    regs.xsave= get_xsave_regs(succ);
-
-    return regs;
 }
 
 uintptr_t get_pc() {
@@ -1031,6 +1062,7 @@ int linux_x64_init_target(Target* t) {
     t->target_get_labelled_regs= get_labelled_regs;
     t->target_set_reg_struct_value= set_reg_struct_value;
     t->target_get_all_regs_instance= get_all_regs_instance;
+    t->target_get_all_regs= get_all_regs;
 
     t->target_check_comparison= check_comparison;
 
@@ -1049,6 +1081,7 @@ int linux_x64_init_target(Target* t) {
     t->target_get_selected_cu= get_selected_cu;
     t->target_get_all_cu_filenames= get_all_cu_filenames;
     t->target_create_var_instance_string= create_var_instance_value_string;
+    t->target_get_virtual_from_ref= get_virtual_from_ref;
 
     return 0;
 }
