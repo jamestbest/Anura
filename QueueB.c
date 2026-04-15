@@ -40,7 +40,7 @@ void queueb_destroy(QueueB* queue) {
 void queueb_push_blocking(QueueB* queue, void* data) {
     pthread_mutex_lock(&queue->lock);
 
-    if (queue->pos == queue->max_size) {
+    if (queue->pos >= queue->max_size) {
         if (!queueb_resize(queue, queue->pos + QUEUE_B_MIN_SIZE)) assert(false);
     }
 
@@ -76,7 +76,7 @@ QueueBAll queueb_pop_all(QueueB* queue) {
 }
 
 bool queueb_resize(QueueB* queue, size_t new_size) {
-    void* new_data= realloc(queue->data_arr, new_size);
+    void* new_data= realloc(queue->data_arr, new_size * sizeof(void*));
 
     if (!new_data) return false;
 
