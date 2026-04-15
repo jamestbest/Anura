@@ -41,6 +41,7 @@ const char* BP_REASON_STRS[BP_REASON_COUNT]= {
     [BP_REASON_STEP_OUT]= "STEP OUT",
     [BP_REASON_STEP_OVER]= "STEP OVER",
     [BP_REASON_BREAK_CAUSE]= "BREAK CAUSE",
+    [BP_REASON_BREAK_SAVE]= "BREAK SAVE",
     [BP_REASON_USER]= "USER"
 };
 
@@ -135,13 +136,15 @@ ARRAY_ADD(BPInfo, BPInfo)
 ARRAY_ADD_CMP(BPAddressInfo, BPAddressInfo, compare_bp_addr_info, address)
 ARRAY_ADD(StackFrame, StackFrame)
 ARRAY_ADD(BP, BP)
-ARRAY_ADD_CMP(VSub, VSub, vsub_cmp, vaddr_start)
+VECTOR_ADD(VSub, VSub)
 ARRAY_ADD(VTypeStructElement, StructElem)
-ARRAY_ADD_CMP(VVar, VVar, strcmp, name);
+VECTOR_ADD(VVar, VVar);
 ARRAY_ADD_CMP(VType, VType, vtype_cmp, ref);
 ARRAY_ADD(EnumElement, EnumElement);
 ARRAY_ADD(VVarInstance, VVarInstance)
 ARRAY_ADD(VRegInstance, VRegInstance)
+VECTOR_ADD(PointInstance, PointInstance)
+VECTOR_ADD(TracedFrame, TracedFrame)
 
 BPAddressInfoArray bp_info;
 
@@ -184,7 +187,7 @@ BPAddressInfo* get_or_add_bp_address_info(uintptr_t address, BPInfo info_if_none
     *addr_info= (BPAddressInfo){0};
     addr_info->address= address;
     addr_info->canonical_bp= info_if_none;
-    addr_info->bps= BP_arr_construct(0);
+    addr_info->bps= BP_arr_construct(5);
     increment_by_reason(addr_info, reason);
 
     return addr_info;
@@ -269,7 +272,7 @@ void print_breakpoints() {
                 show_log("No data");
                 break;
         }
-        show_log(" on line %u", bp->line);
+        show_log(" on line %u\n", bp->line);
 
         if (addr_info->bps.pos != 0) {
             for (int i = 0; i < addr_info->bps.pos; ++i) {
@@ -282,8 +285,6 @@ void print_breakpoints() {
                     bp->defer ? "True" : "False"
                 );
             }
-        } else {
-            show_log("\n");
         }
     }
 }
@@ -310,6 +311,7 @@ void print_breakpoints() {
 // }
 
 QueueB action_q;
+QueueB task_q;
 void* bp_pos= 0;
 int bp_line= 0;
 
@@ -322,6 +324,15 @@ Action* create_action(ACTION_TYPE type, ACTION_DATA data) {
     return action;
 }
 
+Task* create_task(TASK_TYPE type, TASK_DATA data) {
+    Task* task= malloc(sizeof(Task));
+
+    task->type= type;
+    task->data= data;
+
+    return task;
+}
+
 void open_program(const char* filepath) {
     target.target_decode_file(filepath);
 
@@ -330,7 +341,6 @@ void open_program(const char* filepath) {
     }));
 
     g_idle_add(guiup_main_file, (gpointer)target.target_info_main_file_path());
-    g_idle_add(update_target_data, NULL);
 }
 
 char* va_to_string(const char* message, va_list args) {
@@ -407,6 +417,7 @@ int main(int argc, char* argv[]) {
     init_target(ANURA_TARGET);
 
     action_q= queueb_create();
+    task_q= queueb_create();
 
     pipe(target.target_io_pipe);
     pipe(tui_pipe);

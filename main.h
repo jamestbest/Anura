@@ -5,7 +5,8 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-#include "Array.h"
+#include "shared/Array.h"
+#include "shared/Vector.h"
 #include "QueueB.h"
 
 #include <stdint.h>
@@ -16,6 +17,7 @@
 typedef uint64_t PROCESS_ID;
 
 extern QueueB action_q;
+extern QueueB task_q;
 
 typedef enum BP_TYPE {
     BP_HARDWARE,
@@ -51,6 +53,7 @@ typedef enum BP_REASON {
     BP_REASON_STEP_OVER,
     BP_REASON_STEP_OUT,
     BP_REASON_BREAK_CAUSE,
+    BP_REASON_BREAK_SAVE,
     BP_REASON_USER,
     BP_REASON_COUNT
 } BP_REASON;
@@ -95,6 +98,7 @@ typedef enum ACTION_TYPE {
     ACTION_BP_REMOVE,
     ACTION_BP_LIST,
     ACTION_BP_CAUSE,
+    ACTION_BP_SAVE,
 
     ACTION_CF_EXIT,
     ACTION_CF_SINGLE_STEP,
@@ -148,6 +152,31 @@ typedef struct Action {
 
 Action* create_action(ACTION_TYPE type, ACTION_DATA data);
 
+typedef struct Data {
+    uint8_t* raw_data;
+    uint32_t data_size;
+} Data;
+
+typedef enum TASK_TYPE {
+    TASK_GET_DATA
+} TASK_TYPE;
+
+typedef union TASK_DATA {
+    struct {
+        uintptr_t addr;
+        uint32_t bytes;
+        void (*callback)(Data data, void* info);
+        void* info;
+    } GET_DATA;
+} TASK_DATA;
+
+typedef struct Task {
+    TASK_TYPE type;
+    TASK_DATA data;
+} Task;
+
+Task* create_task(TASK_TYPE type, TASK_DATA data);
+
 typedef union RegValue {
     int64_t general;
     __m128 vector[4];
@@ -199,11 +228,6 @@ typedef enum COMPARISONS {
 #endif
 
 ARRAY_PROTO(GeneralRegs, GeneralRegs)
-
-typedef struct Data {
-    uint8_t* raw_data;
-    uint32_t data_size;
-} Data;
 
 typedef struct VRegInstance {
     const char* name;
@@ -318,6 +342,7 @@ typedef struct VLocation {
 } VLocation;
 
 typedef struct VVar {
+    uint64_t ref;
     const char* name;
     uint32_t line;
     uint32_t col;
@@ -325,7 +350,7 @@ typedef struct VVar {
     uint64_t type_ref;
     VLocation loc;
 } VVar;
-ARRAY_PROTO_CMP(VVar, VVar, strcmp, name);
+VECTOR_PROTO(VVar, VVar);
 
 typedef enum ValueType {
     VALUE_NONE,
@@ -353,8 +378,8 @@ typedef struct VSub {
     uintptr_t vaddr_start;
     uintptr_t vaddr_end;
     const char* subprog_name;
-    VVarArray vars;
-    VVarArray params;
+    VVarVector vars;
+    VVarVector params;
 } VSub;
 
 typedef struct StackFrame {
@@ -373,8 +398,44 @@ typedef struct StackFrame {
 ARRAY_PROTO(StackFrame, StackFrame)
 typedef StackFrameArray Stack;
 
-int vsub_cmp(const uintptr_t a, const uintptr_t b);
-ARRAY_PROTO_CMP(VSub, VSub, vsub_cmp, vaddr_start);
+typedef enum PointType {
+    POINT_TYPE_DF,
+    POINT_TYPE_CF,
+    POINT_TYPE_SENTINEL
+} PointType;
+
+typedef struct POINT {
+    PointType type;
+    uintptr_t addr;
+} POINT;
+
+typedef struct PointInstance {
+    PointType type;
+    POINT* point;
+} PointInstance;
+
+typedef struct CFPointInstance {
+    PointInstance base;
+} CFPointInstance;
+
+typedef struct DFPointInstance {
+    PointInstance base;
+    VType* type;
+    Value value;
+} DFPointInstance;
+
+VECTOR_PROTO(PointInstance, PointInstance)
+
+VECTOR_PROTO(struct TracedFrame, TracedFrame)
+typedef struct TracedFrame {
+    StackFrame frame;
+    PointInstanceVector points;
+    TracedFrameVector links;
+    struct TracedFrame* parent;
+    uint32_t pos_in_parent;
+} TracedFrame;
+
+VECTOR_PROTO(VSub, VSub);
 
 typedef struct SubIter {
     struct CU* cu;
