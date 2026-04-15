@@ -194,12 +194,12 @@ AVAL data_to_aval(uint64_t value) {
 
 #define HEX_DIGITS(num) log2(num) / 4
 #define HEX_EXTRA_SIZE sizeof("-0x")
-#define MAX_HEX_CHARS HEX_DIGITS(UINT64_MAX) + HEX_EXTRA_SIZE
+#define MAX_HEX_CHARS 20
 
 char* data_to_string(int64_t value) {
     char* buff= malloc(MAX_HEX_CHARS);
     if (value < 0) {
-        snprintf(buff, MAX_HEX_CHARS, "-%#lx", value);
+        snprintf(buff, MAX_HEX_CHARS, "-0x%lx", -value);
     } else {
         snprintf(buff, MAX_HEX_CHARS, "%#lx", value);
     }

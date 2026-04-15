@@ -57,7 +57,7 @@ typedef struct StrSlice {
 #define COUNT_ALT_BASE_DIGITS(num) (sizeof(XSTR(num)) - 1 - 2)
 #define ALT_DIGITS(num) COUNT_ALT_BASE_DIGITS(num)
 #define EXPECT_BIN_HEX(num) {                                                                           \
-    const char *const str= XSTR(num);                                                                   \
+    const char* const str= XSTR(num);                                                                   \
     const char first= str[0], second= str[1];                                                           \
     _Static_assert(first == '0' && (second == 'x' || second == 'X' || second == 'b' || second == 'B')); \
 }
