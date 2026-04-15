@@ -90,6 +90,7 @@ typedef struct DEP_LINEAR {
 typedef struct DEP_EXPR {
     HITTABLE_BASE
     TYPE type;
+    bool repeatable;
 
     DEP_BASE* left;
     DEP_BASE* right;

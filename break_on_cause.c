@@ -127,7 +127,7 @@ const SubInfo* simple_sub_infos[]= {
 
 
 
-const SubInfo** sub_infos;
+static const SubInfo** sub_infos;
 
 int collect_info_cmp(DEP_COLLECT* a, DEP_COLLECT* b) {
     return a - b;
@@ -140,7 +140,7 @@ ARRAY_ADD_CMP(CollectInfo, CollectInfo, collect_info_cmp, collect)
 ARRAY_ADD(TargetRule, TargetRule)
 
 MarkerVector markers;
-TreeNode* root;
+static TreeNode* root;
 
 TreeNode* alloc_node(uint64_t cfa, DEP_BASE* base) {
     TreeNode* node= malloc(sizeof(TreeNode));
@@ -205,76 +205,17 @@ const SubInfo* find_sub_info(uintptr_t addr) {
     return NULL;
 }
 
-void set_instance_data_from_loc(VLocation loc, VVarInstance* inst, uint8_t size, uintptr_t cfa) {
-    const bool gen= size <= 8;
-    if (gen) {
-        inst->value.type= VALUE_GENERAL_VALUE;
-    } else {
-        inst->value.type= VALUE_DATA;
-    }
-
-    switch (loc.type) {
-        case VLOCATION_REGISTER: {
-            inst->value.data.general= target.target_get_reg(loc.data.register_id).value.general;
-            break;
-        }
-        case VLOCATION_REG_OFF: {
-            const int64_t reg_value= target.target_get_reg(loc.data.reg_off.register_id).value.general;
-            const int64_t pos= reg_value + loc.data.reg_off.offset;
-            if (!gen) {
-                inst->value.data.data= target.target_get_data_runtime(pos, size);
-            } else {
-                inst->value.data.general= target.target_get_general_data_runtime(pos, size);
-            }
-            break;
-        }
-        case VLOCATION_CONST: {
-            inst->value.data.general= loc.data.constant;
-            break;
-        }
-        case VLOCATION_ADDR: {
-            const int64_t pos= loc.data.vaddr;
-            if (!gen) {
-                inst->value.data.data= target.target_get_data_runtime(pos, size);
-            } else {
-                inst->value.data.general= target.target_get_general_data_runtime(pos, size);
-            }
-            break;
-        }
-        case VLOCATION_NO_ACCESS: {
-            inst->value.type= VALUE_NONE;
-            break;
-        }
-        case VLOCATION_EXPR: {
-            const VLocation new_loc= eval_dw_expr_to_location(loc.data.expr, cfa);
-            set_instance_data_from_loc(new_loc, inst, size, cfa);
-            break;
-        }
-    }
-}
-
-VVarInstance instance_var(VVar* var, uintptr_t cfa) {
-    const uint8_t size= get_type_size(var->type);
-
-    VVarInstance inst;
-    inst.var= var;
-
-    set_instance_data_from_loc(var->loc, &inst, size, cfa);
-
-    return inst;
-}
-
 void capture_all_vars(VSub* sub, VVarInstanceArray* arr, uintptr_t cfa) {
     for (int i = 0; i < sub->vars.pos; ++i) {
-        VVar* var= VVar_arr_ptr(&sub->vars, i);
-        VVarInstance_arr_add(arr, instance_var(var, cfa));
+        VVar* var= VVar_vec_get_unsafe(&sub->vars, i);
+        VVarInstance_arr_add(arr, target.target_instance_var(var, cfa));
     }
 }
 
 void capture_all_args(VSub* sub, VVarInstanceArray* arr, uintptr_t cfa) {
     for (int i = 0; i < sub->params.pos; ++i) {
-        VVar* var= VVar_arr_ptr(&sub->params, i);
-        VVarInstance_arr_add(arr, instance_var(var, cfa));
+        VVar* var= VVar_vec_get_unsafe(&sub->params, i);
+        VVarInstance_arr_add(arr, target.target_instance_var(var, cfa));
     }
 }
 
@@ -841,7 +782,7 @@ bool place_expr_markers(Marker* marker, DEP_EXPR* expr, TargetValue target_value
             break;
         case OP_GT: {
             const_val.inverted= false;
-            int64_t gt_value= const_val.data.value;
+            const int64_t gt_value= const_val.data.value;
             const_val= (TargetValue) {
                 .type= TARGET_VALUE_RULES,
                 .data.rules= TargetRule_arr_construct(1)
@@ -891,7 +832,7 @@ void handle_marker_hit_downstream(Marker* marker) {
 
         TreeNode* node= alloc_node(cfa, marker->pos);
         Node_vec_add(&marker->node->links, node);
-        marker->node= node;//todo: add marker to node
+        marker->node= node;
         Marker_vec_add(&node->markers, marker);
 
         size_t idx= 0;
@@ -944,13 +885,14 @@ void handle_marker_hit_downstream(Marker* marker) {
     }
 
     const bool placed= place_next_markers(marker, marker->pos, marker->target_value);
-    // if (!placed) {
-    //     propogate_marker_up(marker);
-    // }
+    if (!placed && hit->value_addr_offset == 0) {
+        handle_marker_hit_upstream(marker);
+    }
 }
 
 void marker_hit_downstream_callback(void* data) {
     Marker* const marker= data;
+
     marker->going_upstream= true;
     handle_marker_hit_downstream(marker);
 }

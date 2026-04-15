@@ -87,10 +87,6 @@ DEP_HEADER current_header= MAKE_HEADER(
     NO_PASS
 );
 
-
-
-
-
 DEP_LINEAR consume_return= MAKE_DATA(
     ID(11),
     LOC_RAX,
@@ -228,7 +224,7 @@ DEP_LINEAR expect_current_type= MAKE_SINGLE(
     0x13ae,
     7,
     LOC_EAX,
-    NOT_DEAD,
+    IS_DEAD,
     NO_PASS,
     current_header,
     "current()->type"
