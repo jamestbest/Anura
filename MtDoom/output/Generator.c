@@ -205,7 +205,14 @@ int generate_statement(Node* statement) {
     }
 }
 
-const char* size_type(uint64_t size) {
+const char* size_type(uint64_t size, bool signed_) {
+    if (signed_) {
+        if (size > 32) return "int64_t";
+        if (size > 16) return "int32_t";
+        if (size > 8) return "int16_t";
+        if (size == 8) return "int8_t";
+    }
+
     if (size > 32) return "uint64_t";
     if (size > 16) return "uint32_t";
     if (size > 8) return "uint16_t";
@@ -347,7 +354,7 @@ int generate_data_statement(DataNode* data) {
     );
 
     if (data->non_fielded) {
-        fprintf(hfile, "\t%s _value: %lu;\n", size_type(data->bits), data->bits);
+        fprintf(hfile, "\t%s _value: %lu;\n", size_type(data->bits, true), data->bits);
     } else {
         for (int i = 0; i < data->all_fields.pos; ++i) {
             const FieldNode* field= FieldNode_vec_get_unsafe(&data->all_fields, i);
@@ -357,7 +364,7 @@ int generate_data_statement(DataNode* data) {
                 fprint_simple_num(hfile, &field->num);
                 fnewline(hfile);
             } else {
-                const char* type= size_type(field->named_info.bits);
+                const char* type= size_type(field->named_info.bits, false);
                 fprintf(hfile,
                     "\t%s %s: %u;\n",
                     type,
