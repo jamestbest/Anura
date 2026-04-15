@@ -57,6 +57,9 @@ add_executable(Anura main.c shared/Array.c
         x64/x64.c
         MtDoom/output/default.c
         DWARF/Expr_eval.c
+        MtDoom/Testing/Gandalf.c
+        breaksave/break_save.c
+        breaksave/break_save.h
 )
 
 target_compile_options(Anura PRIVATE -fsanitize=address)
