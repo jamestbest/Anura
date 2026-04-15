@@ -76,7 +76,7 @@ typedef struct Target {
     uint64_t (*target_get_general_reg_at)(uintptr_t addr);
     bool (*target_set_reg_struct_value)(GeneralRegs* regs, uint16_t register_id, uint64_t value);
     GeneralRegs (*target_get_general_regs)(bool* succ);
-    AllRegs (*target_get_all_regs)(bool* succ);
+    AllRegs* (*target_get_all_regs)(bool* succ);
     VRegInstanceArray (*target_get_all_regs_instance)(AllRegs* regs);
     uint64_t (*target_get_general_reg_using)(uint16_t register_id, GeneralRegs* regs, bool* succ);
 
@@ -87,6 +87,7 @@ typedef struct Target {
 
     Data (*target_get_data_runtime)(runtime_addr runtime_addr, uint32_t bytes);
     Data (*target_get_data_virtual)(virtual_addr virtual_addr, uint32_t bytes);
+    void (*target_get_data_virtual_callback)(virtual_addr addr, uint32_t bytes, void (*callback)(Data data, void* info), void* info);
     int64_t (*target_get_general_data_runtime)(runtime_addr runtime_addr, uint8_t bytes);
 
     const char* (*target_info_main_file_path)();
@@ -96,7 +97,7 @@ typedef struct Target {
     bool (*target_check_comparison)(COMPARISONS comparison);
 
     VSection (*target_get_text_section)();
-    VSub (*target_get_next_sub)(SubIter* iter, bool* succ);
+    VSub* (*target_get_next_sub)(SubIter* iter);
     const char* (*target_get_subroutine_name_at)(uintptr_t v_addr);
     VSub* (*target_get_vsub_at)(uintptr_t v_addr);
 
@@ -110,6 +111,10 @@ typedef struct Target {
     void* (*target_get_selected_cu)();
     void* (*target_get_main_cu)();
     const char* (*target_create_var_instance_string)(VVarInstance* inst);
+
+    void* (*target_get_virtual_from_ref)(uintptr_t ref);
+    VVarInstance (*target_instance_var)(VVar* var, uintptr_t cfa);
+    Value (*target_instance_value)(VType* type, VLocation location, uintptr_t cfa);
 } Target;
 
 typedef enum TARGETS {
