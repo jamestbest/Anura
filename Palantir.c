@@ -67,8 +67,8 @@ int tui_loop() {
             break;
         }
 
-        if (MATCH_STR("set")) {
-            sscanf(buff.data, "set %d", &line);
+        if (MATCH_STR("bp set")) {
+            sscanf(buff.data, "bp set %d", &line);
             LineAddrRes res= line2startaddr(line);
             if (!res.succ) {
                 show_err("There is no code on line %d\n", line);
@@ -87,8 +87,8 @@ int tui_loop() {
                     }
                 )
             );
-        } else if (MATCH_STR("del")) {
-            sscanf(buff.data, "del %d", &line);
+        } else if (MATCH_STR("bp del")) {
+            sscanf(buff.data, "bp del %d", &line);
             LineAddrRes res= line2startaddr(line);
             if (!res.succ) {
                 printf("There is no code on line %d\n", line);
@@ -107,7 +107,7 @@ int tui_loop() {
                     }
                 )
             );
-        } else if (MATCH_STR("cont")) {
+        } else if (MATCH_STR("cf cont")) {
             printf("tui Continuing process\n");
             errno= 0;
             queueb_push_blocking(
@@ -117,7 +117,7 @@ int tui_loop() {
                     NO_DATA
                 )
             );
-        } else if (MATCH_STR("astep")) {
+        } else if (MATCH_STR("cf astep")) {
             printf("Assembly level single step\n");
             queueb_push_blocking(
                 &action_q,
@@ -137,7 +137,7 @@ int tui_loop() {
             );
             target.target_interrupt();
             break;
-        } else if (MATCH_STR("into")) {
+        } else if (MATCH_STR("step into")) {
             printf("Stepping into\n");
             queueb_push_blocking(
                 &action_q,
@@ -146,7 +146,7 @@ int tui_loop() {
                     NO_DATA
                 )
             );
-        } else if (MATCH_STR("over")) {
+        } else if (MATCH_STR("step over")) {
             printf("Stepping over\n");
             queueb_push_blocking(
                 &action_q,
@@ -155,7 +155,7 @@ int tui_loop() {
                     NO_DATA
                 )
             );
-        } else if (MATCH_STR("out")) {
+        } else if (MATCH_STR("step out")) {
             printf("Stepping out\n");
             queueb_push_blocking(
                 &action_q,
@@ -164,7 +164,7 @@ int tui_loop() {
                     NO_DATA
                 )
             );
-        } else if (MATCH_STR("regs")) {
+        } else if (MATCH_STR("display regs")) {
             printf("Sending request for registers\n");
             queueb_push_blocking(
                 &action_q,
@@ -173,9 +173,9 @@ int tui_loop() {
                     NO_DATA
                 )
             );
-        } else if (MATCH_STR("list")) {
+        } else if (MATCH_STR("display breakpoints")) {
             print_breakpoints();
-        } else if (MATCH_STR("stack")) {
+        } else if (MATCH_STR("display stack")) {
             queueb_push_blocking(
                 &action_q,
                 create_action(
@@ -183,9 +183,9 @@ int tui_loop() {
                     NO_DATA
                 )
             );
-        } else if (MATCH_STR("cause")) {
+        } else if (MATCH_STR("break cause")) {
             char choice[21];
-            sscanf(buff.data, "cause %[^\n]20s", choice);
+            sscanf(buff.data, "break cause %[^\n]20s", choice);
             ACTION_DATA data;
             if (strncmp(choice, "EXAMPLE", sizeof("EXAMPLE") - 1) == 0) {
                 data.BP_CAUSE.is_simple= false;
@@ -200,6 +200,10 @@ int tui_loop() {
                 create_action(ACTION_BP_CAUSE,
                     data
                 )
+            );
+        } else if (MATCH_STR("break save")) {
+            queueb_push_blocking(&action_q,
+                create_action(ACTION_BP_SAVE, NO_DATA)
             );
         } else {
             printf("Unable to match command `%s`\n", buff.data);
