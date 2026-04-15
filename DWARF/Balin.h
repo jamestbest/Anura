@@ -306,19 +306,26 @@ typedef struct DIE {
 
 ARRAY_PROTO(DIE, DIE)
 
+typedef struct VDIE {
+    uintptr_t id; // the offset for DWARF
+    void* v_item;
+} VDIE;
+ARRAY_PROTO_CMP(VDIE, VDIE, v_die_cmp, id)
+
 typedef struct CU {
     CU_HEADER header;
     DIEArray dies;
-    VSubArray vsubprogs;
-    VVarArray globals;
+    VSubVector vsubprogs;
+    VVarVector globals;
     VTypeArray types;
+    VDIEArray virtuals;
 } CU;
 VECTOR_PROTO(CU, CU)
 
 FORM_DATA raa_form_data(uint8_t** start, DW_FORM form, uint8_t addr_size, uint8_t offset_size, int64_t impl_const);
 CU* get_main_cu();
 const char* get_subprog_name_at(uintptr_t addr);
-VSub next_sub(SubIter* iter, bool* succ);
+VSub* next_sub(SubIter* iter);
 void print_form_data(const FORM_DATA* data, DW_FORM form, uint64_t impl_const);
 VSub* get_vsub_at(const uintptr_t addr);
 SubIter get_selected_cu_sub_iter();
@@ -328,5 +335,6 @@ Vector get_all_cu_filenames();
 const char* get_var_name(const DIE* var);
 uint8_t get_type_size(VType* type);
 const char* create_var_instance_value_string(VVarInstance* inst);
+void* get_virtual_from_ref(uintptr_t ref);
 
 #endif //BALIN_H

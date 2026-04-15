@@ -18,6 +18,14 @@
 ARRAY_ADD(ATData, ATData)
 ARRAY_ADD(TagData, TagData)
 
+int v_die_cmp(const uintptr_t ref, const uintptr_t die_ref) {
+    if (ref < die_ref) return -1;
+    if (ref > die_ref) return 1;
+    return 0;
+}
+
+ARRAY_ADD_CMP(VDIE, VDIE, v_die_cmp, id)
+
 void print_die(const DIE* die);
 static int parse_cu_dies(uint8_t** data, uint8_t* section_start, const uint8_t* section_end, CU* cu, TableArray* abbrev_tables);
 static const char* die_data_get_str(const FORM_DATA* data, DW_FORM form);
@@ -175,10 +183,11 @@ static CU* alloc_cu() {
     CU* cu= malloc(sizeof(CU));
     *cu= (CU){
         .header= {0},
-        .vsubprogs= VSub_arr_construct(0),
+        .vsubprogs= VSub_vec_create(),
         .dies= DIE_arr_construct(0),
         .types= VType_arr_create(),
-        .globals= VVar_arr_create()
+        .globals= VVar_vec_create(),
+        .virtuals= VDIE_arr_create()
     };
 
     return cu;
@@ -191,6 +200,16 @@ void set_selected_cu(void* cu) {
 void* get_selected_cu() {
     return selected_cu;
 }
+
+static int vsub_cmp(const void* a, const void* b) {
+    const VSub* sub_a= *(VSub**)a;
+    const VSub* sub_b= *(VSub**)b;
+
+    if (sub_a->vaddr_start < sub_b->vaddr_start) return -1;
+    if (sub_a->vaddr_start > sub_b->vaddr_start) return 1;
+    return 0;
+}
+
 
 int parse_info(Section* section, TableArray* abbrev_tables) {
     cus= CU_vec_create();
@@ -208,6 +227,13 @@ int parse_info(Section* section, TableArray* abbrev_tables) {
         res= parse_cu_dies(&data, section_start, section_end, cu, abbrev_tables);
         if (cu->header.filename != NULL)
             CU_vec_add(&cus, cu);
+
+        qsort(
+            cu->vsubprogs.arr,
+            cu->vsubprogs.pos,
+            sizeof(cu->vsubprogs.arr[0]),
+            vsub_cmp
+        );
 
         resolve_type_refs(cu);
     }
@@ -274,6 +300,10 @@ VType* get_base_type(VType* type) {
 const char* create_var_instance_value_string(VVarInstance* inst) {
     VType* base_type= get_base_type(inst->var->type);
 
+    if (inst->value.type == VALUE_NONE) {
+        return "Unassigned";
+    }
+
     switch (base_type->type) {
         case VTYPE_BASE: {
             char* out= malloc(20);
@@ -305,23 +335,23 @@ const char* create_var_instance_value_string(VVarInstance* inst) {
 
 void resolve_type_refs(CU* cu) {
     for (int i = 0; i < cu->vsubprogs.pos; ++i) {
-        const VSub* sub= VSub_arr_ptr(&cu->vsubprogs, i);
+        const VSub* sub= VSub_vec_get_unsafe(&cu->vsubprogs, i);
 
         for (int j = 0; j < sub->vars.pos; ++j) {
-            VVar* var= VVar_arr_ptr(&sub->vars, j);
+            VVar* var= VVar_vec_get_unsafe(&sub->vars, j);
 
             var->type= get_cu_type_by_ref(cu, var->type_ref);
         }
 
         for (int j = 0; j < sub->params.pos; ++j) {
-            VVar* var= VVar_arr_ptr(&sub->params, j);
+            VVar* var= VVar_vec_get_unsafe(&sub->params, j);
 
             var->type= get_cu_type_by_ref(cu, var->type_ref);
         }
     }
 
     for (int i = 0; i < cu->globals.pos; ++i) {
-        VVar* var= VVar_arr_ptr(&cu->globals, i);
+        VVar* var= VVar_vec_get_unsafe(&cu->globals, i);
         var->type= get_cu_type_by_ref(cu, var->type_ref);
     }
 
@@ -357,7 +387,7 @@ void resolve_type_refs(CU* cu) {
     }
 }
 
-VVar to_vvar(const DIE* var, bool* succ, CU* cu) {
+VVar* to_vvar(const DIE* var, CU* cu) {
     const Table* abbrevs= var->type.table;
     const TagData* data= TagData_arr_ptr(&abbrevs->abbrevs, var->type.abbrev);
 
@@ -399,22 +429,28 @@ VVar to_vvar(const DIE* var, bool* succ, CU* cu) {
         type_ref= DIEDATA_arr_ptr(&var->data, type_pos)->reference;
     }
 
-    *succ= true;
-    VVar vvar= (VVar) {
+    VVar* vvar= malloc(sizeof(VVar));
+    *vvar= (VVar) {
+        .ref= var->ref,
         .name= get_var_name(var),
         .col= col,
         .line= line,
         .loc= location,
         .type_ref= type_ref
     };
+
+    VDIE_arr_add(&cu->virtuals, (VDIE) {
+        .id= var->ref,
+        .v_item= vvar
+    });
+
     return vvar;
 
 to_vvar_fail:
-    *succ= false;
-    return (VVar){0};
+    return NULL;
 }
 
-VSub to_vsub(const DIE* subprog, bool* succ) {
+VSub* to_vsub(const DIE* subprog, CU* cu) {
     const Table* abbrevs= subprog->type.table;
     const TagData* data= TagData_arr_ptr(&abbrevs->abbrevs, subprog->type.abbrev);
 
@@ -434,18 +470,23 @@ VSub to_vsub(const DIE* subprog, bool* succ) {
 
     const char* name= get_subprog_name(subprog);
 
-    *succ= true;
-    return (VSub) {
+    VSub* sub= malloc(sizeof(VSub));
+    *sub= (VSub) {
         .vaddr_start= low_pc,
         .vaddr_end= hi_pc,
         .subprog_name= name,
-        .vars= VVar_arr_create(),
-        .params= VVar_arr_create()
+        .vars= VVar_vec_create(),
+        .params= VVar_vec_create()
     };
 
+    VDIE_arr_add(&cu->virtuals, (VDIE) {
+        .id= subprog->ref,
+        .v_item= sub
+    });
+    return sub;
+
 to_vsub_fail:
-    *succ= false;
-    return (VSub){0};
+    return NULL;
 }
 
 SubIter get_selected_cu_sub_iter() {
@@ -466,14 +507,12 @@ Vector get_all_cu_filenames() {
     return vec;
 }
 
-VSub next_sub(SubIter* iter, bool* succ) {
+VSub* next_sub(SubIter* iter) {
     if (iter->idx >= iter->cu->vsubprogs.pos) {
-        *succ= false;
-        return (VSub){0};
+        return NULL;
     }
 
-    *succ= true;
-    return VSub_arr_get(&iter->cu->vsubprogs, iter->idx++);
+    return VSub_vec_get_unsafe(&iter->cu->vsubprogs, iter->idx++);
 }
 
 int cu_search_cmp(const void* a, const void* b) {
@@ -489,7 +528,7 @@ int cu_search_cmp(const void* a, const void* b) {
 
 int vsub_within_cmp(const void* a, const void* b) {
     const uintptr_t addr= *(uintptr_t*)a;
-    const VSub* sub= (const VSub*)b;
+    const VSub* sub= *(const VSub**)b;
 
     if (addr < sub->vaddr_start) return -1;
     if (addr >= sub->vaddr_end) return 1;
@@ -498,14 +537,15 @@ int vsub_within_cmp(const void* a, const void* b) {
 }
 
 VSub* get_vsub_at(const uintptr_t addr) {
-    CU** search_res= bsearch(&addr, cus.arr, cus.pos, sizeof(CU), cu_search_cmp);
+    CU** search_res= bsearch(&addr, cus.arr, cus.pos, sizeof(cus.arr[0]), cu_search_cmp);
     if (search_res == NULL) return NULL;
     CU* cu= *search_res;
 
-    const uint res= arr_search((Array*)&cu->vsubprogs, &addr, vsub_within_cmp);
-    if (res == ARR_NOT_FOUND) return NULL;
+    VSub** sub_res= bsearch(&addr, cu->vsubprogs.arr, cu->vsubprogs.pos, sizeof(cus.arr[0]), vsub_within_cmp);
+    if (sub_res == NULL) return NULL;
 
-    return VSub_arr_ptr(&cu->vsubprogs, res);
+    VSub* sub= *sub_res;
+    return sub;
 }
 
 const char* get_var_name(const DIE* var) {
@@ -925,18 +965,23 @@ void parse_type(ReadState* rs, VTypeArray* arr) {
     }
 }
 
-void parse_var(ReadState* rs, VVarArray* arr) {
-    bool succ;
-    const VVar var= to_vvar(rs->die, &succ, rs->cu);
-    if (succ) {
-        VVar_arr_add(arr, var);
+void parse_var(ReadState* rs, VVarVector* vec) {
+    const VVar* var= to_vvar(rs->die, rs->cu);
+    if (var) {
+        VVar_vec_add(vec, var);
     }
 }
 
-int parse_sub(ReadState* rs, VSubArray* arr) {
-    bool succ;
-    VSub sub= to_vsub(rs->die, &succ);
-    if (!succ) {
+void* get_virtual_from_ref(uintptr_t ref) {
+    VDIE* vdie= VDIE_arr_search_ie(&selected_cu->virtuals, ref);
+
+    if (vdie) return vdie->v_item;
+    return NULL;
+}
+
+int parse_sub(ReadState* rs, VSubVector* vec) {
+    VSub* sub= to_vsub(rs->die, rs->cu);
+    if (sub == NULL) {
         return FAIL;
     }
 
@@ -973,17 +1018,17 @@ int parse_sub(ReadState* rs, VSubArray* arr) {
         print_die(&die);
 
         if (is_var) {
-            parse_var(rs, &sub.vars);
+            parse_var(rs, &sub->vars);
         } else if (is_type) {
             parse_type(rs, &rs->cu->types);
         } else if (is_param) {
-            parse_var(rs, &sub.params);
+            parse_var(rs, &sub->params);
         }
     }
 
 parse_sub_end:
-    VSub_arr_add(arr, sub);
-    if (strcmp(sub.subprog_name, "main") == 0) {
+    VSub_vec_add(vec, sub);
+    if (strcmp(sub->subprog_name, "main") == 0) {
         main_cu= rs->cu;
     }
 
@@ -1069,8 +1114,6 @@ int parse_cu_dies(uint8_t** data_, uint8_t* section_start_, const uint8_t* secti
             add_cu_data_to_header(rs.cu, &die);
         }
     }
-
-    VSub_arr_sort_i(&rs.cu->vsubprogs);
 
     return SUCCESS;
 }
