@@ -165,6 +165,7 @@ ARRAY_PROTO(FrameRow, MRow)
 ARRAY_ADD(FrameRow, MRow)
 
 static MRowArray matrix;
+static LNInfo LN_info;
 
 void peek_text_at_addr(uintptr_t addr, uint16_t amount) {
     for (int j = 0; j < amount; ++j) {
@@ -197,6 +198,8 @@ void new_row() {
         .pc= pc
     };
     if (on_new_row) on_new_row();
+
+    LN_info.decoded_to_line= line > LN_info.decoded_to_line ? line : LN_info.decoded_to_line;
 
     // 4. Set the basic_block register to “false.”
     // 5. Set the prologue_end register to “false.”
@@ -345,6 +348,15 @@ DecodeRet decode_op(uint8_t* base) {
     };
 }
 
+void decode_until(uint32_t line) {
+    while (!LN_info.reached_end_of_code && LN_info.decoded_to_line <= line) {
+        const DecodeRet res= decode_op(LN_info.bc_head);
+
+        LN_info.reached_end_of_code= res.end_of_code;
+        LN_info.bc_head += res.bytes_read;
+    }
+}
+
 typedef struct {
     DW_LNCT content;
     DW_FORM form;
@@ -442,19 +454,22 @@ static int read_header(uint8_t* start, char* string_data) {
 
     matrix= MRow_arr_create();
     create_header();
-    while (true) {
-        DecodeRet res= decode_op(bc_start);
-        bc_start+= res.bytes_read;
-
-        if (res.end_of_code) break;
-    }
+    LN_info.bc_head= bc_start;
+    LN_info.reached_end_of_code= false;
+    LN_info.decoded_to_line= 0;
+    // while (true) {
+    //     DecodeRet res= decode_op(bc_start);
+    //     bc_start+= res.bytes_read;
+    //
+    //     if (res.end_of_code) break;
+    // }
     print_header();
 
-    for (int i= 26; i < 50; ++i) {
-        ARange addr_r= line2addr(i);
-        show_log("line[%d] is addr: %p-%p %s\n", i, (void*)addr_r.s, (void*)addr_r.e, addr_r.s == -1 ? "(NO LINE)" : "\nWith peek: ");
-        if (addr_r.s != -1) peek_text_at_addr(addr_r.s, addr_r.e - addr_r.s);
-    }
+    // for (int i= 26; i < 50; ++i) {
+    //     ARange addr_r= line2addr(i);
+    //     show_log("line[%d] is addr: %p-%p %s\n", i, (void*)addr_r.s, (void*)addr_r.e, addr_r.s == -1 ? "(NO LINE)" : "\nWith peek: ");
+    //     if (addr_r.s != -1) peek_text_at_addr(addr_r.s, addr_r.e - addr_r.s);
+    // }
 
     show_log("CONVERSIONS: \n");
     for (uintptr_t i = 0X145E; i < 0X14C6; ++i) {
@@ -587,8 +602,7 @@ ARange line2addr(uint32_t line) {
 // }
 
 void on_new_row_header();
-LNInfo LN_info;
-#define ASSUMED_LINE_COUNT 1000 // [[todo]] THIS DOES NOT GROW!!!
+#define ASSUMED_LINE_COUNT 1000
 void create_header() {
     // we assume a lower bound of 500 lines to start (at worst we waste 1/2kb)
     void* data= calloc(ASSUMED_LINE_COUNT, sizeof (uint32_t));
@@ -653,6 +667,12 @@ const LineAddrRes LINE_ADDR_RES_FAIL= (LineAddrRes) {
 
 LineAddrRes line2startaddr(uint32_t l) {
     if (LN_info.header.lines == NULL) return LINE_ADDR_RES_FAIL;
+
+    if (l > LN_info.decoded_to_line) {
+        decode_until(l);
+    }
+
+    if (l > LN_info.decoded_to_line) return LINE_ADDR_RES_FAIL;
     if (l > LN_info.header.max_line) return LINE_ADDR_RES_FAIL;
 
     uint32_t off= LN_info.header.lines[l];
@@ -689,7 +709,17 @@ LineRange* furthest_range_containing_addr(uintptr_t addr) {
     return NULL;
 }
 
+void fill_data() {
+    while (!LN_info.reached_end_of_code) {
+        const DecodeRet res= decode_op(LN_info.bc_head);
+        LN_info.bc_head+= res.bytes_read;
+        LN_info.reached_end_of_code= res.end_of_code;
+    }
+}
+
 AddrLineRes addr2line(uintptr_t addr) {
+    fill_data();
+
     show_log("Attempting to find line for addr %lX\n", addr);
     const LineRange* res= furthest_range_containing_addr(addr);
 
@@ -704,13 +734,20 @@ AddrLineRes addr2line(uintptr_t addr) {
 }
 
 void on_new_row_header() {
-    add_new_row_to_matrix(); // [[todo]] TEMP!
+    add_new_row_to_matrix();
 
     // we go through the line number program
     // as we get new rows we check if they are contiguous (same line as last)
     //  if they are we can just update the last data in the entry
     //  if they are not then we either add a new entry, or a new data entry
-    if (row.line > LN_info.header.max_line) assert(false);
+    if (row.line > LN_info.header.max_line) {
+        const size_t new_max= LN_info.header.max_line + 100;
+        const size_t old_max= LN_info.header.max_line;
+        LN_info.header.lines= realloc(LN_info.header.lines, new_max);
+
+        memset(&LN_info.header.lines[old_max + 1], 0xFF, (new_max - old_max) * sizeof(uint32_t));
+        LN_info.header.max_line= new_max;
+    }
 
     bool add_new= true;
     if (line_ranges.pos != 0) {

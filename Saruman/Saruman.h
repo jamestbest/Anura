@@ -77,6 +77,10 @@ typedef struct LNInfo {
     uint8_t* next_free;
     uint32_t last_entry;
     uint64_t max_size;
+
+    uint32_t decoded_to_line;
+    bool reached_end_of_code;
+    uint8_t* bc_head;
 } LNInfo;
 
 void create_header();
