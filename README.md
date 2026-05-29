@@ -1,6 +1,9 @@
 # Anura
 Anura is a GUI debugger for my BSc Computer Science degree 3rd year dissertation  
 
+## Demo video
+https://jamestbest.co.uk/static/videos/diss_demo.mp4
+
 ## Targets
 Anura is designed to be 'extensible' in that it should be possible to 'easily' add more target architectures and OSes.  
 For this dissertation it will start by targeting Linux-x64.
