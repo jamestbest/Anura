@@ -53,11 +53,11 @@ This data is then visualised to the user, as shown below, with the stack traces,
 <img width="608" height="383" alt="image" src="https://github.com/user-attachments/assets/4ccc7995-0e4e-4060-946f-d6ce34a89027" />
 
 ## File names
-The current file name scheme might be changed one day...  
-GUI/TUI- Palantir, simple tui to handle input and queue actions
-Control thread- IsildursBane, controls the target process through PTRACE  
-ISDL- MtDoom
-DWARF DIEs- DIE parsing is done by Balin 
-ELF parser- Sauron  
-DWARF parser- Saruman  
-Logger- Tolkien
+The current file name scheme might be changed one day...   \
+GUI/TUI- Palantir, simple tui to handle input and queue actions \
+Control thread- IsildursBane, controls the target process through PTRACE   \
+ISDL- MtDoom \
+DWARF DIEs- DIE parsing is done by Balin  \
+ELF parser- Sauron   \
+DWARF parser- Saruman  \
+Logger- Tolkien 
